@@ -2,13 +2,16 @@
 #define NEURO_PROGRAMM_H
 
 #include <QChart>
+#include <QCompleter>
 #include <QFileSystemModel>
 #include <QLineSeries>
 #include <QListWidget>
 #include <QMainWindow>
 #include <QSplitter>
+#include <QStringListModel>
 #include "start_progect.h"
 #include "panel_other.h"
+#include <QTcpSocket>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -29,13 +32,24 @@ public:
     void open_project();
     void forceOpenConsoleWithError(const QString &errorMessage);
     static Neuro_programm* self;
+    QString getCurrentOpenFilePath() const;
+    void sendLspRequest(const QString &method, QJsonObject params);
+    QStringList temporaryOpenFilesBackup;
+    QProcess* getLspProcess() const { return lspProcess; }
+    int globalLspDocVersion = 1;
+    int lspRequestId = 0;
 
 signals:
     void signalSendChunkToConsole(const QString &text);
+    void completionDataReceived(const QStringList &completions);
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 protected slots:
     void new_progect();
 
+    void openNewFileInEditor(const QString &absoluteFilePath);
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
@@ -44,6 +58,9 @@ private:
     void initLossChart();
     void updateRecentProjectActions();   // Метод перерисовки списка в меню
     void addProjectToRecent(const QString &projectPath); // Метод добавления нового пути
+    void initLspServer();
+    QWidget *activeCompletionPopup = nullptr;
+
 
 private slots:
     void onFileDoubleClicked(const QModelIndex &index);
@@ -59,8 +76,8 @@ private slots:
     void saveAllProjectChanges();
     void onCurrentFileTextChanged();
     void onCloseProjectClicked();
-
-
+    void readLspResponse();
+    void showCompletionMenuInGuiThread(const QStringList &completions);
 
 private:
     Start_progect *rsc;
@@ -80,7 +97,12 @@ private:
     void sendChatMessageToAI();
     static const int MaxRecentFiles = 5;
     QMenu *recentProjectsMenu;           // Подменю "Открыть недавние"
-    QAction *recentProjectActions[MaxRecentFiles]; // Массив экшенов под каждый проект
+    QAction *recentProjectActions[MaxRecentFiles];
+    QProcess *lspProcess = nullptr;
+    QCompleter *codeCompleter = nullptr;
+    QStringListModel *completerModel = nullptr;
+    QString venvPythonBinary;
+
 
 };
 #endif // NEURO_PROGRAMM_H

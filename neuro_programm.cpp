@@ -5,7 +5,9 @@
 #include "ui_panel_other.h"
 
 #include <QFileSystemModel>
+#include <QInputDialog> // Обязательно добавьте этот инклуд в начало файла, если его нет
 #include <QLabel>
+#include <QScrollBar>
 #include <QScreen>
 #include <QStyleFactory>
 #include <QDir>
@@ -40,6 +42,13 @@
 #include <memory>
 #include <cstdio>
 #include <iostream>
+#include <QProcess>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QCompleter>
+#include <QStringListModel>
+#include <QThread>
 
 Neuro_programm* Neuro_programm::self = nullptr;
 
@@ -291,6 +300,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             color: #333333;
             margin: 0px;
             padding: 0px;
+            border-top: none;
             border-bottom: 1px solid #b0b0b0;
         }
 
@@ -373,8 +383,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             margin-right: -2px;
             margin-top: 0px;
             margin-bottom: 0px;
-            padding-left: 2px;
-            padding-right: 2px;
+            padding-left: 0px;
+            padding-right: 0px;
         }
 
         /* Системные разделители QMainWindow */
@@ -926,11 +936,61 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 3. ЗАГРУЖАЕМ ИЗ ПАМЯТИ И ВЫВОДИМ СПИСОК ПРИ СТАРТЕ ПРОГРАММЫ
     updateRecentProjectActions();
 
-    detectCudaDevices();
+   // detectCudaDevices();
+
+    if (!currentOpenProjectPath.isEmpty()) {
+        initLspServer();
+    }
+
+
+    connect(ui->new_file, &QAction::triggered, this, [this]() {
+        // Защита: Если проект еще не создан или не открыт, не даем создавать файлы
+        if (currentOpenProjectPath.isEmpty()) {
+            sendSystemNotification("Внимание", "Сначала откройте или создайте проект (*.pystudio)");
+            return;
+        }
+
+        bool ok;
+        // Всплывающее окно для ввода имени файла
+        QString fileName = QInputDialog::getText(this, "Создание файла",
+                                                 "Введите имя нового Python-файла:",
+                                                 QLineEdit::Normal, "script", &ok);
+
+        // Если пользователь нажал OK и строка не пустая
+        if (ok && !fileName.trimmed().isEmpty()) {
+            // Автоматически добавляем расширение .py, если пользователь его забыл
+            if (!fileName.endsWith(".py", Qt::CaseInsensitive)) {
+                fileName += ".py";
+            }
+
+            // Собираем абсолютный путь (например, создаем сразу в корне проекта)
+            QString fullPath = currentOpenProjectPath + "/" + fileName.trimmed();
+
+            // Запускаем ваш пуленепробиваемый метод открытия и инициализации в Jedi!
+            this->openNewFileInEditor(fullPath);
+        }
+    });
+
+    // Внутри конструктора Neuro_programm в файле neuro_programm.cpp
+    connect(this, &Neuro_programm::completionDataReceived,
+            this, &Neuro_programm::showCompletionMenuInGuiThread);
+
 }
 
 Neuro_programm::~Neuro_programm()
 {
+    if (lspProcess) {
+        lspProcess->disconnect(); // Намертво отключаем сигналы чтения логов
+        lspProcess->kill();       // Посылаем системный сигнал завершения
+        lspProcess->waitForFinished(300); // Даем 300мс на безопасную очистку ОЗУ
+    }
+
+    if (trainingProcess) {
+        trainingProcess->disconnect();
+        trainingProcess->kill();
+        trainingProcess->waitForFinished(300);
+    }
+
     delete ui;
 }
 
@@ -989,6 +1049,7 @@ void Neuro_programm::new_progect()
         // Добавляем свежесозданный проект в историю верхнего меню "Файл"
         addProjectToRecent(createdPystudioFile);
     }
+    initLspServer();
 }
 
 void Neuro_programm::sync()
@@ -1183,139 +1244,109 @@ void Neuro_programm::open_project()
     this->setWindowTitle(QString("PyTorch Studio - %1 [%2]").arg(projName).arg(fullProjectPath));
     sendSystemNotification("PyTorch Studio", QString("✔ Проект '%1' успешно загружен").arg(projName));
     addProjectToRecent(selectedFile);
+    initLspServer();
 }
 
 void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
 {
-    // --- 1. ЗАЩИТА: Проверяем, инициализирована ли модель файловой системы ---
-    if (!projectModel) return;
-
-    // Считываем абсолютный путь к объекту на жестком диске Arch Linux
-    QString filePath = projectModel->filePath(index);
-    QFileInfo fileInfo(filePath);
-
-    // ВАЖНОЕ УСЛОВИЕ: Если пользователь кликнул по ПАПКЕ — просто выходим
-    if (fileInfo.isDir()) return;
-
-    // --- 2. ЗАЩИТА ОТ ДУБЛИКАТОВ ВКЛАДОК ---
-    // Сканируем комбобокс. Если файл уже открыт — переключаем фокус на него и выходим
-    for (int i = 0; i < ui->fileComboBox->count(); ++i)
-    {
-        if (ui->fileComboBox->itemData(i).toString() == filePath)
-        {
-            ui->fileComboBox->setCurrentIndex(i);
-
-            // Синхронизируем подсветку строки в боковом списке документов
-            if (ui->openFilesListWidget) {
-                ui->openFilesListWidget->setCurrentRow(i);
-            }
-            return;
-        }
-    }
-
-    // --- 3. ФИЗИЧЕСКОЕ ЧТЕНИЕ ТЕКСТА С ДИСКА (Кодировка UTF-8) ---
+    // Извлекаем абсолютный путь к файлу из модели дерева проекта (Ваш рабочий код из PDF)
+    QString filePath = projectModel->fileInfo(index).absoluteFilePath();
     QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-    {
-        qCritical() << "❌ ОШИБКА ФАЙЛА: Не удалось прочитать исходный код по пути:" << filePath;
+
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qCritical() << "🔴 [ОШИБКА] Не удалось физически прочитать файл с жесткого диска:" << filePath;
         return;
     }
 
-    QTextStream in(&file);
-    in.setEncoding(QStringConverter::Utf8); // Стандарт для Linux и Python-скриптов
-    QString fileContent = in.readAll();
+    // Считываем сырые байты Python-скрипта в текстовую переменную
+    QString fileContent = QString::fromUtf8(file.readAll());
     file.close();
 
-    // =========================================================================
-    // 4. ДИНАМИЧЕСКОЕ СОЗДАНИЕ СТРАНИЦЫ И КАСTOMНОГО CodeEditor С НОМЕРАМИ СТРОК
-    // =========================================================================
+    // Проверяем, не открыт ли этот документ уже в соседней вкладке StackedWidget (Ваш код из PDF)
+    for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+        QWidget *page = ui->centralStackedWidget->widget(i);
+        if (page && page->objectName() == filePath) {
+            ui->centralStackedWidget->setCurrentWidget(page);
 
-    // Создаем базовый QWidget новой изолированной страницы стэка
-    QWidget *newPage = new QWidget(this);
-
-    // Менеджер вертикальной компоновки элементов на этой странице
-    QVBoxLayout *layout = new QVBoxLayout(newPage);
-
-    // Намертво убираем внутренние рамки и отступы менеджера слоев страницы
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-
-    // ИСПРАВЛЕНИЕ: Вместо QPlainTextEdit создаем наш кастомный CodeEditor!
-    CodeEditor *editor = new CodeEditor(newPage);
-
-    // Загружаем в него считанный код Python-файла
-    editor->setPlainText(fileContent);
-
-    // ПОДКЛЮЧАЕМ СИГНАЛ: Любое нажатие клавиши в коде вешает звездочку изменения файла
-    connect(editor, &CodeEditor::textChanged, this, &Neuro_programm::onCurrentFileTextChanged);
-
-    // Накатываем строгий плоский стиль Breeze для текстового редактора
-    editor->setStyleSheet(
-        "CodeEditor {"
-        "   background-color: #ffffff;"
-        "   color: #232629;"
-        "   font-family: 'Monospace', 'Courier New', 'Liberation Mono';"
-        "   font-size: 13px;"
-        "   border: none;"
-        "}"
-        );
-
-    // Устанавливаем размер табуляции Tab ровно в 4 пробела (критично для Python синтаксиса)
-    editor->setTabStopDistance(4 * editor->fontMetrics().horizontalAdvance(' '));
-
-    // Интегрируем кастомный текстовый редактор внутрь слоя созданной страницы
-    layout->addWidget(editor);
-
-    // =========================================================================
-    // 5. ИНТЕГРАЦИЯ СТРАНИЦЫ В ЦЕНТРАЛЬНЫЙ СТЭК, КОМБОБОКС И ЛЕВЫЙ СПИСОК
-    // =========================================================================
-
-    // Добавляем готовую страницу со сплиттером-линейкой в центральный QStackedWidget
-    int newStackIndex = ui->centralStackedWidget->addWidget(newPage);
-
-    // Извлекаем чистое имя файла с расширением (например, "train.py")
-    QString fileName = fileInfo.fileName();
-
-    // Добавляем имя файла в верхний QComboBox, пряча полный путь в userData (второй параметр)
-    ui->fileComboBox->addItem(fileName, QVariant(filePath));
-
-    // Добавляем имя файла в левый боковой список QListWidget открытых документов
-    QListWidgetItem *listItem = new QListWidgetItem(fileName, ui->openFilesListWidget);
-    listItem->setData(Qt::UserRole, filePath); // Прячем путь в скрытые метаданные строки
-
-    // =========================================================================
-    // 6. УПРАВЛЕНИЕ ВИДИМОСТЬЮ ЛЕВОГО КОНТЕЙНЕРА И ПРАВОГО ДОКА
-    // =========================================================================
-
-    // Если это первый открытый текстовый файл в сессии — плавно выводим левую панель документов
-    if (ui->openFilesContainer && !ui->openFilesContainer->isVisible())
-    {
-        ui->openFilesContainer->setVisible(true);
-
-        // Перераспределяем высоту левого вертикального сплиттера окон навигации
-        if (ui->leftVerticalSplitter) {
-            ui->leftVerticalSplitter->setCollapsible(1, false); // Защита от случайного скрытия
-            ui->leftVerticalSplitter->setSizes(QList<int>({600, 200}));
+            // Если в комбобоксе файлов есть этот документ — принудительно синхронизируем индекс
+            if (ui->fileComboBox) {
+                int comboIdx = ui->fileComboBox->findData(filePath);
+                if (comboIdx != -1) ui->fileComboBox->setCurrentIndex(comboIdx);
+            }
+            return; // Файл уже на экране, просто переключили фокус вкладок
         }
     }
 
-    // Синхронизируем фокус: выставляем в комбобоксе последний добавленный индекс
-    ui->fileComboBox->setCurrentIndex(newStackIndex);
+    // Создаем новую графическую страницу-контейнер внутри stacked-панели
+    QWidget *newPage = new QWidget(ui->centralStackedWidget);
+    QVBoxLayout *layout = new QVBoxLayout(newPage);
+    layout->setContentsMargins(0, 0, 0, 0);
 
-    // Подсвечиваем созданную строку в левом боковом списке открытых документов
-    ui->openFilesListWidget->setCurrentRow(ui->openFilesListWidget->count() - 1);
+    // Инициализируем наш кастомный текстовый редактор автодополнения
+    CodeEditor *editor = new CodeEditor(newPage);
 
-    // Скрываем правую панель параметров при переходе к редактору кодов, давая максимум ширины экрана
-    if (ui->widgetRightCharts) {
-        ui->widgetRightCharts->setVisible(false);
+    // =========================================================================
+    // ЖЕСТКАЯ АРХИТЕКТУРНАЯ СВЯЗКА ПУТЕЙ Qt C++:
+    // Записываем абсолютный путь к файлу в объектное имя самого виджета!
+    // Благодаря этому метод keyPressEvent всегда будет мгновенно знать свой URI.
+    // =========================================================================
+    editor->setObjectName(filePath);
+    newPage->setObjectName(filePath); // Дублируем в контейнер страницы
+
+    // Настраиваем Breeze-параметры отображения кода на экране ноутбука
+    editor->setLineWrapMode(QPlainTextEdit::NoWrap); // Отключаем ломающий синтаксис Python перенос строк
+    layout->addWidget(editor);
+
+    // Добавляем созданную страницу в StackedWidget и выводим её на экран
+    ui->centralStackedWidget->addWidget(newPage);
+    ui->centralStackedWidget->setCurrentWidget(newPage);
+
+    // Загружаем в редактор считанный код Python-файла
+    editor->setPlainText(fileContent);
+
+    // 1. Проверяем или запускаем сервер Jedi (если он запущен при открытии проекта — сработает замок)
+    this->initLspServer();
+
+    // 2. ======================================================================
+    // ГАРАНТИРОВАННЫЙ ВЫСТРЕЛ DIDOPEN ПРИ РЕАЛЬНОМ ОТКРЫТИИ ВКЛАДКИ ФАЙЛА!
+    // Мы берем живой, непустой fileContent с диска, намертво очищаем его от мусорных
+    // переносов строк '\r' и принудительно скармливаем серверу Jedi через метод sendLspRequest!
+    // ======================================================================
+    if (this->lspProcess && this->lspProcess->state() == QProcess::Running)
+    {
+        QJsonObject openParams;
+        QJsonObject textDocument;
+
+        // Собираем идеальный каноничный URI-путь через QUrl (file:///) символ в символ
+        textDocument["uri"] = QUrl::fromLocalFile(filePath).toString();
+        textDocument["languageId"] = "python";
+
+        this->globalLspDocVersion = 1; // Устанавливаем стартовую сквозную версию документа по стандарту LSP
+        textDocument["version"] = this->globalLspDocVersion;
+
+        // Очищаем стартовый буфер текста от скрытых DOS-переносов строк \r для точной сетки координат
+        QString cleanStartText = fileContent;
+        cleanStartText.remove('\r');
+        textDocument["text"] = cleanStartText;
+
+        openParams["textDocument"] = textDocument;
+
+        // Отправляем официальный didOpen. Теперь Jedi примет его со 100% успешностью!
+        this->sendLspRequest("textDocument/didOpen", openParams);
+
+        std::cerr << "🔓 [LSP СИСТЕМНЫЙ УСПЕХ] Файл официально ИНДЕКСИРОВАН в памяти Jedi с текстом! Путь: "
+                  << filePath.toStdString() << std::endl;
+        std::cerr.flush();
     }
-    if (ui->mainHorizontalSplitter) {
-        ui->mainHorizontalSplitter->setCollapsible(1, true);
-        ui->mainHorizontalSplitter->setSizes(QList<int>({this->width(), 0}));
-    }
 
-    qInfo() << "✔ [IDE] Открыта новая вкладка редактора кода для файла:" << filePath;
+    // Добавляем имя файла в верхний комбобокс открытых документов (Ваш рабочий код из PDF)
+    if (ui->fileComboBox) {
+        QFileInfo info(filePath);
+        ui->fileComboBox->addItem(info.fileName(), filePath);
+        ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
+    }
 }
+
 
 void Neuro_programm::onCloseCurrentFileClicked()
 {
@@ -1988,8 +2019,6 @@ void Neuro_programm::initLossChart()
     currentEpochCounter = 0;
 }
 
-#include <QSettings>
-
 // =============================================================================
 // 1. ДОБАВЛЕНИЕ НОВОГО ПУТИ В КОНФИГУРАЦИОННЫЙ СПИСОК RECENT
 // =============================================================================
@@ -2126,13 +2155,6 @@ void Neuro_programm::openRecentProject()
     sendSystemNotification("PyTorch Studio", QString("✔ Проект '%1' успешно загружен").arg(projName));
 }
 
-#include <QFile>
-#include <QTextStream>
-#include <QPlainTextEdit>
-
-// =============================================================================
-// 1. АЛГОРИТМ СОХРАНЕНИЯ ОДНОГО АКТИВНОГО ФАЙЛА (Ctrl + S)
-// =============================================================================
 void Neuro_programm::saveCurrentActiveFile()
 {
     // Узнаем, какая страница центрального стэка сейчас открыта перед пользователем
@@ -2358,3 +2380,665 @@ void Neuro_programm::onCloseProjectClicked()
     qInfo() << "✔ [IDE] Проект успешно закрыт. Интерфейс переведен в стерильное стартовое состояние.";
     sendSystemNotification("PyTorch Studio", "📁 Проект успешно закрыт.");
 }
+
+#include <QProcessEnvironment>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QUrl>
+#include <QFileInfo>
+#include <QCoreApplication>
+#include <iostream>
+
+void Neuro_programm::initLspServer()
+{
+    // Если процесс уже запущен, не переинициализируем его
+    if (lspProcess && lspProcess->state() == QProcess::Running) return;
+
+    if (!lspProcess) {
+        lspProcess = new QProcess(this);
+    }
+
+    // =========================================================================
+    // ШАГ 1: НАСТРОЙКА ОКРУЖЕНИЯ OS (БОРЬБА С БУФЕРИЗАЦИЕЙ В LINUX)
+    // =========================================================================
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+
+    // Отключаем буферизацию Python внутри Jedi, заставляя его отвечать мгновенно
+    env.insert("PYTHONUNBUFFERED", "1");
+    env.insert("PYTHONIOENCODING", "utf-8");
+
+    lspProcess->setProcessEnvironment(env);
+
+    // =========================================================================
+    // ШАГ 2: АСИНХРОННЫЕ СИГНАЛ-СЛОТЫ ДЛЯ МОНИТОРИНГА И СЧИТЫВАНИЯ
+    // =========================================================================
+
+    // Перехватчик стандартного вывода (Ответы сервера)
+    connect(lspProcess, &QProcess::readyReadStandardOutput, this, [this]() {
+        // Подглядываем в буфер для вывода красивого лога в консоль
+        QByteArray peekData = lspProcess->peek(lspProcess->bytesAvailable());
+        std::cerr << " [LSP СЫРОЙ JSON ВЫВОД (PEEK)]:\n" << QString::fromUtf8(peekData).toStdString() << std::endl;
+        std::cerr.flush();
+
+        // Вызываем ваш оригинальный метод парсинга ответов без аргументов
+        this->readLspResponse();
+    });
+
+    // Перехватчик потока ошибок (Для отлова внутренних сбоев Jedi)
+    connect(lspProcess, &QProcess::readyReadStandardError, this, [this]() {
+        QByteArray errData = lspProcess->readAllStandardError();
+        std::cerr << " [JEDI СИСТЕМНЫЙ ВЫВОД ERR]:\n" << errData.toStdString() << std::endl;
+        std::cerr.flush();
+    });
+
+    // Мониторинг непредвиденного падения процесса
+    connect(lspProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this, [](int exitCode, QProcess::ExitStatus exitStatus) {
+                std::cerr << " [LSP СТАТУС] Сервер Jedi завершил работу. Код выхода: "
+                          << exitCode << " Статус: " << exitStatus << std::endl;
+                std::flush(std::cerr);
+            });
+
+    // =========================================================================
+    // ШАГ 3: ЗАПУСК ПРЯМОГО БИНАРНИКА СЕРВЕРА БЕЗ ФЛАГОВ И АРГУМЕНТOВ
+    // =========================================================================
+    // Жестко задаем абсолютный путь к прямому исполняемому файлу сервера внутри venv
+    QString localLspBinary = "/home/elf/projects/z1/venv/bin/jedi-language-server";
+    this->venvPythonBinary = localLspBinary;
+
+    // Фикс: Список аргументов СТРОГО пустой, так как бинарник не принимает флаг -m
+    QStringList lspArgs;
+
+    std::cerr << " [LSP СИСТЕМНЫЙ СТАРТ] Запускаю прямой бинарник Jedi Language Server..." << std::endl;
+    std::cerr.flush();
+
+    // Запускаем процесс асинхронно
+    lspProcess->start(localLspBinary, lspArgs);
+
+    if (!lspProcess->waitForStarted(1500)) {
+        std::cerr << " [КРИТИЧЕСКАЯ ОШИБКА] Не удалось запустить процесс LSP сервера по пути: "
+                  << localLspBinary.toStdString() << std::endl;
+        std::cerr.flush();
+        return;
+    }
+
+    // =========================================================================
+    // ШАГ 4: ФОРМИРОВАНИЕ ПАКЕТА ИНИЦИАЛИЗАЦИИ (ОПТИМИЗАЦИЯ ПОД PYTORCH)
+    // =========================================================================
+    QJsonObject rootObj;
+    rootObj["jsonrpc"] = "2.0";
+    this->lspRequestId = 1;
+    rootObj["id"] = this->lspRequestId;
+    rootObj["method"] = "initialize";
+
+    QJsonObject params;
+    params["processId"] = QCoreApplication::applicationPid();
+
+    // Задаем корневую директорию проекта для контекста импортов
+    if (!currentOpenProjectPath.isEmpty()) {
+        params["rootUri"] = QUrl::fromLocalFile(currentOpenProjectPath).toString();
+        params["rootPath"] = currentOpenProjectPath;
+    } else {
+        params["rootUri"] = QJsonValue::Null;
+        params["rootPath"] = QJsonValue::Null;
+    }
+
+    // Описываем базовые возможности нашего Qt-клиента
+    QJsonObject capabilities;
+    QJsonObject textDocumentCaps;
+    QJsonObject completionCaps;
+    completionCaps["contextSupport"] = true;
+    textDocumentCaps["completion"] = completionCaps;
+    capabilities["textDocument"] = textDocumentCaps;
+    params["capabilities"] = capabilities;
+
+    // Сборка оптимизированных настроек Jedi Settings
+    QJsonObject initializationOptions;
+    QJsonObject jediSettings;
+
+    // Указываем путь к Python интерпретатору venv, чтобы сервер подхватил установленный torch
+    jediSettings["pythonExecutablePath"] = "/home/elf/projects/z1/venv/bin/python";
+
+    // Отключаем глубокое статическое сканирование ИИ-библиотеки при автоимпорте
+    QJsonArray disableAutoImport;
+    disableAutoImport.append("torch");
+    disableAutoImport.append("pytorch");
+    jediSettings["disable_auto_import_modules"] = disableAutoImport;
+
+    // Добавляем torch и os в preload для динамической подгрузки типов в рантайме
+    QJsonArray preloadModules;
+    preloadModules.append("torch");
+    preloadModules.append("os");
+    jediSettings["preload_modules"] = preloadModules;
+
+    // Лимитируем вложенность разбора функций для ускорения отклика IDE
+    jediSettings["max_function_parses"] = 150;
+
+    initializationOptions["jediSettings"] = jediSettings;
+    params["initializationOptions"] = initializationOptions;
+
+    rootObj["params"] = params;
+
+    // Маркируем пакет по стандарту LSP (Content-Length) и отправляем в пайп
+    QByteArray jsonData = QJsonDocument(rootObj).toJson(QJsonDocument::Compact);
+    QByteArray headerData = QString("Content-Length: %1\r\n\r\n").arg(jsonData.size()).toUtf8();
+
+    lspProcess->write(headerData + jsonData);
+    lspProcess->waitForBytesWritten(500);
+
+    std::cerr << " [LSP КЛИЕНТ] Стартовый пакет 'initialize' отправлен на сервер." << std::endl;
+    std::cerr.flush();
+}
+
+void Neuro_programm::sendLspRequest(const QString &method, QJsonObject params)
+{
+    if (!lspProcess || lspProcess->state() != QProcess::Running) return;
+
+    QJsonObject requestObj;
+    requestObj["jsonrpc"] = "2.0";
+    requestObj["method"] = method;
+
+    // Супер-фикс для валидатора pygls (убирает KeyError)
+    if (method == "initialized") {
+        requestObj["params"] = QJsonValue::Null;
+    } else {
+        requestObj["params"] = params;
+    }
+
+    // Проверяем: если метод НЕ является системным уведомлением (Notification),
+    // то генерируем инкрементальный ID, чтобы сервер прислал нам ответ в readLspResponse
+    QString lowerMethod = method.toLower();
+    if (!lowerMethod.contains("didchange") && !lowerMethod.contains("didopen") &&
+        !lowerMethod.contains("didsave") && lowerMethod != "initialized")
+    {
+        // Это Request (например, textDocument/completion) — ему необходим ID!
+        this->lspRequestId++;
+        requestObj["id"] = this->lspRequestId;
+    }
+
+    // Упаковываем в монолитный JSON-RPC 2.0 пакет по спецификации LSP
+    QByteArray jsonData = QJsonDocument(requestObj).toJson(QJsonDocument::Compact);
+    QByteArray headerData = QString("Content-Length: %1\r\n\r\n").arg(jsonData.size()).toUtf8();
+    QByteArray monolithicPacket = headerData + jsonData;
+
+    // Пишем напрямую в поток запущенного процесса venv
+    lspProcess->write(monolithicPacket);
+    lspProcess->waitForBytesWritten(50);
+}
+
+void Neuro_programm::readLspResponse()
+{
+    if (!lspProcess) return;
+
+    // 1. Забираем только свежие сырые байты из пайпа
+    QByteArray rawData = lspProcess->readAllStandardOutput();
+    if (rawData.isEmpty()) return;
+
+    // Накапливаем байты в статическом буфере класса
+    static QByteArray lspBuffer;
+    lspBuffer.append(rawData);
+
+    // =========================================================================
+    // СТАНДАРТНЫЙ ИНДУСТРИАЛЬНЫЙ СТРИМ-ПАРСЕР ДЛЯ LSP ПРОТОКОЛА
+    // =========================================================================
+    while (!lspBuffer.isEmpty())
+    {
+        // Находим, где в буфере начинается сам JSON-объект (ищем первую фигурную скобку)
+        int jsonStartIndex = lspBuffer.indexOf('{');
+
+        if (jsonStartIndex == -1) {
+            // Если фигурной скобки вообще нет, значит в буфере лежит только текстовый заголовок.
+            // Мы просто выходим и ждем, когда из пайпа догрузится сам JSON.
+            return;
+        }
+
+        // Проверяем, если перед фигурной скобкой застрял заголовок Content-Length,
+        // мы временно заглядываем в него, чтобы узнать точную длину пакета.
+        int headerIndex = lspBuffer.indexOf("Content-Length:");
+        int expectedLength = 0;
+        if (headerIndex != -1 && headerIndex < jsonStartIndex) {
+            int headerEndIndex = lspBuffer.indexOf("\r\n\r\n", headerIndex);
+            if (headerEndIndex != -1) {
+                int valStart = headerIndex + 15;
+                expectedLength = lspBuffer.mid(valStart, headerEndIndex - valStart).trimmed().toInt();
+            }
+        }
+
+        // Если мы смогли узнать ожидаемую длину, проверяем, накопилось ли столько байт в буфере.
+        // Если буфер меньше, значит пакет еще долетает по сети. Выходим и ждем readyRead!
+        if (expectedLength > 0 && lspBuffer.size() < (jsonStartIndex + expectedLength)) {
+            return;
+        }
+
+        // Вырезаем кусок буфера, начиная строго от фигурной скобки '{' и до конца буфера
+        QByteArray jsonCandidate = lspBuffer.mid(jsonStartIndex);
+
+        // Позволяем встроенному парсеру Qt САМОМУ распарсить JSON.
+        // Qt безупречно определяет реальные границы объекта по балансу фигурных скобок {},
+        // полностью игнорируя любые проблемы со смещениями строк в заголовках!
+        QJsonParseError parseError;
+        QJsonDocument doc = QJsonDocument::fromJson(jsonCandidate, &parseError);
+
+        // СЛУЧАЙ 1: Пакет оборван на полуслове (парсер ругается на неожиданный конец файла)
+        if (parseError.error == QJsonParseError::UnterminatedObject ||
+            parseError.error == QJsonParseError::UnterminatedArray)
+        {
+            return; // Спокойно выходим и ждем, когда QProcess догрузит оставшиеся байты
+        }
+
+        // СЛУЧАЙ 2: Пакет успешно распарсился!
+        if (parseError.error == QJsonParseError::NoError)
+        {
+            // Вычисляем, сколько байт реально занял этот JSON-объект на диске
+            int actualJsonSize = doc.toJson(QJsonDocument::Compact).size();
+
+            // Намертво стираем из буфера обработанный заголовок и сам JSON,
+            // продвигая очередь строго к следующему LSP-пакету
+            lspBuffer.remove(0, jsonStartIndex + actualJsonSize);
+
+            // Обрабатываем валидный JSON-объект
+            QJsonObject rootObj = doc.object();
+
+            // Пропускаем пакеты асинхронной диагностики синтаксиса
+            if (!rootObj.contains("id")) {
+                continue; // Переходим к следующему пакету в цикле while
+            }
+
+            int responseId = rootObj["id"].toInt();
+
+            // Ответ на initialize (id: 1) — завершаем рукопожатие
+            if (responseId == 1) {
+                std::clog << " [LSP УСПЕХ] Рукопожатие с Jedi пройдено!" << std::endl;
+                std::clog.flush();
+                QJsonObject initializedParams;
+                this->sendLspRequest("initialized", initializedParams);
+                continue;
+            }
+
+            // Обрабатываем долгожданный пакет автодополнения (textDocument/completion)
+            if (rootObj.contains("result"))
+            {
+                QJsonValue resultVal = rootObj["result"];
+                QJsonArray itemsArray;
+
+                if (resultVal.isArray()) {
+                    itemsArray = resultVal.toArray();
+                } else if (resultVal.isObject() && resultVal.toObject().contains("items")) {
+                    itemsArray = resultVal.toObject()["items"].toArray();
+                }
+
+                QStringList completionList;
+                for (int i = 0; i < itemsArray.size(); ++i) {
+                    QJsonObject item = itemsArray[i].toObject();
+                    QString label = item["label"].toString();
+                    if (!label.isEmpty()) completionList.append(label);
+                }
+
+                std::clog << " [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов: "
+                          << completionList.size() << ". Отправляю в GUI..." << std::endl;
+                std::clog.flush();
+
+                if (!completionList.isEmpty()) {
+                    // Испускаем сигнал межпотокового взаимодействия для вывода QMenu
+                    emit this->completionDataReceived(completionList);
+                }
+            }
+            continue;
+        }
+
+        // СЛУЧАЙ 3: Если в буфере застрял совсем непонятный мусор, из-за которого Qt выдает ошибку,
+        // мы просто сдвигаем буфер на 1 байт вперед, чтобы не зайти в бесконечный цикл зависания.
+        lspBuffer.remove(0, jsonStartIndex + 1);
+    }
+}
+
+
+QString Neuro_programm::getCurrentOpenFilePath() const
+{
+    if (!ui->fileComboBox) return "";
+    int idx = ui->fileComboBox->currentIndex();
+    if (idx < 2) return "";
+    return ui->fileComboBox->itemData(idx).toString();
+}
+
+void Neuro_programm::openNewFileInEditor(const QString &absoluteFilePath)
+{
+    if (absoluteFilePath.isEmpty()) return;
+
+    // =========================================================================
+    // ШАГ 1: ФИЗИЧЕСКОЕ СОЗДАНИЕ ФАЙЛА НА ДИСКЕ (ЕСЛИ ОН ЕЩЕ НЕ СУЩЕСТВУЕТ)
+    // =========================================================================
+    QFile file(absoluteFilePath);
+    if (!file.exists()) {
+        // Автоматически проверяем и создаем подпапки (например, /models/), если их нет
+        QFileInfo fileInfo(absoluteFilePath);
+        QDir dir = fileInfo.dir();
+        if (!dir.exists()) {
+            dir.mkpath(dir.absolutePath());
+        }
+
+        // Открываем файл для записи в кодировке UTF-8 с базовым шаблоном
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream out(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            out.setEncoding(QStringConverter::Utf8);
+#else
+            out.setCodec("UTF-8");
+#endif
+            out << "# -*- coding: utf-8 -*-\n";
+            out << "import torch\n";
+            out << "import torch.nn as nn\n\n";
+            file.close();
+        } else {
+            qCritical() << " [ОШИБКА OS] Не удалось создать файл на диске:" << absoluteFilePath;
+            return;
+        }
+    }
+
+    // =========================================================================
+    // ШАГ 2: ПРОВЕРКА — НЕ ОТКРЫТ ЛИ ЭТОТ ФАЙЛ УЖЕ В ДРУГОЙ ВКЛАДКЕ
+    // =========================================================================
+    for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+        QWidget *page = ui->centralStackedWidget->widget(i);
+        if (page && page->objectName() == absoluteFilePath) {
+            // Файл уже открыт, просто переключаем фокус на него
+            ui->centralStackedWidget->setCurrentWidget(page);
+            if (ui->fileComboBox) {
+                int comboIdx = ui->fileComboBox->findData(absoluteFilePath);
+                if (comboIdx != -1) ui->fileComboBox->setCurrentIndex(comboIdx);
+            }
+            return;
+        }
+    }
+
+    // =========================================================================
+    // ШАГ 3: ПРОГРАММНОЕ СОЗДАНИЕ И НАСТРОЙКА ВИДЖЕТА РЕДАКТОРА КОДА
+    // =========================================================================
+    // Читаем содержимое созданного файла
+    QString fileContent;
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        fileContent = QString::fromUtf8(file.readAll());
+        file.close();
+    }
+
+    // Создаем новую страницу-контейнер для стэка виджетов
+    QWidget *newPage = new QWidget(ui->centralStackedWidget);
+    QVBoxLayout *layout = new QVBoxLayout(newPage);
+    layout->setContentsMargins(0, 0, 0, 0);
+
+    // Инициализируем ваш кастомный класс редактора из PDF
+    CodeEditor *editor = new CodeEditor(newPage);
+
+    // ЖЕСТКАЯ АРХИТЕКТУРНАЯ СВЯЗКА: Присваиваем абсолютный путь в имя объекта,
+    // чтобы keyPressEvent внутри CodeEditor знал свой URI.
+    editor->setObjectName(absoluteFilePath);
+    newPage->setObjectName(absoluteFilePath);
+
+    // Настраиваем базовые параметры отображения Breeze
+    editor->setLineWrapMode(QPlainTextEdit::NoWrap); // Отключаем ломающий синтаксис Python перенос строк
+    editor->setPlainText(fileContent);
+
+    // Добавляем созданный редактор в менеджер разметки страницы
+    layout->addWidget(editor);
+
+    // Встраиваем страницу в главный StackedWidget и выводим на экран
+    ui->centralStackedWidget->addWidget(newPage);
+    ui->centralStackedWidget->setCurrentWidget(newPage);
+
+    // Снабжаем редактор встроенным в систему QCompleter-ом подсказок, если он активен
+    if (this->codeCompleter) {
+        editor->setCompleter(this->codeCompleter);
+    }
+
+    // =========================================================================
+    // ШАГ 4: СИНХРОНИЗАЦИЯ С ВЕРХНИМ И БOКОВЫМ ИНТЕРФЕЙСОМ НАВИГАЦИИ
+    // =========================================================================
+    if (ui->fileComboBox) {
+        QFileInfo info(absoluteFilePath);
+        // Добавляем чистое имя в выпадающий список, а скрытый путь — в userData
+        ui->fileComboBox->addItem(info.fileName(), absoluteFilePath);
+        ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
+    }
+
+    // Подключаем слот отслеживания изменений, чтобы рисовать звёздочку изменения "*"
+    connect(editor, &CodeEditor::textChanged, this, &Neuro_programm::onCurrentFileTextChanged);
+
+    // =========================================================================
+    // ШАГ 5: ОФИЦИАЛЬНАЯ ИНДЕКСИРOВАНИЯ ФАЙЛА В ПАМЯТИ СЕРВЕРА JEDI (didOpen)
+    // =========================================================================
+    if (this->lspProcess && this->lspProcess->state() == QProcess::Running)
+    {
+        QJsonObject openParams;
+        QJsonObject textDocument;
+
+        textDocument["uri"] = QUrl::fromLocalFile(absoluteFilePath).toString();
+        textDocument["languageId"] = "python";
+
+        this->globalLspDocVersion = 1; // Устанавливаем стартовую версию по спецификации LSP
+        textDocument["version"] = this->globalLspDocVersion;
+
+        // Очищаем буфер от скрытых DOS-символов \r, ломающих сетку координат LSP
+        QString cleanStartText = fileContent;
+        cleanStartText.remove('\r');
+        textDocument["text"] = cleanStartText;
+
+        openParams["textDocument"] = textDocument;
+
+        // Отправляем уведомлениеdidOpen в пайп сервера
+        this->sendLspRequest("textDocument/didOpen", openParams);
+
+        std::cerr << " [LSP] Новый файл зарегистрирован в AST-дереве Jedi: "
+                  << absoluteFilePath.toStdString() << std::endl;
+        std::cerr.flush();
+    }
+}
+
+#include <QListWidget>
+#include <QVBoxLayout>
+#include <QScrollBar>
+
+#include <QKeyEvent>
+
+void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completions)
+{
+    if (completions.isEmpty()) return;
+
+    QWidget *currentWidget = ui->centralStackedWidget->currentWidget();
+    if (!currentWidget) return;
+
+    CodeEditor *activeEditor = currentWidget->findChild<CodeEditor*>();
+    if (!activeEditor) return;
+
+    // 1. Создаем всплывающий контейнер (Breeze Light)
+    QWidget *popupWindow = new QWidget(activeEditor, Qt::Popup | Qt::FramelessWindowHint);
+    popupWindow->setAttribute(Qt::WA_DeleteOnClose);
+
+    QVBoxLayout *layout = new QVBoxLayout(popupWindow);
+    layout->setContentsMargins(0, 0, 0, 0);
+
+    QListWidget *listWidget = new QListWidget(popupWindow);
+    listWidget->addItems(completions);
+    listWidget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+    listWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    // Применяем стили KDE Breeze Light
+    listWidget->setStyleSheet(
+        "QListWidget { background-color: #fcfcfc; color: #232629; border: 1px solid #c7c7c7; font-family: monospace; font-size: 11pt; }"
+        "QListWidget::item { padding: 4px 8px; }"
+        "QListWidget::item:hover { background-color: #eff0f1; color: #232629; }"
+        "QListWidget::item:selected { background-color: #3daee9; color: #ffffff; }"
+        "QScrollBar:vertical { background-color: #eff0f1; width: 10px; margin: 0px; }"
+        "QScrollBar::handle:vertical { background-color: #b0b3b6; min-height: 20px; border-radius: 2px; margin: 1px; }"
+        "QScrollBar::handle:vertical:hover { background-color: #3daee9; }"
+        "QScrollBar::handle:vertical:pressed { background-color: #2a7da6; }"
+        "QScrollBar::sub-line:vertical, QScrollBar::add-line:vertical { background: none; height: 0px; }"
+        "QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical, QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }"
+        );
+
+    layout->addWidget(listWidget);
+
+    // Связываем клик мыши (если пользователь решит выбрать элемент не с клавиатуры)
+    connect(listWidget, &QListWidget::itemClicked, this, [activeEditor, listWidget, popupWindow]() {
+        QListWidgetItem *currentItem = listWidget->currentItem();
+        if (currentItem) {
+            QString itemText = currentItem->text();
+            QTextCursor tc = activeEditor->textCursor();
+            int prefixLength = activeEditor->textCursor().position() - activeEditor->property("startPosition").toInt();
+            tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, prefixLength);
+            tc.beginEditBlock();
+            tc.insertText(itemText);
+            tc.endEditBlock();
+            activeEditor->setTextCursor(tc);
+        }
+        popupWindow->close();
+        activeEditor->setFocus();
+    });
+
+    // === ЖЕСТКАЯ СВЯЗКА С КЛАССOМ РЕДАКТОРА ===
+    // Передаем созданные указатели напрямую в свойства активного CodeEditor,
+    // чтобы его встроенный keyPressEvent мог ими управлять!
+    activeEditor->setProperty("startPosition", activeEditor->textCursor().position());
+
+    // Используем динамическое приведение типов, чтобы записать указатели в переменные класса
+    // (Поскольку свойства Qt не любят голые указатели C++, запишем их через кастомный метод или напрямую)
+    // Но проще использовать встроенный механизм метаобъектов Qt:
+    activeEditor->m_popupWindow = popupWindow;
+    activeEditor->m_listWidget = listWidget;
+
+    // Геометрия (Wayland-совместимая)
+    QTextCursor cursor = activeEditor->textCursor();
+    QRect cursorRect = activeEditor->cursorRect(cursor);
+    QPoint globalPos = activeEditor->mapToGlobal(cursorRect.bottomLeft());
+    globalPos.setY(globalPos.y() + 5);
+
+    int width = listWidget->sizeHintForColumn(0) + 40;
+    if (width < 250) width = 250;
+    if (width > 450) width = 450;
+
+    popupWindow->setGeometry(globalPos.x(), globalPos.y(), width, 200);
+    listWidget->setCurrentRow(0);
+
+    // Показываем окно. Фокус ОСТАЕТСЯ в текстовом поле, чтобы работал ввод букв!
+    popupWindow->show();
+}
+
+bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
+{
+    // Проверяем, что окно автодополнения сейчас открыто и нажата клавиша
+    if (this->activeCompletionPopup && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        QListWidget *listWidget = this->activeCompletionPopup->findChild<QListWidget*>("completionListWidget");
+
+        // Получаем доступ к самому CodeEditor. Так как фильтр висит на viewport(),
+        // сам класс редактора кода является его родителем (parent)
+        CodeEditor *editor = qobject_cast<CodeEditor*>(obj->parent());
+
+        if (listWidget && editor)
+        {
+            // -----------------------------------------------------------------
+            // 1. УПРАВЛЕНИЕ СТРЕЛКАМИ ВВЕРХ / ВНИЗ
+            // -----------------------------------------------------------------
+            if (keyEvent->key() == Qt::Key_Up) {
+                int currentRow = listWidget->currentRow();
+                // Листаем вверх, пропуская скрытые фильтром элементы
+                for (int i = currentRow - 1; i >= 0; --i) {
+                    if (!listWidget->item(i)->isHidden()) {
+                        listWidget->setCurrentRow(i);
+                        break;
+                    }
+                }
+                return true; // Перехватываем, чтобы курсор в тексте не прыгал вверх
+            }
+
+            if (keyEvent->key() == Qt::Key_Down) {
+                int currentRow = listWidget->currentRow();
+                // Листаем вниз, пропуская скрытые фильтром элементы
+                for (int i = currentRow + 1; i < listWidget->count(); ++i) {
+                    if (!listWidget->item(i)->isHidden()) {
+                        listWidget->setCurrentRow(i);
+                        break;
+                    }
+                }
+                return true; // Перехватываем, чтобы курсор в тексте не прыгал вниз
+            }
+
+            // -----------------------------------------------------------------
+            // 2. ПОДТВЕРЖДЕНИЕ ВЫБОРА (ENTER / RETURN / TAB)
+            // -----------------------------------------------------------------
+            if (keyEvent->key() == Qt::Key_Enter || keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Tab) {
+                // Вызываем активацию элемента списка программно
+                QListWidgetItem *currentItem = listWidget->currentItem();
+                if (currentItem && !currentItem->isHidden()) {
+                    QString itemText = currentItem->text();
+                    QTextCursor tc = editor->textCursor();
+
+                    // Стираем префикс, который успели набрать
+                    tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, editor->property("prefixLength").toInt());
+                    tc.beginEditBlock();
+                    tc.insertText(itemText);
+                    tc.endEditBlock();
+                    editor->setTextCursor(tc);
+                }
+                this->activeCompletionPopup->close();
+                editor->setFocus();
+                return true;
+            }
+
+            // 3. ЗАКРЫТИЕ ПО ESC
+            if (keyEvent->key() == Qt::Key_Escape) {
+                this->activeCompletionPopup->close();
+                editor->setFocus();
+                return true;
+            }
+
+            // -----------------------------------------------------------------
+            // 4. ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ НА ЛЕТУ ПРИ ВВОДЕ СИМВОЛОВ
+            // -----------------------------------------------------------------
+            // Проверяем, что нажата обычная печатная клавиша (буква, цифра или знак)
+            if (!keyEvent->text().isEmpty() && keyEvent->key() != Qt::Key_Backspace &&
+                keyEvent->key() != Qt::Key_Left && keyEvent->key() != Qt::Key_Right)
+            {
+                // Сначала принудительно отдаем букву текстовому редактору, чтобы она напечаталась
+                QCoreApplication::sendEvent(obj, event);
+
+                int startPos = editor->property("startPosition").toInt();
+                int currentPos = editor->textCursor().position();
+
+                // Вычисляем длину набранного префикса
+                int prefixLength = currentPos - startPos;
+                editor->setProperty("prefixLength", prefixLength);
+
+                // Вырезаем то, что набрал пользователь после точки
+                QTextCursor tc = editor->textCursor();
+                tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, prefixLength);
+                QString currentPrefix = tc.selectedText().toLower();
+
+                int firstVisibleRow = -1;
+                // Запускаем фильтрацию по всему списку подсказок Jedi
+                for (int i = 0; i < listWidget->count(); ++i) {
+                    QListWidgetItem *item = listWidget->item(i);
+                    bool matches = item->text().toLower().contains(currentPrefix);
+                    item->setHidden(!matches); // Скрываем несовпавшие элементы
+
+                    if (matches && firstVisibleRow == -1) {
+                        firstVisibleRow = i; // Фокусируемся на первом совпадении
+                    }
+                }
+
+                if (firstVisibleRow != -1) {
+                    listWidget->setCurrentRow(firstVisibleRow);
+                } else {
+                    this->activeCompletionPopup->close(); // Закрываем, если совпадений нет
+                }
+
+                return true;
+            }
+        }
+    }
+
+    // Во всех остальных случаях отдаем события базовому классу Qt
+    return QMainWindow::eventFilter(obj, event);
+}
+

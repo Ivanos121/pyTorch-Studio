@@ -14,6 +14,7 @@ SOURCES += \
     start_progect.cpp
 
 HEADERS += \
+    FolderBlockData.h \
     codeeditor.h \
     neuro_programm.h \
     panel_other.h \
