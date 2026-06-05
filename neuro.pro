@@ -11,6 +11,7 @@ SOURCES += \
     main.cpp \
     neuro_programm.cpp \
     panel_other.cpp \
+    settings.cpp \
     start_progect.cpp
 
 HEADERS += \
@@ -18,11 +19,13 @@ HEADERS += \
     codeeditor.h \
     neuro_programm.h \
     panel_other.h \
+    settings.h \
     start_progect.h
 
 FORMS += \
     neuro_programm.ui \
     panel_other.ui \
+    settings.ui \
     start_progect.ui
 
 # Default rules for deployment.

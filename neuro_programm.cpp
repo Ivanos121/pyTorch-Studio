@@ -49,6 +49,11 @@
 #include <QCompleter>
 #include <QStringListModel>
 #include <QThread>
+#include <QClipboard>
+#include <QApplication>
+#include <QDesktopServices>
+#include <QMovie>
+
 
 Neuro_programm* Neuro_programm::self = nullptr;
 
@@ -60,6 +65,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     self = this;
     trainingProcess = nullptr;
+
+    networkManager = new QNetworkAccessManager(this);
 
     // 1. Создаем вертикальный сплиттер
     mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
@@ -82,9 +89,17 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 1. Инициализируем глобальную переменную класса (без QPushButton* в начале!)
     btnTerminal = new QPushButton("💻 Терминал", this);
     btnSearch = new QPushButton("🔍 Поиск по коду", this);
-    btnLogs = new QPushButton("📋 Логи PyTorch", this);
+    btnLogs = new QPushButton("📋 Панель быстрых команд", this);
     btnTogglePip = new QPushButton("🛠 Управление пакетами", this);
     btnAIChat = new QPushButton("💬 ИИ-Ассистент", this);
+
+    // Настраиваем окно вывода чата
+    ui->chatLogWidget->setReadOnly(true);
+    ui->chatLogWidget->setOpenLinks(false); // Чтобы клики обрабатывались программно
+
+    // Привязываем кнопку отправки и клики по ссылкам-кнопкам
+    connect(ui->btnSendChat, &QPushButton::clicked, this, &Neuro_programm::sendChatMessageToAI);
+    connect(ui->chatLogWidget, &QTextBrowser::anchorClicked, this, &Neuro_programm::onChatAnchorClicked);
 
 
     QWidget *leftSpacer = new QWidget(this);
@@ -221,18 +236,43 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         }
     });
 
+
+    // 2. Новый переделанный коннект для управления панелью ИИ
     connect(btnLogs, &QPushButton::clicked, this, [this](bool checked) {
         if (checked) {
+            // А. Снимаем выделение со всех остальных нижних системных кнопок
             btnTerminal->setChecked(false);
             btnSearch->setChecked(false);
             btnTogglePip->setChecked(false);
-            panelOther->setVisible(true);
-            panelOther->setLogsPageActive();
-            if (mainVerticalSplitter) mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
-        } else {
-            panelOther->setVisible(false);
+
+            // Б. Закрываем нижнюю панель логов/терминала, чтобы освободить место
+            if (panelOther) {
+                panelOther->setVisible(false);
+            }
+
+            // В. Выдвигаем боковую панель быстрых команд ИИ в сплиттере
+            if (ui->quickActionsList) {
+                ui->quickActionsList->setVisible(true);
+            }
+
+            // Г. Заставляем горизонтальный сплиттер плавно обновить геометрию
+            if (ui->mainHorizontalSplitter) {
+                ui->mainHorizontalSplitter->refresh();
+            }
+        }
+        else {
+            // Если кнопку отжали — просто прячем панель быстрых команд ИИ
+            if (ui->quickActionsList) {
+                ui->quickActionsList->setVisible(false);
+            }
         }
     });
+
+    // Изначально скрываем список при запуске PyTorch Studio
+    if (ui->quickActionsList) {
+        ui->quickActionsList->hide();
+    }
+
 
     connect(btnTogglePip, &QPushButton::clicked, this, [this](bool checked) {
         if (checked) {
@@ -494,6 +534,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     connect(ui->New_progect, &QAction::triggered, this, &Neuro_programm::new_progect);
     connect(ui->open_progect, &QAction::triggered, this, &Neuro_programm::open_project);
+    connect(ui->action_settngs, &QAction::triggered, this, &Neuro_programm::open_settings);
 
     // Очищаем комбобокс и стэк-виджет от тестовых данных из Designer
     ui->fileComboBox->clear();
@@ -974,6 +1015,15 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // Внутри конструктора Neuro_programm в файле neuro_programm.cpp
     connect(this, &Neuro_programm::completionDataReceived,
             this, &Neuro_programm::showCompletionMenuInGuiThread);
+
+    ui->chatLogWidget->setReadOnly(true);
+    ui->chatLogWidget->setOpenLinks(false); // Отключаем открытие ссылок в браузере
+    connect(ui->chatLogWidget, &QTextBrowser::anchorClicked, this, &Neuro_programm::onChatAnchorClicked);
+    connect(ui->quickActionsList, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onQuickActionTriggered);
+    connect(ui->quickActionsList, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onQuickActionTriggered);
+
+
+    sendInitialWelcomeRequest();
 
 }
 
@@ -1549,146 +1599,150 @@ void Neuro_programm::initProjectTreeModel(const QString &path)
 
 void Neuro_programm::sendChatMessageToAI()
 {
-    // --- 1. ИЗВЛЕКАЕМ МНОГОСТРОЧНЫЙ ТЕКСТ ЗАПРОСА ---
     QString userQuery = ui->inputChatText->toPlainText().trimmed();
     if (userQuery.isEmpty()) return;
 
-    // Отображаем сообщение пользователя в логе чата синим цветом Breeze
-    QListWidgetItem *userItem = new QListWidgetItem("Вы:\n" + userQuery, ui->chatLogWidget);
-    userItem->setForeground(QBrush(QColor("#0056b3")));
-    ui->inputChatText->clear(); // Сразу очищаем поле ввода
+    ui->chatLogWidget->setReadOnly(true);
+    ui->chatLogWidget->setLineWrapMode(QTextEdit::WidgetWidth);
+    ui->chatLogWidget->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
 
-    // Добавляем маркер ожидания ответа локального ИИ
-    QListWidgetItem *aiItem = new QListWidgetItem("ИИ: Сканирую файлы проекта и генерирую ответ...", ui->chatLogWidget);
-    aiItem->setForeground(QBrush(QColor("#555555"))); // Серый цвет
-    ui->chatLogWidget->scrollToBottom();
+    // Форматируем вывод реплики пользователя в логе чата
+    if (userQuery.startsWith("Напиши профессиональные комментарии") ||
+        userQuery.startsWith("Выступи в роли эксперта") ||
+        userQuery.startsWith("Оптимизируй этот код"))
+    {
+        QString commandTitle = userQuery.split('\n').first();
+        ui->chatLogWidget->append("<font color='#0056b3'><b>Вы:</b><br><i>" + commandTitle.toHtmlEscaped() + "</i></font><br>");
+    } else {
+        ui->chatLogWidget->append("<font color='#0056b3'><b>Вы:</b><br>" + userQuery.toHtmlEscaped().replace("\n", "<br>") + "</font><br>");
+    }
 
-    // Блокируем ввод на время генерации, чтобы защитить от спама кнопками
+    ui->inputChatText->clear();
+
+    QMovie *chatLoader = this->property("chatLoader").value<QMovie*>();
+    if (chatLoader) {
+        chatLoader->start();
+        ui->chatLogWidget->append("<font color='#555555'><b>ИИ:</b> думает <img src=':/images/loader.gif' height='14'></font>");
+    } else {
+        ui->chatLogWidget->append("<font color='#555555'><b>ИИ:</b> Читаю файлы проекта и генерирую ответ...</font>");
+    }
+    ui->chatLogWidget->moveCursor(QTextCursor::End);
+
     ui->inputChatText->setEnabled(false);
     ui->btnSendChat->setEnabled(false);
 
     // =========================================================================
-    // 2. АВТОМАТИЧЕСКИЙ СБОР ЖИВОГО КОНТЕКСТА ТЕКУЩЕГО ПРОЕКТА
+    // 2. УМНЫЙ СБОР КОНТЕКСТА ДЛЯ ОТПРАВКИ НА СЕРВЕР
     // =========================================================================
-    QString projectContext = "--- ТЕКУЩИЙ КОНТЕКСТ ИИ-ПРОЕКТА ---\n";
+    QString finalSystemContent = "";
 
-    // А. Считываем гиперпараметры с пульта управления на первой странице стэка
-    // projectContext += QString("Настройки обучения в GUI:\n- Количество эпох: %1\n- Размер пакета (Batch Size): %2\n- Шаг градиента (LR): %3\n- Вычислительный чип: %4\n\n")
-    //                       .arg(ui->spinBoxEpochs ? QString::number(ui->spinBoxEpochs->value()) : "10")
-    //                       .arg(ui->comboBatchSize ? ui->comboBatchSize->currentText() : "32")
-    //                       .arg(ui->spinBoxLR ? QString::number(ui->spinBoxLR->value(), 'f', 5) : "0.001")
-    //                       .arg(ui->comboDevice ? ui->comboDevice->currentText() : "cpu");
-
-    // Б. Считываем исходный код Python из активного текстового редактора (если файл открыт)
-    int currentStackIdx = ui->centralStackedWidget->currentIndex();
-    if (currentStackIdx >= 2) // Страницы 0 и 1 заняты Панелью и Чатом, файлы идут дальше
+    // ЕСЛИ КОД УЖЕ ЗАШИТ В КВАРТЕТЕ ЗАПРОСА (Быстрая команда) — отправляем его монолитом
+    if (userQuery.contains("```python"))
     {
-        QWidget *currentPage = ui->centralStackedWidget->widget(currentStackIdx);
-        if (currentPage)
+        QString systemInstruction = "Ты — встроенный ИИ-помощник в среде 'PyTorch Studio'. Твоя цель — помогать пользователю настраивать обучение нейросетей PyTorch на основе предоставленного кода.";
+        finalSystemContent = systemInstruction + "\n\n" + userQuery;
+    }
+    else
+    {
+        // Свободный режим: считываем текст активного CodeEditor
+        QString projectContext = "--- КОНТЕКСТ ИСХОДНОГО КОДА ПРОЕКТА ---\n";
+        int currentFileIdx = ui->fileComboBox->currentIndex();
+
+        if (currentFileIdx >= 2)
         {
-            QPlainTextEdit *activeEditor = currentPage->findChild<QPlainTextEdit*>();
-            if (activeEditor) {
-                QString activeFileName = ui->fileComboBox->itemText(currentStackIdx);
-                projectContext += QString("Исходный код открытого файла (%1):\n```python\n%2\n```\n\n")
-                                      .arg(activeFileName).arg(activeEditor->toPlainText());
+            QWidget *filePageWidget = ui->centralStackedWidget->widget(currentFileIdx);
+            if (filePageWidget) {
+                CodeEditor *editor = filePageWidget->findChild<CodeEditor*>();
+                if (editor) {
+                    QString activeFileName = ui->fileComboBox->itemText(currentFileIdx);
+                    projectContext += QString("\n[Текущий открытый файл в PyTorch Studio: %1]\n```python\n%2\n```\n")
+                                          .arg(activeFileName).arg(editor->toPlainText());
+                }
             }
         }
+        QString systemInstruction = "Ты — встроенный ИИ-помощник в среде 'PyTorch Studio'. Твоя цель — помогать пользователю настраивать обучение нейросетей PyTorch на основе предоставленного кода.";
+        finalSystemContent = systemInstruction + "\n\n" + projectContext;
     }
 
-    // В. Настраиваем жесткую системную роль (инструкцию) для локальной модели
-    QString systemInstruction = "Ты — встроенный ИИ-помощник в среде 'PyTorch Studio'. Твоя цель — помогать пользователю проектировать, "
-                                "исправлять ошибки и настраивать обучение нейросетей PyTorch на основе предоставленного кода и настроек GUI.";
-
     // =========================================================================
-    // 3. СБОРКА СТАНДАРТНОГО JSON ПАКЕТА ПОД OLLAMA API
-    // Структура Ollama API: {"model": "llama3", "messages": [...], "stream": false}
+    // 3. СБОРКА И ОТПРАВКА JSON В OLLAMA API (/api/chat)
     // =========================================================================
     QJsonObject requestBody;
-
-    // Рекомендуется загрузить в систему модель qwen2.5-coder:7b или deepseek-coder
-    // Если у вас скачана другая модель, просто замените "qwen2.5-coder" на её имя (например, "llama3")
     requestBody["model"] = "qwen2.5-coder:1.5b";
-    requestBody["stream"] = false; // Получаем ответ целиком одной порцией текста
+    requestBody["stream"] = false;
 
     QJsonArray messagesArray;
 
-    // Сообщение №1: Передаем системную инструкцию и весь контекст проекта
     QJsonObject systemMessage;
     systemMessage["role"] = "system";
-    systemMessage["content"] = systemInstruction + "\n\n" + projectContext;
+    systemMessage["content"] = finalSystemContent;
     messagesArray.append(systemMessage);
 
-    // Сообщение №2: Передаем живой многострочный вопрос пользователя
     QJsonObject userMessage;
     userMessage["role"] = "user";
-    userMessage["content"] = userQuery;
+    userMessage["content"] = userQuery.split('\n').first(); // Краткое действие
     messagesArray.append(userMessage);
 
     requestBody["messages"] = messagesArray;
 
-    QJsonDocument jsonDoc(requestBody);
-    QByteArray jsonData = jsonDoc.toJson();
-
-    // =========================================================================
-    // 4. НАСТРОЙКА ЛОКАЛЬНОГО СЕТЕВОГО ПОДКЛЮЧЕНИЯ (БЕЗ API-КЛЮЧЕЙ)
-    // =========================================================================
     QNetworkAccessManager *networkManager = new QNetworkAccessManager(this);
-
-    // Адрес локального сервера Ollama в вашей системе Arch Linux (порт 11434 по умолчанию)
-    QUrl apiUrl("http://localhost:11434/api/chat");
-    QNetworkRequest request(apiUrl);
+    QNetworkRequest request(QUrl("http://localhost:11434/api/chat"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    // Отправляем асинхронный POST запрос на собственный компьютер
-    QNetworkReply *reply = networkManager->post(request, jsonData);
+    QNetworkReply *reply = networkManager->post(request, QJsonDocument(requestBody).toJson());
 
     // =========================================================================
-    // 5. АСИНХРОННЫЙ ОБРАБОТЧИК ОТВЕТА ОТ OLLAMA
+    // 4. ПРИЕМ ОТВЕТА
     // =========================================================================
-    connect(reply, &QNetworkReply::finished, this, [this, reply, networkManager, aiItem]() {
-        // Мгновенно возвращаем управление и фокус интерфейсу чата
+    connect(reply, &QNetworkReply::finished, this, [this, reply, networkManager, chatLoader]() {
+        if (chatLoader) chatLoader->stop();
+
         ui->inputChatText->setEnabled(true);
         ui->btnSendChat->setEnabled(true);
         ui->inputChatText->setFocus();
 
-        if (reply->error() == QNetworkReply::NoError)
-        {
-            QByteArray rawResponse = reply->readAll();
-            QJsonDocument responseDoc = QJsonDocument::fromJson(rawResponse);
-            QJsonObject responseObj = responseDoc.object();
+        QTextCursor cursor = ui->chatLogWidget->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        cursor.select(QTextCursor::LineUnderCursor);
+        cursor.removeSelectedText();
+        cursor.deletePreviousChar();
 
-            // ПАРСИНГ OLLAMA JSON ДЕРЕВА: Извлекаем объект message напрямую из корня
-            QJsonObject messageObj = responseObj["message"].toObject();
-            QString aiResponse     = messageObj["content"].toString().trimmed();
+        if (reply->error() == QNetworkReply::NoError) {
+            QJsonObject responseObj = QJsonDocument::fromJson(reply->readAll()).object();
+            QString aiResponse = responseObj["message"].toObject()["content"].toString().trimmed();
 
-            if (!aiResponse.isEmpty())
-            {
-                // УСПЕХ: Выводим развернутый ответ локального ИИ в историю чата!
-                aiItem->setText("ИИ-Ассистент:\n" + aiResponse);
-                aiItem->setForeground(QBrush(QColor("#232629"))); // Цвет Breeze
-                sendSystemNotification("ИИ-Ассистент", "🤖 Локальный ответ ИИ успешно сгенерирован.");
+            if (!aiResponse.isEmpty()) {
+                QString formattedHtml = this->parseMarkdownCodeBlocks(aiResponse);
+                QString responseId = QString("resp_%1").arg(++responseCounter);
+                aiResponsesMap.insert(responseId, aiResponse);
+
+                QString actionPanelHtml = QString(
+                                              "<div style='margin-top: 8px; padding-top: 6px; border-top: 1px dashed #cbd5e1; font-family: sans-serif; font-size: 12px; text-align: left;'>"
+                                              " <span style='color: #718096; margin-right: 15px;'>Действия:</span>"
+                                              " <a href='action:copy:%1' style='color: #0056b3; text-decoration: none; margin-right: 12px;'>📋 Копировать ответ</a>"
+                                              " <a href='action:export:%1' style='color: #0056b3; text-decoration: none;'>💾 В TXT</a>"
+                                              "</div>"
+                                              ).arg(responseId);
+
+                ui->chatLogWidget->append(
+                    "<div style='margin-bottom: 25px; padding: 12px; background-color: #f8f9fa; border-left: 4px solid #007acc; border-radius: 4px;'>"
+                    " <b style='color: #007acc;'>Ollama AI:</b>"
+                    " <div style='color: #232629; margin-top: 5px;'>" + formattedHtml + "</div>" + actionPanelHtml +
+                    "</div>"
+                    );
             }
-            else
-            {
-                aiItem->setText("ИИ: ⚠️ Сервер Ollama вернул пустую структуру контента. Проверьте запущенную модель.");
-                aiItem->setForeground(QBrush(QColor("#b57c00")));
-            }
+        } else {
+            ui->chatLogWidget->append("<font color='#cc0000'><b>Ошибка:</b> Оллама не отвечает.</font><br>");
         }
-        else
-        {
-            // Выводим сетевую ошибку, если служба Ollama выключена или упала
-            aiItem->setText(QString("ИИ: ❌ Локальная служба Ollama не отвечает!\n"
-                                    "Убедитесь, что служба запущена в терминале: 'sudo systemctl start ollama'\n"
-                                    "И скачана модель: 'ollama run qwen2.5-coder'\n"
-                                    "Системный лог ошибки: %1").arg(reply->errorString()));
-            aiItem->setForeground(QBrush(QColor("#cc0000")));
-        }
-
-        ui->chatLogWidget->scrollToBottom();
+        ui->chatLogWidget->moveCursor(QTextCursor::End);
         reply->deleteLater();
         networkManager->deleteLater();
     });
 }
+
+
+
+
 
 // =============================================================================
 // 1. СЛOT ЗАПУСКА ПРОЦЕССА ОБУЧЕНИЯ НЕЙРОСЕТИ
@@ -1792,14 +1846,11 @@ void Neuro_programm::readTrainingOutput()
 {
     if (!trainingProcess || !panelOther) return;
 
-    // Считываем сквозной поток данных (включая ошибки импорта)
+    // Считываем сквозной поток данных (включая ошибки импорта и рантайма)
     QByteArray rawData = trainingProcess->readAll();
     QString outputText = QString::fromUtf8(rawData);
 
-    // =========================================================================
-    // ПУЛЕНЕПРОБИВАЕМЫЙ ВЫВОД: Ищем текстовый виджет панели по его типу QTextEdit!
-    // Это заставит текст мгновенно отобразиться в вашем ui->textEdit на экране.
-    // =========================================================================
+    // ВЫВОД: Выводим текст во встроенный терминал на экране
     QTextEdit *richConsole = panelOther->findChild<QTextEdit*>();
     if (richConsole != nullptr) {
         richConsole->insertPlainText(outputText);
@@ -1807,10 +1858,39 @@ void Neuro_programm::readTrainingOutput()
     }
 
     // =========================================================================
+    // АВТОМАТИЧЕСКОЕ РАСПОЗНАВАНИЕ ОШИБОК КОМПИЛЯЦИИ/РАНТАЙМА PYTHON
+    // =========================================================================
+    // Проверяем, содержит ли прилетевший лог признаки критической ошибки Python
+    if (outputText.contains("Traceback (most recent call last):") || outputText.contains("Error:"))
+    {
+        QStringList lines = outputText.trimmed().split('\n', Qt::SkipEmptyParts);
+        QString mainErrorLine = "Неизвестная ошибка PyTorch";
+
+        // Пытаемся найти финальную значимую строку ошибки (обычно это последняя строка)
+        if (!lines.isEmpty()) {
+            mainErrorLine = lines.last().trimmed();
+        }
+
+        // Отправляем интерактивную плашку-предложение в чат-ассистент
+        ui->chatLogWidget->append(
+            "<div style='margin: 12px 0; padding: 12px; background-color: #fff5f5; "
+            "border: 1px solid #feb2b2; border-left: 5px solid #cc0000; border-radius: 4px; font-family: sans-serif;'>"
+            "  <b style='color: #cc0000;'>⚠️ Обнаружена ошибка выполнения в PyTorch!</b><br>"
+            "  <code style='color: #2d3748; font-size: 13px; font-weight: bold;'>" + mainErrorLine.toHtmlEscaped() + "</code><br><br>"
+                                              "  <a href='action:fix_error' style='color: #0056b3; font-weight: bold; text-decoration: none;'>[🤖 Исправить ошибку через Ollama ИИ]</a>"
+                                              "</div>"
+            );
+
+        // Запоминаем этот лог ошибки внутри динамических свойств программы
+        this->setProperty("lastPythonErrorTraceback", outputText);
+        ui->chatLogWidget->moveCursor(QTextCursor::End);
+    }
+
+    // =========================================================================
     // ВАШ РОДНОЙ НЕИЗМЕНЯЕМЫЙ КОД ПАРСИНГА ГРАФИКОВ И HTML МЕТРИК
     // =========================================================================
     static QRegularExpression lossRegex("PROGRESS:\\s*epoch=(\\d+),\\s*loss=([0-9.]+)");
-    static QRegularExpression metricsRegex("METRICS:\\s*epoch=(\\d+),\\s*accuracy=([0-9.]+)%,\\s*vram=([0-9.]+)GB,\\s*speed=(\\d+)");
+    static QRegularExpression metricsRegex("METRICS:\\s*epoch=(\\d+),\\s*accuracy=([0-9.]+)%\\s*vram=([0-9.]+)GB,\\s*speed=(\\d+)");
 
     QStringList lines = outputText.split('\n', Qt::SkipEmptyParts);
     for (const QString &line : lines)
@@ -1819,7 +1899,7 @@ void Neuro_programm::readTrainingOutput()
         QRegularExpressionMatch lossMatch = lossRegex.match(line.trimmed());
         if (lossMatch.hasMatch()) {
             double epoch = lossMatch.captured(1).toDouble();
-            double loss  = lossMatch.captured(2).toDouble();
+            double loss = lossMatch.captured(2).toDouble();
             if (lossSeries) lossSeries->append(epoch, loss);
             if (lossChart) {
                 lossChart->axes(Qt::Horizontal).first()->setRange(1, qMax(10.0, epoch));
@@ -1833,26 +1913,26 @@ void Neuro_programm::readTrainingOutput()
         QRegularExpressionMatch metricsMatch = metricsRegex.match(line.trimmed());
         if (metricsMatch.hasMatch() && ui->summaryMetrics) {
             QString epochStr = metricsMatch.captured(1);
-            QString accStr   = metricsMatch.captured(2);
-            QString vramStr  = metricsMatch.captured(3);
+            QString accStr = metricsMatch.captured(2);
+            QString vramStr = metricsMatch.captured(3);
             QString speedStr = metricsMatch.captured(4);
-
             QString htmlReport = QString(
                                      "<div style='font-family:\"Monospace\"; font-size:13px; color:#232629;'>"
-                                     "  <b style='color:#0056b3; font-size:14px;'> МОНИТОРИНГ МЕТРИК НЕЙРОСЕТИ:</b><br>"
-                                     "  <hr style='border:none; border-top:1px solid #b0b0b0; margin: 5px 0;'>"
-                                     "  <table width='100%' cellpadding='2' cellspacing='0'>"
-                                     "    <tr><td><b>Текущая эпоха:</b></td><td align='right' style='color:#27ae60; font-weight:bold;'>%1</td></tr>"
-                                     "    <tr><td><b>Точность (Accuracy):</b></td><td align='right' style='color:#2980b9; font-weight:bold;'>%2 %</td></tr>"
-                                     "    <tr><td><b>Видеопамять VRAM:</b></td><td align='right' style='color:#8e44ad; font-weight:bold;'>%3 ГБ</td></tr>"
-                                     "    <tr><td><b>Скорость вычислений:</b></td><td align='right' style='color:#f39c12; font-weight:bold;'>%4 img/s</td></tr>"
-                                     "  </table>"
+                                     " <b style='color:#0056b3; font-size:14px;'> МОНИТОРИНГ МЕТРИК НЕЙРОСЕТИ:</b><br>"
+                                     " <hr style='border:none; border-top:1px solid #b0b0b0; margin: 5px 0;'>"
+                                     " <table width='100%' cellpadding='2' cellspacing='0'>"
+                                     " <tr><td><b>Текущая эпоха:</b></td><td align='right' style='color:#27ae60; font-weight:bold;'>%1</td></tr>"
+                                     " <tr><td><b>Точность (Accuracy):</b></td><td align='right' style='color:#2980b9; font-weight:bold;'>%2 %</td></tr>"
+                                     " <tr><td><b>Видеопамять VRAM:</b></td><td align='right' style='color:#8e44ad; font-weight:bold;'>%3 ГБ</td></tr>"
+                                     " <tr><td><b>Скорость вычислений:</b></td><td align='right' style='color:#f39c12; font-weight:bold;'>%4 img/s</td></tr>"
+                                     " </table>"
                                      "</div>"
                                      ).arg(epochStr).arg(accStr).arg(vramStr).arg(speedStr);
             ui->summaryMetrics->setHtml(htmlReport);
         }
     }
 }
+
 
 
 void Neuro_programm::trainingFinished(int exitCode)
@@ -2834,12 +2914,6 @@ void Neuro_programm::openNewFileInEditor(const QString &absoluteFilePath)
     }
 }
 
-#include <QListWidget>
-#include <QVBoxLayout>
-#include <QScrollBar>
-
-#include <QKeyEvent>
-
 void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completions)
 {
     if (completions.isEmpty()) return;
@@ -3041,4 +3115,354 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
     // Во всех остальных случаях отдаем события базовому классу Qt
     return QMainWindow::eventFilter(obj, event);
 }
+
+void Neuro_programm::sendInitialWelcomeRequest()
+{
+    // Настраиваем QTextEdit вывода чата на случай, если это еще не сделано
+    ui->chatLogWidget->setReadOnly(true);
+    ui->chatLogWidget->setLineWrapMode(QTextEdit::WidgetWidth);
+
+    // Добавляем временный маркер ожидания
+    ui->chatLogWidget->append("<font color='#555555'><i>ИИ-Ассистент подключается...</i></font>");
+
+    // Блокируем интерфейс, пока ИИ не поприветствует пользователя
+    ui->inputChatText->setEnabled(false);
+    ui->btnSendChat->setEnabled(false);
+
+    // 1. Формируем жесткую системную инструкцию
+    QString systemInstruction =
+        "Ты — встроенный ИИ-помощник в среде 'PyTorch Studio'. Твоя цель — помогать пользователю "
+        "проектировать, исправлять ошибки и настраивать обучение нейросетей PyTorch. "
+        "Сейчас чат только что открылся. Напиши короткое, дружелюбное стартовое приветствие для пользователя "
+        "длиной не более 2-3 предложений. Предложи свою помощь по коду PyTorch или настройкам сети.";
+
+    // 2. Сборка JSON пакета
+    QJsonObject requestBody;
+    requestBody["model"] = "qwen2.5-coder:1.5b";
+    requestBody["stream"] = false;
+
+    QJsonArray messagesArray;
+    QJsonObject systemMessage;
+    systemMessage["role"] = "system";
+    systemMessage["content"] = systemInstruction;
+    messagesArray.append(systemMessage);
+
+    requestBody["messages"] = messagesArray;
+
+    QJsonDocument jsonDoc(requestBody);
+    QByteArray jsonData = jsonDoc.toJson();
+
+    // 3. Отправка скрытого запроса
+    QNetworkAccessManager *networkManager = new QNetworkAccessManager(this);
+    QUrl apiUrl("http://localhost:11434/api/chat");
+    QNetworkRequest request(apiUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QNetworkReply *reply = networkManager->post(request, jsonData);
+
+    // 4. Обработка ответа
+    connect(reply, &QNetworkReply::finished, this, [this, reply, networkManager]() {
+        // Разблокируем интерфейс для работы
+        ui->inputChatText->setEnabled(true);
+        ui->btnSendChat->setEnabled(true);
+        ui->inputChatText->setFocus();
+
+        // Удаляем временный маркер ("ИИ-Ассистент подключается...")
+        QTextCursor cursor = ui->chatLogWidget->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        cursor.select(QTextCursor::LineUnderCursor);
+        cursor.removeSelectedText();
+        cursor.deletePreviousChar();
+
+        if (reply->error() == QNetworkReply::NoError)
+        {
+            QByteArray rawResponse = reply->readAll();
+            QJsonDocument responseDoc = QJsonDocument::fromJson(rawResponse);
+            QJsonObject responseObj = responseDoc.object();
+            QJsonObject messageObj = responseObj["message"].toObject();
+            QString aiWelcome = messageObj["content"].toString().trimmed();
+
+            if (!aiWelcome.isEmpty())
+            {
+                // Выводим красивое приветствие от ИИ
+                ui->chatLogWidget->append("<font color='#232629'><b>ИИ-Ассистент:</b><br>" + aiWelcome.toHtmlEscaped().replace("\n", "<br>") + "</font><br>");
+            }
+        }
+        else
+        {
+            // Если Ollama не запущена, сразу сообщаем пользователю на старте
+            ui->chatLogWidget->append("<font color='#cc0000'><b>ИИ: Ошибка инициализации.</b> Локальная служба Ollama не отвечает. "
+                                      "Запустите сервер через терминал: <i>'sudo systemctl start ollama'</i></font><br>");
+        }
+
+        ui->chatLogWidget->moveCursor(QTextCursor::End);
+        reply->deleteLater();
+        networkManager->deleteLater();
+    });
+}
+
+QString Neuro_programm::parseMarkdownCodeBlocks(const QString &rawText) {
+    QString htmlResult = rawText.toHtmlEscaped();
+    htmlResult.replace("&lt;br&gt;", "\n");
+
+    QRegularExpression rx("```(?:python|py)?\\n([\\s\\S]*?)\\n```");
+    QRegularExpressionMatchIterator it = rx.globalMatch(htmlResult);
+
+    while (it.hasNext()) {
+        QRegularExpressionMatch match = it.next();
+        QString rawCode = match.captured(1);
+
+        QString blockId = QString("code_block_%1").arg(++codeBlockCounter);
+
+        QString cleanCodeForClipboard = rawCode;
+        cleanCodeForClipboard.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+        codeBlocksMap.insert(blockId, cleanCodeForClipboard);
+
+        QString codeContainerHtml = QString(
+                                        "<div style='background-color: #eaedf1; border: 2px solid #cbd5e1; "
+                                        "border-left: 5px solid #0056b3; border-radius: 6px; margin: 12px 0; overflow: hidden;'>"
+                                        "  <pre style='padding: 12px; margin: 0; font-family: Consolas, Monaco, monospace; "
+                                        "  font-size: 13px; color: #1a1a1a; white-space: pre-wrap; overflow-x: auto;'>%2</pre>"
+                                        "  <div style='background-color: #cbd5e1; padding: 6px 12px; font-size: 12px; "
+                                        "  text-align: right; font-family: sans-serif; border-top: 1px solid #b8c9de;'>"
+                                        "    <a href='copy:%1' style='color: #004494; text-decoration: none; font-weight: bold;'>[📋 Копировать код]</a>"
+                                        "  </div>"
+                                        "</div>"
+                                        ).arg(blockId, rawCode.replace("\n", "<br>"));
+
+        htmlResult.replace(match.capturedStart(), match.capturedLength(), codeContainerHtml);
+    }
+
+    htmlResult.replace("\n", "<br>");
+    return htmlResult;
+}
+
+
+void Neuro_programm::onChatAnchorClicked(const QUrl &link) {
+    QString urlStr = link.toString();
+
+    // --- ПЕРЕХВАТ ИСПРАВЛЕНИЯ ОШИБОК КОМПИЛЯЦИИ ---
+    if (urlStr == "action:fix_error") {
+        // Извлекаем сохраненный Traceback падения скрипта
+        QString traceback = this->property("lastPythonErrorTraceback").toString();
+        if (traceback.isEmpty()) return;
+
+        // Показываем пользователю, что запрос пошел
+        ui->chatLogWidget->append("<font color='#0056b3'><b>Вы:</b><br><i>[Автоматический запрос] Исправь ошибку обучения сети.</i></font><br>");
+
+        // Формируем скрытый промпт для Олламы
+        QString errorPrompt = QString(
+                                  "Мой скрипт PyTorch упал во время обучения со следующей ошибкой:\n"
+                                  "```\n%1\n```\n"
+                                  "Пожалуйста, детально разбери этот лог Traceback, объясни причину падения (например, "
+                                  "несовпадение размерностей слоев, неверный индекс или тип данных) и напиши исправленный вариант кода."
+                                  ).arg(traceback);
+
+        // Помещаем промпт в скрытый буфер ввода и триггерим вашу отправку
+        ui->inputChatText->setPlainText(errorPrompt);
+
+        // Запускаем ваш основной метод общения с Ollama
+        this->sendChatMessageToAI();
+        return;
+    }
+
+    // --- ПОДДЕРЖКА СТАРОЙ КНОПКИ (Копирование отдельного блока кода) ---
+    if (urlStr.startsWith("copy:")) {
+        QString blockId = urlStr.mid(5);
+        if (codeBlocksMap.contains(blockId)) {
+            QApplication::clipboard()->setText(codeBlocksMap.value(blockId));
+            sendSystemNotification("PyTorch Studio", "Код скопирован!");
+        }
+        return;
+    }
+
+    // --- ОБРАБОТКА СТАНДАРТНОЙ ПАНЕЛИ ДЕЙСТВИЙ ОТВЕТА ---
+    if (urlStr.startsWith("action:")) {
+        // Парсим строку вида "action:команда:resp_ID"
+        QStringList parts = urlStr.split(':');
+        if (parts.size() < 3) return;
+
+        QString command = parts[1]; // copy, export или share
+        QString responseId = parts[2]; // resp_X
+
+        // Достаем из памяти именно тот чистый текст ответа, под которым была нажата кнопка
+        if (!aiResponsesMap.contains(responseId)) return;
+        QString textToProcess = aiResponsesMap.value(responseId);
+
+        // 1. Кнопка "Копировать весь ответ"
+        if (command == "copy") {
+            QApplication::clipboard()->setText(textToProcess);
+            sendSystemNotification("PyTorch Studio", "Ответ скопирован в буфер обмена.");
+        }
+
+        // 2. Кнопка "Экспорт в документы"
+        else if (command == "export") {
+            QString savePath = QFileDialog::getSaveFileName(this, "Экспорт ответа ИИ", "", "Текстовые файлы (*.txt);;Документы Markdown (*.md)");
+            if (!savePath.isEmpty()) {
+                QFile file(savePath);
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&file);
+                    out << textToProcess;
+                    file.close();
+                    sendSystemNotification("PyTorch Studio", "Файл успешно сохранен.");
+                }
+            }
+        }
+
+        // 3. Кнопка "Передача в соцсеть / Мессенджер"
+        else if (command == "share") {
+            // Самый безопасный способ передать длинный технический текст в соцсети (например, в Telegram) —
+            // открыть веб-ссылку шеринга. Из-за ограничений длины URL, текст обрезается до 400 символов.
+            QString shortText = textToProcess.left(400) + "...";
+
+            // Формируем ссылку для отправки в Telegram (можно заменить на VK, WhatsApp и т.д.)
+            QString encodedText = QUrl::toPercentEncoding(shortText);
+            QUrl shareUrl("https://t.me" + encodedText);
+
+            // Qt аппаратно открывает браузер по умолчанию на компьютере пользователя
+            QDesktopServices::openUrl(shareUrl);
+        }
+    }
+}
+
+void Neuro_programm::onQuickActionTriggered(QListWidgetItem *item)
+{
+    if (!item) return;
+
+    // =========================================================================
+    // 0. АППАРАТНАЯ ЗАЩИТА ОТ ДУБЛИРОВАНИЯ И СЕРВИСНЫХ СТРАНИЦ
+    // =========================================================================
+    static bool isProcessing = false;
+    if (isProcessing) {
+        qDebug() << "[ИИ ЗАЩИТА] Заблокирован каскадный вызов функции!";
+        return;
+    }
+
+    int currentFileIdx = ui->fileComboBox->currentIndex();
+
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Если индекс < 2 (чат или панель), это 100% повторный ложный вызов.
+    // Мы просто молча выходим из функции, не ломая интерфейс и не выводя ошибок.
+    if (currentFileIdx < 2) {
+        qDebug() << "[ИИ ЗАЩИТА] Игнорируем вызов, так как интерфейс уже переключен на чат.";
+        return;
+    }
+
+    isProcessing = true; // Включаем блокировку
+
+    QString actionText = item->text();
+
+    // =========================================================================
+    // 1. СБОР КОДА ИЗ ВАШЕГО КЛАССА CodeEditor
+    // =========================================================================
+    QString targetCode = "";
+    QString debugReport = "<b>🔍 Отчет системы сбора кода:</b><br>";
+    debugReport += QString("• Индекс активного файла в комбобоксе: %1<br>").arg(currentFileIdx);
+
+    QWidget *filePageWidget = ui->centralStackedWidget->widget(currentFileIdx);
+    if (filePageWidget)
+    {
+        debugReport += QString("• Найдена страница в StackedWidget с именем: '%1'<br>").arg(filePageWidget->objectName());
+
+        QList<QWidget*> allChildren = filePageWidget->findChildren<QWidget*>();
+        debugReport += QString("• Всего дочерних виджетов на странице: %1<br>").arg(allChildren.size());
+
+        CodeEditor *editor = filePageWidget->findChild<CodeEditor*>();
+        if (editor)
+        {
+            debugReport += QString("<font color='green'>• УСПЕХ: Объект класса CodeEditor обнаружен!</font><br>");
+            targetCode = editor->textCursor().selectedText().trimmed();
+            if (targetCode.isEmpty()) {
+                targetCode = editor->toPlainText().trimmed();
+                debugReport += QString("• Выделения нет. Считан весь файл. Длина текста: %1 симв.<br>").arg(targetCode.length());
+            } else {
+                debugReport += QString("• Считан ВЫДЕЛЕННЫЙ фрагмент кода. Длина текста: %1 симв.<br>").arg(targetCode.length());
+            }
+        } else {
+            debugReport += "<font color='red'>• ОШИБКА: Виджет класса CodeEditor НЕ НАЙДЕН!</font><br>";
+        }
+    }
+
+    // Опционально: можно закомментировать строку ниже, чтобы серый блок не мозолил глаза в чате
+    ui->chatLogWidget->append("<div style='background-color: #edf2f7; padding: 10px; border-radius: 4px; margin-bottom: 10px;'>" + debugReport + "</div>");
+    ui->chatLogWidget->moveCursor(QTextCursor::End);
+
+    if (targetCode.isEmpty()) {
+        ui->chatLogWidget->append("<font color='#cc0000'><b>Система:</b> Сбор кода прерван из-за ошибок выше.</font><br>");
+        if (ui->quickActionsList) ui->quickActionsList->hide();
+        if (this->btnLogs) this->btnLogs->setChecked(false);
+
+        isProcessing = false;
+        return;
+    }
+
+    // =========================================================================
+    // 2. СИНХРОНИЗАЦИЯ ИНТЕРФЕЙСА
+    // =========================================================================
+    if (ui->quickActionsList) ui->quickActionsList->hide();
+    if (this->btnLogs) this->btnLogs->setChecked(false);
+
+    // =========================================================================
+    // 3. ПЕРЕКЛЮЧЕНИЕ НА СТРАНИЦУ ЧАТА ИИ
+    // =========================================================================
+    int realChatStackIndex = ui->centralStackedWidget->indexOf(ui->page_chat);
+    if (realChatStackIndex != -1) {
+        ui->fileComboBox->setCurrentIndex(realChatStackIndex);
+        ui->inputChatText->setFocus();
+    }
+
+    // =========================================================================
+    // 4. ДИСПЕТЧЕР ИИ-КОМАНД И ФОРМИРОВАНИЕ ПРОМПТА ПОД OLLAMA
+    // =========================================================================
+    QString systemInstruction = "";
+    QString userHeading = "";
+
+    if (actionText.contains("Документировать")) {
+        userHeading = "📝 Документировать код";
+        systemInstruction = "Напиши профессиональные комментарии docstring для этого кода PyTorch. "
+                            "Опиши структуру входных/выходных тензоров, назначение слоев и аргументов:\n";
+    }
+    else if (actionText.contains("Найти баги")) {
+        userHeading = "🔍 Проверить на баги";
+        systemInstruction = "Выступи в роли эксперта по глубокому обучению. Проверь этот код PyTorch на логические баги, "
+                            "несовпадения размерностей слоев, ошибки инициализации или утечки памяти CUDA. Выдай исправленный вариант:\n";
+    }
+    else if (actionText.contains("Оптимизировать")) {
+        userHeading = "🚀 Оптимизировать код";
+        systemInstruction = "Оптимизируй этот код PyTorch для ускорения обучения. Сделай упор на векторизацию, "
+                            "эффективное использование VRAM/CUDA, ускорение DataLoader или замену медленных циклов. Напиши оптимизированный вариант:\n";
+    }
+
+    if (systemInstruction.isEmpty()) {
+        isProcessing = false;
+        return;
+    }
+
+    QString finalPrompt = systemInstruction + "```python\n" + targetCode + "\n```";
+
+    // Блокируем сигналы поля ввода
+    ui->inputChatText->blockSignals(true);
+    ui->inputChatText->setPlainText(finalPrompt);
+    ui->inputChatText->blockSignals(false);
+
+    // Запускаем отправку к Ollama
+    this->sendChatMessageToAI();
+
+    // МАКРОС АСИНХРОННОСТИ: Снимаем блокировку не сразу, а через 100 миллисекунд.
+    // Это гарантирует, что все "эхо-сигналы" от переключения комбобокса успеют разбиться о наш предохранитель!
+    QTimer::singleShot(100, [=]() {
+        isProcessing = false;
+    });
+}
+
+void Neuro_programm::open_settings()
+{
+    rsc2 = new Settings(this);
+    //rsc2->wf = this;
+    rsc2->setWindowTitle("Настройки программы");
+    rsc2->exec();
+
+
+}
+
+
 

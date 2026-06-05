@@ -7,11 +7,13 @@
 #include <QLineSeries>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QNetworkAccessManager>
 #include <QSplitter>
 #include <QStringListModel>
 #include "start_progect.h"
 #include "panel_other.h"
 #include <QTcpSocket>
+#include "settings.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -50,6 +52,7 @@ protected slots:
     void new_progect();
 
     void openNewFileInEditor(const QString &absoluteFilePath);
+    void open_settings();
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
@@ -60,6 +63,17 @@ private:
     void addProjectToRecent(const QString &projectPath); // Метод добавления нового пути
     void initLspServer();
     QWidget *activeCompletionPopup = nullptr;
+    void sendInitialWelcomeRequest();
+    int codeBlockCounter = 0;
+    int responseCounter = 0;
+    QMap<QString, QString> aiResponsesMap;
+    QMap<QString, QString> codeBlocksMap; // Хранилище: ID блока -> Чистый код
+    void onChatAnchorClicked(const QUrl &link);
+    QString parseMarkdownCodeBlocks(const QString &rawText);
+    void handlePythonErrors();
+    void onQuickActionTriggered(QListWidgetItem *item);
+    QPushButton *btnStatusAI = nullptr;
+
 
 
 private slots:
@@ -81,6 +95,7 @@ private slots:
 
 private:
     Start_progect *rsc;
+    Settings    *rsc2;
     Panel_other *panelOther;
     QSplitter   *mainVerticalSplitter;
     QPushButton *btnTerminal;
@@ -102,6 +117,8 @@ private:
     QCompleter *codeCompleter = nullptr;
     QStringListModel *completerModel = nullptr;
     QString venvPythonBinary;
+    QNetworkAccessManager *networkManager;
+
 
 
 };
