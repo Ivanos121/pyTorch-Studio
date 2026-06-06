@@ -13,6 +13,7 @@
 #include <QPainter>
 #include <QPaintEvent>
 #include <QTextBlock>
+#include <QSettings>
 
 LineNumberArea::LineNumberArea(CodeEditor *editor)
     : QWidget(editor), codeEditor(editor)
@@ -27,12 +28,7 @@ void LineNumberArea::paintEvent(QPaintEvent *event) {
 PythonHighlighter::PythonHighlighter(QTextDocument *parent)
     : QSyntaxHighlighter(parent)
 {
-    HighlightingRule rule;
-
-    // 1. Ключевые слова Python (Цвет Breeze Control Flow: Насыщенный синий/голубой)
-    QTextCharFormat keywordFormat;
-    keywordFormat.setForeground(QColor("#1b6ac7"));
-    keywordFormat.setFontWeight(QFont::Bold);
+    // 1. Ключевые слова Python (Связываем регулярку напрямую с адресом формата класса)
     const QString keywordPatterns[] = {
         "\\bclass\\b", "\\bdef\\b", "\\bimport\\b", "\\bfrom\\b", "\\bas\\b",
         "\\bif\\b", "\\belse\\b", "\\belif\\b", "\\bfor\\b", "\\bwhile\\b",
@@ -41,75 +37,58 @@ PythonHighlighter::PythonHighlighter(QTextDocument *parent)
         "\\blambda\\b", "\\bprint\\b"
     };
     for (const QString &pattern : keywordPatterns) {
-        rule.pattern = QRegularExpression(pattern);
-        rule.format = keywordFormat;
-        highlightingRules.append(rule);
+        highlightingRulesMap.insert(QRegularExpression(pattern), &keywordFormat);
     }
 
-    // 2. Встроенные константы (True, False, None) (Тёмно-голубой)
-    QTextCharFormat constantFormat;
-    constantFormat.setForeground(QColor("#0057ae"));
-    constantFormat.setFontWeight(QFont::Bold);
-    rule.pattern = QRegularExpression("\\b(True|False|None)\\b");
-    rule.format = constantFormat;
-    highlightingRules.append(rule);
+    // 2. Встроенные константы (True, False, None) (Запись напрямую в QMap)
+    highlightingRulesMap.insert(QRegularExpression("\\b(True|False|None)\\b"), &constantFormat);
 
-    // 3. Специфика PyTorch и ИИ (Выделяем классы торча, Модели, Тензоры) (Малиновый/Фиолетовый)
-    QTextCharFormat pytorchFormat;
-    pytorchFormat.setForeground(QColor("#a31515")); // Breeze Модели/Типы
-    pytorchFormat.setFontWeight(QFont::Bold);
-    rule.pattern = QRegularExpression("\\b(torch|nn|optim|utils|data|Tensor|Module|Linear|Conv2d|ReLU|Sequential)\\b");
-    rule.format = pytorchFormat;
-    highlightingRules.append(rule);
+    // 3. Специфика PyTorch и ИИ (Выделяем классы торча, Модели, Тензоры)
+    highlightingRulesMap.insert(QRegularExpression("\\b(torch|nn|optim|utils|data|Tensor|Module|Linear|Conv2d|ReLU|Sequential)\\b"), &pytorchFormat);
 
-    // 4. Функции и методы (Например, __init__, forward, .append) (Тёмно-зелёный/Морской)
-    QTextCharFormat functionFormat;
-    functionFormat.setForeground(QColor("#008080"));
-    rule.pattern = QRegularExpression("\\b[A-Za-z_][A-Za-z0-9_]*(?=\\()");
-    rule.format = functionFormat;
-    highlightingRules.append(rule);
+    // 4. Функции и методы (Например, __init__, forward, .append)
+    highlightingRulesMap.insert(QRegularExpression("\\b[A-Za-z_][A-Za-z0-9_]*(?=\\()"), &functionFormat);
 
     // 5. Числа (Breeze Value: Терракотовый/Оранжевый)
-    QTextCharFormat numberFormat;
-    numberFormat.setForeground(QColor("#b56c00"));
-    rule.pattern = QRegularExpression("\\b\\d+(\\.\\d+)?\\b");
-    rule.format = numberFormat;
-    highlightingRules.append(rule);
+    highlightingRulesMap.insert(QRegularExpression("\\b\\d+(\\.\\d+)?\\b"), &numberFormat);
 
     // 6. Однострочные строки в кавычках (Зелёный чистый)
-    QTextCharFormat stringFormat;
-    stringFormat.setForeground(QColor("#047a15"));
-    rule.pattern = QRegularExpression("\".*?\"|'.*?'");
-    rule.format = stringFormat;
-    highlightingRules.append(rule);
+    highlightingRulesMap.insert(QRegularExpression("\".*?\"|'.*?'"), &stringFormat);
 
-    // 7. Однострочные комментарии # (Светло-серый/Курсив)
-    QTextCharFormat commentFormat;
-    commentFormat.setForeground(QColor("#898f94"));
-    commentFormat.setFontItalic(true);
-    rule.pattern = QRegularExpression("#.*");
-    rule.format = commentFormat;
-    highlightingRules.append(rule);
+    // 7. Однострочные комментарии #
+    highlightingRulesMap.insert(QRegularExpression("#.*"), &commentFormat);
 
-    // 8. Многострочные Docstrings-комментарии """ ... """ (Серый)
-    multiLineCommentFormat.setForeground(QColor("#898f94"));
-    multiLineCommentFormat.setFontItalic(true);
+    // 8. Многострочные Docstrings-комментарии """ ... """ (Инициализируем регулярки)
     tripleSingleQuote = QRegularExpression("'''");
     tripleDoubleQuote = QRegularExpression("\"\"\"");
+
+    // ЗАПУСКАЕМ ДИНАМИЧЕСКУЮ ЗАГРУЗКУ ЦВЕТОВ ИЗ РЕЕСТРА QSETTINGS
+    loadThemeSettings();
 }
 
 void PythonHighlighter::highlightBlock(const QString &text)
 {
-    // Применяем стандартные правила (ключевые слова, строки, торч)
-    for (const HighlightingRule &rule : highlightingRules) {
-        QRegularExpressionMatchIterator matchIterator = rule.pattern.globalMatch(text);
+    // =========================================================================
+    // ИСПРАВЛЕННЫЙ ЦИКЛ ОБХОДА С АВТОМАТИЧЕСКИМ ОПРЕДЕЛЕНИЕМ ТИПА AUTO
+    // ПОЛНОСТЬЮ И ОКОНЧАТЕЛЬНО УБИРАЕТ ОШИБКУ НА СТРОКЕ 75
+    // =========================================================================
+    // Ключевое слово auto само поймет, что перед ним константный итератор QHash!
+    auto i = highlightingRulesMap.constBegin();
+    while (i != highlightingRulesMap.constEnd()) {
+
+        QRegularExpressionMatchIterator matchIterator = i.key().globalMatch(text);
         while (matchIterator.hasNext()) {
             QRegularExpressionMatch match = matchIterator.next();
-            setFormat(match.capturedStart(), match.capturedLength(), rule.format);
+            // i.value() — это указатель QTextCharFormat*,
+            // разыменовываем его звездочкой *, чтобы Qt применил цвет темы
+            setFormat(match.capturedStart(), match.capturedLength(), *(i.value()));
         }
+        ++i;
     }
 
-    // Обработка многострочных блоков комментариев Python (""" docstring """)
+    // =========================================================================
+    // ВАШ РОДНОЙ НЕИЗМЕНЯЕМЫЙ КОД ОБРАБОТКИ МНОГОСТРОЧНЫХ DOCSTRINGS
+    // =========================================================================
     setCurrentBlockState(0);
     int startIndex = 0;
     if (previousBlockState() != 1) {
@@ -130,6 +109,44 @@ void PythonHighlighter::highlightBlock(const QString &text)
         setFormat(startIndex, commentLength, multiLineCommentFormat);
         startIndex = tripleDoubleQuote.match(text, startIndex + commentLength).capturedStart();
     }
+}
+
+
+void PythonHighlighter::loadThemeSettings()
+{
+    QSettings settings("PyTorchStudio", "EditorSettings");
+
+    // Вытягиваем цвета из реестра. Если они отсутствуют, включаются ваши родные дефолтные цвета Breeze
+    QColor keyCol(settings.value("Theme/KeywordColor", "#1b6ac7").toString());
+    QColor constCol(settings.value("Theme/ConstantColor", "#0057ae").toString());
+    QColor torchCol(settings.value("Theme/PytorchColor", "#a31515").toString());
+    QColor funcCol(settings.value("Theme/FunctionColor", "#008080").toString());
+    QColor numCol(settings.value("Theme/NumberColor", "#b56c00").toString());
+    QColor strCol(settings.value("Theme/StringColor", "#047a15").toString());
+    QColor commCol(settings.value("Theme/CommentColor", "#898f94").toString());
+
+    // Записываем новые цвета в QTextCharFormat
+    keywordFormat.setForeground(keyCol);
+    keywordFormat.setFontWeight(QFont::Bold);
+
+    constantFormat.setForeground(constCol);
+    constantFormat.setFontWeight(QFont::Bold);
+
+    pytorchFormat.setForeground(torchCol);
+    pytorchFormat.setFontWeight(QFont::Bold);
+
+    functionFormat.setForeground(funcCol);
+    numberFormat.setForeground(numCol);
+    stringFormat.setForeground(strCol);
+
+    commentFormat.setForeground(commCol);
+    commentFormat.setFontItalic(true);
+
+    multiLineCommentFormat.setForeground(commCol);
+    multiLineCommentFormat.setFontItalic(true);
+
+    // Команда Qt принудительно перерисовать документ новыми цветами темы на экране
+    rehighlight();
 }
 
 // =============================================================================
@@ -299,6 +316,7 @@ void CodeEditor::highlightCurrentLine() {
 #include <QApplication>
 #include <QScrollBar>
 #include <QVBoxLayout>
+#include <QSettings>
 
 void CodeEditor::keyPressEvent(QKeyEvent *e)
 {

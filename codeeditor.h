@@ -33,6 +33,15 @@ class PythonHighlighter : public QSyntaxHighlighter
 
 public:
     PythonHighlighter(QTextDocument *parent = nullptr);
+    void loadThemeSettings();
+    QTextCharFormat keywordFormat;
+    QTextCharFormat constantFormat;
+    QTextCharFormat pytorchFormat;
+    QTextCharFormat functionFormat;
+    QTextCharFormat numberFormat;
+    QTextCharFormat stringFormat;
+    QTextCharFormat commentFormat;
+    QTextCharFormat multiLineCommentFormat;
 
 protected:
     // Главный метод, который Qt автоматически вызывает для каждой видимой строки
@@ -40,14 +49,7 @@ protected:
 
 private:
     // Структура для хранения правила: регулярное выражение + формат цвета
-    struct HighlightingRule {
-        QRegularExpression pattern;
-        QTextCharFormat format;
-    };
-    QList<HighlightingRule> highlightingRules;
-
-    // Отдельные форматы для многострочных комментариев/строк (docstrings)
-    QTextCharFormat multiLineCommentFormat;
+    QHash<QRegularExpression, QTextCharFormat*> highlightingRulesMap;
     QRegularExpression tripleSingleQuote;
     QRegularExpression tripleDoubleQuote;
 };

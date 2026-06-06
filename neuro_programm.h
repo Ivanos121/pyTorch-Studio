@@ -4,6 +4,7 @@
 #include <QChart>
 #include <QCompleter>
 #include <QFileSystemModel>
+#include <QLabel>
 #include <QLineSeries>
 #include <QListWidget>
 #include <QMainWindow>
@@ -40,6 +41,7 @@ public:
     QProcess* getLspProcess() const { return lspProcess; }
     int globalLspDocVersion = 1;
     int lspRequestId = 0;
+    void applyGlobalFonts();
 
 signals:
     void signalSendChunkToConsole(const QString &text);
@@ -47,12 +49,15 @@ signals:
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
 
 protected slots:
     void new_progect();
 
     void openNewFileInEditor(const QString &absoluteFilePath);
     void open_settings();
+
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
@@ -92,6 +97,7 @@ private slots:
     void onCloseProjectClicked();
     void readLspResponse();
     void showCompletionMenuInGuiThread(const QStringList &completions);
+    void on_actionOpenSettings_triggered();
 
 private:
     Start_progect *rsc;
@@ -118,8 +124,16 @@ private:
     QStringListModel *completerModel = nullptr;
     QString venvPythonBinary;
     QNetworkAccessManager *networkManager;
-
-
-
+    QWidget *titleBarWidget = nullptr;
+    QLabel *titleLabel = nullptr;
+    QPushButton *btnMinimize = nullptr;
+    QPushButton *btnMaximize = nullptr;
+    QPushButton *btnExit = nullptr;
+    QPoint m_dragPosition;
+    QWidget *topHeaderPanel = nullptr;
+    QLabel *topTitleLabel = nullptr;
+    QPushButton *topBtnInfo = nullptr;
+    QPushButton *topBtnStatus = nullptr;
+    QPushButton *topBtnSettings = nullptr;
 };
 #endif // NEURO_PROGRAMM_H

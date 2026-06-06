@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QStyleFactory>
 #include <iostream>
 
 // main.cpp
@@ -48,11 +49,14 @@ void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &contex
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+
     qInstallMessageHandler(linuxConsoleMessageHandler);
 
     qInfo() << "PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы.";
 
     Neuro_programm w;
+    //w.setWindowFlags(Qt::Window | Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
+
     w.showMaximized();
     return QApplication::exec();
 }

@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/new/prefix1">
+        <file>dark_darcula.ini</file>
+        <file>light_breeze.ini</file>
+        <file>monokai.ini</file>
+    </qresource>
+</RCC>

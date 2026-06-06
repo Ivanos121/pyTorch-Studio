@@ -3,9 +3,10 @@
 #include "start_progect.h"
 #include "panel_other.h"
 #include "ui_panel_other.h"
+#include "settings.h"
 
 #include <QFileSystemModel>
-#include <QInputDialog> // Обязательно добавьте этот инклуд в начало файла, если его нет
+#include <QInputDialog>
 #include <QLabel>
 #include <QScrollBar>
 #include <QScreen>
@@ -53,6 +54,8 @@
 #include <QApplication>
 #include <QDesktopServices>
 #include <QMovie>
+#include <QToolBar>
+#include <QBoxLayout>
 
 
 Neuro_programm* Neuro_programm::self = nullptr;
@@ -62,6 +65,15 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     , ui(new Ui::Neuro_programm)
 {
     ui->setupUi(this);
+
+    // Отключаем нативную рамку ОС
+    setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
+
+    // Включаем поддержку прозрачности фона (если потребуется скругление)
+    setAttribute(Qt::WA_TranslucentBackground);
+
+    // Инициализируем ваш кастомный заголовок
+    setupCustomTitleBar();
 
     self = this;
     trainingProcess = nullptr;
@@ -119,9 +131,12 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     // Настраиваем плоский аккуратный стиль в стиле Breeze
     QString statusBarBtnStyle =
-        "QPushButton { border: none; padding: 4px 10px; background: transparent; }"
-        "QPushButton:hover { background-color: #e0e0e0; }"
-        "QPushButton:checked { background-color: #d0d0d0; font-weight: bold; }";
+        "QPushButton { "
+        "   border: none; "
+        "   padding: 4px 12px; "
+        "   background: transparent; "
+        "   font-weight: bold; "
+        "}";
 
     btnTerminal->setStyleSheet(statusBarBtnStyle);
     btnSearch->setStyleSheet(statusBarBtnStyle);
@@ -333,202 +348,202 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     ui->treeView->setIndentation(20);
 
     // ИСПРАВЛЕННЫЙ STYLE SHEET (Все стыки с деревом и статусбаром строго 1px)
-    this->setStyleSheet(R"(
-        /* --- НАСТРОЙКА МЕНЮБЛOКОВ --- */
-        QMenuBar {
-            background-color: #f0f0f0;
-            color: #333333;
-            margin: 0px;
-            padding: 0px;
-            border-top: none;
-            border-bottom: 1px solid #b0b0b0;
-        }
+//     this->setStyleSheet(R"(
+//         /* --- НАСТРОЙКА МЕНЮБЛOКОВ --- */
+//         QMenuBar {
+//             background-color: #f0f0f0;
+//             color: #333333;
+//             margin: 0px;
+//             padding: 0px;
+//             border-top: none;
+//             border-bottom: 1px solid #b0b0b0;
+//         }
 
-        QMenuBar::item {
-            background-color: transparent;
-            padding: 4px 8px;
-        }
+//         QMenuBar::item {
+//             background-color: transparent;
+//             padding: 4px 8px;
+//         }
 
-        QMenuBar::item:selected {
-            background-color: #e0e0e0;
-        }
+//         QMenuBar::item:selected {
+//             background-color: #e0e0e0;
+//         }
 
-        QMenu {
-            background-color: #f0f0f0;
-            border: 1px solid #b0b0b0;
-            color: #333333;
-        }
+//         QMenu {
+//             background-color: #f0f0f0;
+//             border: 1px solid #b0b0b0;
+//             color: #333333;
+//         }
 
-        QMenu::item:selected {
-            background-color: #e0e0e0;
-        }
+//         QMenu::item:selected {
+//             background-color: #e0e0e0;
+//         }
 
-        /* --- НАСТРОЙКА ЗАГОЛОВКОВ QDOCKWIDGET --- */
-        QDockWidget::title {
-            background-color: #f0f0f0;
-            color: #333333;
-            border-left: 1px solid #b0b0b0;
-            border-right: 1px solid #b0b0b0;
-            border-bottom: 1px solid #b0b0b0;
-            border-top: none;
-            padding-left: 6px;
-            padding-top: 4px;
-            padding-bottom: 4px;
-            height: 18px;
-            margin: 0px;
-        }
+//         /* --- НАСТРОЙКА ЗАГОЛОВКОВ QDOCKWIDGET --- */
+//         QDockWidget::title {
+//             background-color: #f0f0f0;
+//             color: #333333;
+//             border-left: 1px solid #b0b0b0;
+//             border-right: 1px solid #b0b0b0;
+//             border-bottom: 1px solid #b0b0b0;
+//             border-top: none;
+//             padding-left: 6px;
+//             padding-top: 4px;
+//             padding-bottom: 4px;
+//             height: 18px;
+//             margin: 0px;
+//         }
 
-        /* Скрываем кнопки доков в обычном состоянии */
-        QDockWidget::close-button, QDockWidget::float-button {
-            qproperty-icon: none;
-            background: transparent;
-            border: none;
-            width: 0px;
-            height: 0px;
-        }
+//         /* Скрываем кнопки доков в обычном состоянии */
+//         QDockWidget::close-button, QDockWidget::float-button {
+//             qproperty-icon: none;
+//             background: transparent;
+//             border: none;
+//             width: 0px;
+//             height: 0px;
+//         }
 
-        /* Показываем кнопки только при наведении на заголовок дока */
-        QDockWidget::title:hover QDockWidget::close-button,
-        QDockWidget::title:hover QDockWidget::float-button {
-            qproperty-icon: theme("window-close");
-            width: 16px;
-            height: 16px;
-            padding: 2px;
-        }
+//         /* Показываем кнопки только при наведении на заголовок дока */
+//         QDockWidget::title:hover QDockWidget::close-button,
+//         QDockWidget::title:hover QDockWidget::float-button {
+//             qproperty-icon: theme("window-close");
+//             width: 16px;
+//             height: 16px;
+//             padding: 2px;
+//         }
 
-        QDockWidget::close-button:hover, QDockWidget::float-button:hover {
-            background-color: #e0e0e0;
-            border-radius: 2px;
-        }
+//         QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+//             background-color: #e0e0e0;
+//             border-radius: 2px;
+//         }
 
-        /* Внутреннее содержимое дока (контейнер) */
-        /* Оставляем рамку только по бокам, нижнюю убираем, чтобы она не сливалась со статусбаром */
-        #dockWidgetContents {
-            border-left: 1px solid #b0b0b0;
-            border-right: 1px solid #b0b0b0;
-            border-bottom: none;
-            border-top: none;
-        }
+//         /* Внутреннее содержимое дока (контейнер) */
+//         /* Оставляем рамку только по бокам, нижнюю убираем, чтобы она не сливалась со статусбаром */
+//         #dockWidgetContents {
+//             border-left: 1px solid #b0b0b0;
+//             border-right: 1px solid #b0b0b0;
+//             border-bottom: none;
+//             border-top: none;
+//         }
 
-        /* --- НАСТРОЙКА ЦЕНТРАЛЬНОЙ ФАЛЬШ-ПАНЕЛИ --- */
-        #widget_3 {
-            background-color: #f0f0f0;
-            border-top: none;
-            border-bottom: 1px solid #b0b0b0;
-            border-left: none;
-            border-right: none;
-            min-height: 29px;
-            max-height: 29px;
-            margin-left: -2px;
-            margin-right: -2px;
-            margin-top: 0px;
-            margin-bottom: 0px;
-            padding-left: 0px;
-            padding-right: 0px;
-        }
+//         /* --- НАСТРОЙКА ЦЕНТРАЛЬНОЙ ФАЛЬШ-ПАНЕЛИ --- */
+//         #widget_3 {
+//             background-color: #f0f0f0;
+//             border-top: none;
+//             border-bottom: 1px solid #b0b0b0;
+//             border-left: none;
+//             border-right: none;
+//             min-height: 29px;
+//             max-height: 29px;
+//             margin-left: -2px;
+//             margin-right: -2px;
+//             margin-top: 0px;
+//             margin-bottom: 0px;
+//             padding-left: 0px;
+//             padding-right: 0px;
+//         }
 
-        /* Системные разделители QMainWindow */
-        QMainWindow::separator {
-            background-color: #b0b0b0;
-            width: 1px;
-            height: 1px;
-            margin: 0px;
-            padding: 0px;
-        }
+//         /* Системные разделители QMainWindow */
+//         QMainWindow::separator {
+//             background-color: #b0b0b0;
+//             width: 1px;
+//             height: 1px;
+//             margin: 0px;
+//             padding: 0px;
+//         }
 
-        /* --- НАСТРОЙКА ДЕРЕВА (QTreeView) --- */
-        QTreeView {
-            background-color: #ffffff;
-            color: #333333;
+//         /* --- НАСТРОЙКА ДЕРЕВА (QTreeView) --- */
+//         QTreeView {
+//             background-color: #ffffff;
+//             color: #333333;
 
-            /* КОРРЕКЦИЯ ЗДЕСЬ: Жестко отключаем рамку у самого дерева, */
-            /* так как внешние границы формирует контейнер дока */
-            border: none;
+//             /* КОРРЕКЦИЯ ЗДЕСЬ: Жестко отключаем рамку у самого дерева, */
+//             /* так как внешние границы формирует контейнер дока */
+//             border: none;
 
-            show-decoration-selected: 1;
-        }
+//             show-decoration-selected: 1;
+//         }
 
-        QTreeView::item:hover {
-            background-color: #f2f2f2;
-        }
+//         QTreeView::item:hover {
+//             background-color: #f2f2f2;
+//         }
 
-        QTreeView::item:selected {
-            background-color: #e0e0e0;
-            color: #000000;
-        }
+//         QTreeView::item:selected {
+//             background-color: #e0e0e0;
+//             color: #000000;
+//         }
 
-        /* --- НАСТРОЙКА СТРОКИ СОСТОЯНИЯ (QStatusBar) --- */
-        QStatusBar {
-            background-color: #f0f0f0;
-            color: #333333;
+//         /* --- НАСТРОЙКА СТРОКИ СОСТОЯНИЯ (QStatusBar) --- */
+//         QStatusBar {
+//             background-color: #f0f0f0;
+//             color: #333333;
 
-            /* КОРРЕКЦИЯ ЗДЕСЬ: Рисуем тонкую линию СВЕРХУ статусбара. */
-            /* На нее будут ровно опираться доки своим бесшовным нижним краем */
-            border-top: 1px solid #b0b0b0;
-            border-bottom: none;
-            border-left: none;
-            border-right: none;
-        }
-        /* --- НАСТРОЙКА COMBOBOX НА ФАЛЬШ-ПАНЕЛИ (ИДЕАЛЬНЫЙ FLAT UI) --- */
-#widget_3 QComboBox {
-        background-color: transparent !important;
+//             /* КОРРЕКЦИЯ ЗДЕСЬ: Рисуем тонкую линию СВЕРХУ статусбара. */
+//             /* На нее будут ровно опираться доки своим бесшовным нижним краем */
+//             border-top: 1px solid #b0b0b0;
+//             border-bottom: none;
+//             border-left: none;
+//             border-right: none;
+//         }
+//         /* --- НАСТРОЙКА COMBOBOX НА ФАЛЬШ-ПАНЕЛИ (ИДЕАЛЬНЫЙ FLAT UI) --- */
+// #widget_3 QComboBox {
+//         background-color: transparent !important;
 
-        /* Плоские линии рамок (без верхней) */
-        border-left: 1px solid #d0d0d0 !important;
-        border-right: 1px solid #d0d0d0 !important;
-        border-bottom: 1px solid #d0d0d0 !important;
-        border-top: none !important;
-        border-radius: 0px !important;
+//         /* Плоские линии рамок (без верхней) */
+//         border-left: 1px solid #d0d0d0 !important;
+//         border-right: 1px solid #d0d0d0 !important;
+//         border-bottom: 1px solid #d0d0d0 !important;
+//         border-top: none !important;
+//         border-radius: 0px !important;
 
-        /* Отступы: зажимаем текст слева и справа */
-        padding-left: 6px !important;
-        padding-right: 25px !important;
-        color: #333333 !important;
-        font-size: 11px !important;
-    }
+//         /* Отступы: зажимаем текст слева и справа */
+//         padding-left: 6px !important;
+//         padding-right: 25px !important;
+//         color: #333333 !important;
+//         font-size: 11px !important;
+//     }
 
-    /* Подсветка комбобокса при наведении — МЯГКО И ЦЕЛИКОМ */
-    #widget_3 QComboBox:hover {
-        border-left: 1px solid #b0b0b0 !important;
-        border-right: 1px solid #b0b0b0 !important;
-        border-bottom: 1px solid #b0b0b0 !important;
-        border-top: none !important;
-        background-color: #e5e5e5 !important;
-    }
+//     /* Подсветка комбобокса при наведении — МЯГКО И ЦЕЛИКОМ */
+//     #widget_3 QComboBox:hover {
+//         border-left: 1px solid #b0b0b0 !important;
+//         border-right: 1px solid #b0b0b0 !important;
+//         border-bottom: 1px solid #b0b0b0 !important;
+//         border-top: none !important;
+//         background-color: #e5e5e5 !important;
+//     }
 
-    #widget_3 QComboBox:on {
-        border-left: 1px solid #b0b0b0 !important;
-        border-right: 1px solid #b0b0b0 !important;
-        border-bottom: 1px solid #b0b0b0 !important;
-        border-top: none !important;
-        background-color: #ffffff !important;
-    }
+//     #widget_3 QComboBox:on {
+//         border-left: 1px solid #b0b0b0 !important;
+//         border-right: 1px solid #b0b0b0 !important;
+//         border-bottom: 1px solid #b0b0b0 !important;
+//         border-top: none !important;
+//         background-color: #ffffff !important;
+//     }
 
-    /* НАМЕРТВО УНИЧТОЖАЕМ СИСТЕМНУЮ КНОПКУ BREEZE, КОТОРАЯ ДАВАЛА СБОЙНЫЙ ПРЯМОУГОЛЬНИК */
-    #widget_3 QComboBox::drop-down,
-    #widget_3 QComboBox::drop-down:hover {
-        width: 0px !important;
-        border: none !important;
-        background: transparent !important;
-    }
-    #widget_3 QComboBox::down-arrow {
-        image: none !important;
-        border: none !important;
-    }
+//     /* НАМЕРТВО УНИЧТОЖАЕМ СИСТЕМНУЮ КНОПКУ BREEZE, КОТОРАЯ ДАВАЛА СБОЙНЫЙ ПРЯМОУГОЛЬНИК */
+//     #widget_3 QComboBox::drop-down,
+//     #widget_3 QComboBox::drop-down:hover {
+//         width: 0px !important;
+//         border: none !important;
+//         background: transparent !important;
+//     }
+//     #widget_3 QComboBox::down-arrow {
+//         image: none !important;
+//         border: none !important;
+//     }
 
-    /* Настройка выпадающего списка */
-    #widget_3 QComboBox QAbstractItemView {
-        background-color: #ffffff !important;
-        border: 1px solid #b0b0b0 !important;
-        border-radius: 0px !important;
-        color: #333333 !important;
-        selection-background-color: #e0e0e0 !important;
-        selection-color: #000000 !important;
-        outline: none !important;
-    }
+//     /* Настройка выпадающего списка */
+//     #widget_3 QComboBox QAbstractItemView {
+//         background-color: #ffffff !important;
+//         border: 1px solid #b0b0b0 !important;
+//         border-radius: 0px !important;
+//         color: #333333 !important;
+//         selection-background-color: #e0e0e0 !important;
+//         selection-color: #000000 !important;
+//         outline: none !important;
+//     }
 
 
-    )");
+//     )");
 
     //panelOther->setVisible(false);
 
@@ -641,10 +656,11 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 1. Создаем кастомный виджет для шапки дока
     QWidget *customTitleWidget = new QWidget(ui->leftDockWidget);
 
-    // Задаем горизонтальный слой с минимальными отступами
-    QHBoxLayout *titleLayout = new QHBoxLayout(customTitleWidget);
-    titleLayout->setContentsMargins(10, 4, 10, 4); // Небольшие аккуратные отступы
-    titleLayout->setSpacing(0);
+    // // Задаем горизонтальный слой с минимальными отступами
+    QHBoxLayout *customTitleLayout = new QHBoxLayout(customTitleWidget);
+    // customTitleLayout->addWidget(someWidget);
+    // titleLayout->setContentsMargins(10, 4, 10, 4); // Небольшие аккуратные отступы
+    // titleLayout->setSpacing(0);
 
     // 2. Создаем красивый текстовый заголовок
     QLabel *titleLabel = new QLabel("📁 Открытые файлы и проект", customTitleWidget);
@@ -655,12 +671,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     titleFont.setPointSize(10); // Аккуратный компактный размер
     titleLabel->setFont(titleFont);
     titleLabel->setStyleSheet("color: #232629;"); // Контрастный темно-серый цвет Breeze
-
-    // Добавляем текст в слой шапки
-    titleLayout->addWidget(titleLabel);
-
-    // Добавляем пружину, чтобы прижать текст к левому краю
-    titleLayout->addStretch();
 
     // 3. НАМЕРТВО УСТАНАВЛИВАЕМ КАСТОМНУЮ ШАПКУ В ВАШ ЛЕВЫЙ ДОК
     // (Замените leftDockWidget на реальное objectName вашего дока из Designer)
@@ -1022,9 +1032,9 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     connect(ui->quickActionsList, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onQuickActionTriggered);
     connect(ui->quickActionsList, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onQuickActionTriggered);
 
-
     sendInitialWelcomeRequest();
 
+    this->applyGlobalFonts();
 }
 
 Neuro_programm::~Neuro_programm()
@@ -1395,6 +1405,8 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         ui->fileComboBox->addItem(info.fileName(), filePath);
         ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
     }
+
+    this->applyGlobalFonts();
 }
 
 
@@ -3460,9 +3472,273 @@ void Neuro_programm::open_settings()
     //rsc2->wf = this;
     rsc2->setWindowTitle("Настройки программы");
     rsc2->exec();
+}
 
+void Neuro_programm::applyGlobalFonts()
+{
+    QSettings settings("PyTorchStudio", "EditorSettings");
 
+    QString editorFamily = settings.value("Editor/FontFamily", "Monospace").toString();
+    int editorSize = settings.value("Editor/FontSize", 12).toInt();
+    QString currentTheme = settings.value("Theme/Name", "Светлая тема").toString();
+
+    QFont editorFont(editorFamily, editorSize);
+    QPalette palette;
+
+    qApp->setStyle(QStyleFactory::create("Fusion"));
+
+    QString chatBgColor, chatTextColor, chatBorderColor;
+    QString windowBgHex, containerBgHex, borderAccentHex, textAccentHex;
+
+    bool isDark = currentTheme.contains("Тёмная")  ||
+                  currentTheme.contains("Темная")  ||
+                  currentTheme.contains("Dark")    ||
+                  currentTheme.contains("Darcula") ||
+                  currentTheme.contains("Monokai");
+
+    if (isDark)
+    {
+        windowBgHex     = "#232629"; // Родной тёмный фон окон Breeze Dark
+        containerBgHex  = "#2a2e32";
+        borderAccentHex = "#4d5053";
+        textAccentHex   = "#3daee9"; // Синий акцент Breeze
+
+        QColor darkBg(windowBgHex);
+        QColor darkWidget(containerBgHex);
+        QColor darkText("#eff0f1");
+
+        palette.setColor(QPalette::Window, darkBg);
+        palette.setColor(QPalette::WindowText, darkText);
+        palette.setColor(QPalette::Base, QColor("#1b1e20"));
+        palette.setColor(QPalette::AlternateBase, darkBg);
+        palette.setColor(QPalette::ToolTipBase, darkWidget);
+        palette.setColor(QPalette::ToolTipText, darkText);
+        palette.setColor(QPalette::Text, darkText);
+        palette.setColor(QPalette::Button, darkWidget);
+        palette.setColor(QPalette::ButtonText, darkText);
+        palette.setColor(QPalette::Highlight, QColor(textAccentHex));
+        palette.setColor(QPalette::HighlightedText, Qt::white);
+
+        chatBgColor = "#1b1e20";
+        chatTextColor = "#eff0f1";
+        chatBorderColor = "#31363b";
+
+        // Сигнал оконному менеджеру Linux KWin перекрасить Title Bar ОС в тёмный цвет!
+        qApp->setProperty("activeColorScheme", "BreezeDark");
+    }
+    else
+    {
+        windowBgHex     = "#eff0f1"; // Серый фон окон Breeze Light
+        containerBgHex  = "#ffffff";
+        borderAccentHex = "#bcbebf";
+        textAccentHex   = "#3daee9";
+
+        QColor lightBg(windowBgHex);
+        QColor lightWidget(containerBgHex);
+        QColor lightText("#232629");
+
+        palette.setColor(QPalette::Window, lightBg);
+        palette.setColor(QPalette::WindowText, lightText);
+        palette.setColor(QPalette::Base, Qt::white);
+        palette.setColor(QPalette::AlternateBase, lightBg);
+        palette.setColor(QPalette::ToolTipBase, lightWidget);
+        palette.setColor(QPalette::ToolTipText, lightText);
+        palette.setColor(QPalette::Text, lightText);
+        palette.setColor(QPalette::Button, lightBg);
+        palette.setColor(QPalette::ButtonText, lightText);
+        palette.setColor(QPalette::Highlight, QColor(textAccentHex));
+        palette.setColor(QPalette::HighlightedText, Qt::white);
+
+        chatBgColor = "#ffffff";
+        chatTextColor = "#232629";
+        chatBorderColor = "#cfc9c2";
+
+        qApp->setProperty("activeColorScheme", "BreezeLight");
+    }
+
+    qApp->setPalette(palette);
+
+    // =========================================================================
+    // 2. CSS-МАНИФЕСТ С УСТРАНЕНИЕМ НАПЛЫВА БУКВ И ЧЁТКИМИ СЛОЯМИ
+    // =========================================================================
+    QString globalStyle =
+        "/* Базовый шрифт */"
+        "QWidget { font-family: 'Segoe UI', Arial, sans-serif; }"
+
+        "/* Монолитное оформление вашей желтой панели ui->widget_3 */"
+        "QWidget#widget_3 { "
+        "   background-color: " + windowBgHex + " !important; "
+                        "   border-bottom: 1px solid " + borderAccentHex + " !important; "
+                            "   min-height: 34px; "
+                            "   max-height: 34px; "
+                            "}"
+
+                            "/* Карточки параметров обучения */"
+                            "QGroupBox, QTabWidget::panel { "
+                            "   background-color: " + containerBgHex + " !important; "
+                           "   border: 1px solid " + borderAccentHex + "; "
+                            "   border-radius: 6px; "
+                            "   margin-top: 10px; "
+                            "   padding: 15px; "
+                            "}"
+
+                            "/* КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Находим шапку левого дока и жестко отодвигаем её под кнопки! */"
+                            "QDockWidget, QTreeView, QTreeWidget, QListWidget, #leftDockWidget { "
+                            "   background-color: " + containerBgHex + " !important; "
+                           "   margin-top: 36px !important; " // Отодвигает надпись "Проект" ровно под линию кнопок
+                           "}"
+                           "QGroupBox QTreeView, QTabWidget QTreeView { margin-top: 0px !important; }" // Сброс для внутренних окон
+
+                           "QGroupBox::title { "
+                           "   subcontrol-origin: margin; "
+                           "   subcontrol-position: top left; "
+                           "   padding: 0 5px; "
+                           "   color: " + textAccentHex + "; "
+                          "   font-weight: bold; "
+                          "}"
+
+                          "/* Поля ввода и выпадающие списки */"
+                          "QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QHeaderView::section { "
+                          "   background-color: " + containerBgHex + " !important; "
+                           "   color: " + palette.color(QPalette::Text).name() + " !important; "
+                                                 "   border: 1px solid " + borderAccentHex + " !important; "
+                            "   border-radius: 4px; "
+                            "   padding: 4px 8px; "
+                            "   min-height: 22px; "
+                            "}"
+
+                            "/* Текстовые редакторы и ваш CodeEditor */"
+                            "QPlainTextEdit, QTextEdit, CodeEditor, [class*='CodeEditor'] { "
+                            "   font-family: '" + editorFamily + "' !important; "
+                         "   font-size: " + QString::number(editorSize) + "px !important; "
+                                        "   background-color: " + containerBgHex + " !important; "
+                           "   color: " + palette.color(QPalette::Text).name() + " !important; "
+                                                 "   border: none; "
+                                                 "}"
+
+                                                 "/* Верхний файловое меню */"
+                                                 "QMenuBar { "
+                                                 "   background-color: " + windowBgHex + " !important; "
+                        "   border-bottom: 1px solid " + borderAccentHex + "; "
+                            "   padding: 6px 2px; "
+                            "}"
+                            "QMenuBar::item { "
+                            "   background: transparent; "
+                            "   color: " + palette.color(QPalette::WindowText).name() + " !important; "
+                                                       "   padding: 6px 12px; "
+                                                       "   font-weight: bold; "
+                                                       "}"
+                                                       "QMenuBar::item:selected { background-color: " + borderAccentHex + " !important; }"
+
+                            "/* Нижний статусбар */"
+                            "QStatusBar { "
+                            "   border-top: 1px solid " + borderAccentHex + "; "
+                            "   background-color: " + windowBgHex + " !important; "
+                        "}"
+                        "QStatusBar QPushButton, QStatusBar QLabel { "
+                        "   background-color: transparent !important; "
+                        "   color: " + palette.color(QPalette::WindowText).name() + " !important; "
+                                                       "   border: none; "
+                                                       "   font-weight: bold; "
+                                                       "   padding: 4px 12px; "
+                                                       "}"
+                                                       "QStatusBar QPushButton:hover { background-color: " + borderAccentHex + " !important; }"
+
+                            "/* Окно переписки чата ИИ */"
+                            "QTextBrowser#chatLogWidget { "
+                            "   background-color: " + chatBgColor + " !important; "
+                        "   color: " + chatTextColor + " !important; "
+                          "   font-family: 'Segoe UI', Arial, sans-serif !important; "
+                          "   font-size: " + QString::number(editorSize) + "px !important; "
+                                        "   border: 1px solid " + chatBorderColor + "; "
+                            "   border-radius: 4px; "
+                            "}";
+
+    qApp->setStyleSheet(globalStyle);
+
+    // =========================================================================
+    // 3. АППАРАТНЫЙ ОБХОД И СБРОС СТИЛЕЙ БЛОКИРОВЩИКОВ
+    // =========================================================================
+    for (QWidget *widget : QApplication::allWidgets())
+    {
+        if (!widget) continue;
+
+        if (widget->window()->metaObject()->className() == QString("Settings")) {
+            continue;
+        }
+
+        QString className = widget->metaObject()->className();
+        QString objName = widget->objectName();
+
+        if (className.contains("CodeEditor") || className == "QPlainTextEdit" || className == "QTextEdit")
+        {
+            if (objName != "chatLogWidget")
+            {
+                widget->setStyleSheet("");
+                widget->setFont(editorFont);
+
+                QPlainTextEdit *pe = qobject_cast<QPlainTextEdit*>(widget);
+                if (pe && pe->document()) {
+                    pe->document()->setDefaultFont(editorFont);
+                    PythonHighlighter *highlighter = pe->findChild<PythonHighlighter*>();
+                    if (highlighter) {
+                        highlighter->loadThemeSettings();
+                    }
+                }
+            }
+        }
+        else
+        {
+            if (objName != "btnTerminal" && objName != "btnSearch" &&
+                objName != "btnLogs"     && objName != "btnTogglePip" &&
+                objName != "btnAIChat"   && className != "QStatusBar" &&
+                className != "QMenuBar"  && objName != "widget_3")
+            {
+                widget->setStyleSheet("");
+            }
+
+            if (className == "QWidget") {
+                widget->setAttribute(Qt::WA_StyledBackground, true);
+            } else {
+                widget->setAttribute(Qt::WA_StyledBackground, false);
+            }
+        }
+        QEvent event(QEvent::StyleChange);
+        QApplication::sendEvent(widget, &event);
+        widget->update();
+    }
+    qApp->processEvents();
 }
 
 
+void Neuro_programm::on_actionOpenSettings_triggered()
+{
+    // 1. Создаем объект диалогового окна
+    Settings dialog(this);
 
+    // 2. СВЯЗЫВАЕМ СИГНАЛ ДИАЛОГА С МЕТОДОМ ГЛАВНОГО ОКНА
+    // Как только в диалоге нажмут кнопку "Сохранить/ОК", сработает этот коннект
+    connect(&dialog, &Settings::settingsChanged, this, &Neuro_programm::applyGlobalFonts);
+
+    // 3. Запускаем диалоговое окно в модальном режиме
+    dialog.exec();
+}
+
+// Перехват клика мыши на заголовке
+void Neuro_programm::mousePressEvent(QMouseEvent *event)
+{
+    // Если кликнули в зоне нашего titleBarWidget
+    if (titleBarWidget && titleBarWidget->geometry().contains(event->pos())) {
+        m_dragPosition = event->globalPosition().toPoint() - frameGeometry().topLeft();
+        event->accept();
+    }
+}
+
+// Перетаскивание окна вслед за курсором
+void Neuro_programm::mouseMoveEvent(QMouseEvent *event)
+{
+    if (titleBarWidget && titleBarWidget->geometry().contains(event->pos()) && (event->buttons() & Qt::LeftButton)) {
+        move(event->globalPosition().toPoint() - m_dragPosition);
+        event->accept();
+    }
+}
