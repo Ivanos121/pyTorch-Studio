@@ -56,6 +56,7 @@
 #include <QMovie>
 #include <QToolBar>
 #include <QBoxLayout>
+#include <QWindow>
 
 
 Neuro_programm* Neuro_programm::self = nullptr;
@@ -66,14 +67,144 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 {
     ui->setupUi(this);
 
-    // Отключаем нативную рамку ОС
+    ui->setupUi(this);
+
+    // 1. Отключаем нативную рамку ОС
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
 
-    // Включаем поддержку прозрачности фона (если потребуется скругление)
-    setAttribute(Qt::WA_TranslucentBackground);
+    // 2. Полностью УДАЛЯЕМ встроенный системный менюбар, который лезет наверх
+    if (this->menuBar()) {
+        this->menuBar()->hide();
+        this->menuBar()->deleteLater();
+    }
 
-    // Инициализируем ваш кастомный заголовок
-    setupCustomTitleBar();
+    // 3. Создаем ОДИН общий тулбар на всю ширину окна, который станет нашей новой супер-шапкой
+    QToolBar *topContainerBar = new QToolBar(this);
+    topContainerBar->setObjectName("topContainerBar");
+    topContainerBar->setMovable(false);
+    topContainerBar->setFloatable(false);
+    topContainerBar->setAllowedAreas(Qt::TopToolBarArea);
+    topContainerBar->setContentsMargins(0, 0, 0, 0);
+
+    // 4. Внутренний вертикальный макет, который жестко зафиксирует порядок элементов
+    QWidget *topWrapper = new QWidget(topContainerBar);
+    QVBoxLayout *topLayout = new QVBoxLayout(topWrapper);
+    topLayout->setContentsMargins(0, 0, 0, 0);
+    topLayout->setSpacing(0);
+
+    // 5. Создаем новый ручной QMenuBar, который будет вести себя как послушный виджет
+    QMenuBar *customMenuBar = new QMenuBar(topWrapper);
+
+    // Наполняем его вашими пунктами меню и экшенами из Qt Designer
+    QMenu *fileMenu = customMenuBar->addMenu("Файл");
+    fileMenu->addAction(ui->New_progect);
+    fileMenu->addAction(ui->new_file);
+    fileMenu->addAction(ui->open_progect);
+    fileMenu->addAction(ui->save_files);
+    fileMenu->addAction(ui->Exit);
+
+    QMenu *editMenu = customMenuBar->addMenu("Правка");
+
+    QMenu *toolsMenu = customMenuBar->addMenu("Инструменты");
+    toolsMenu->addAction(ui->action_settngs);
+
+    QMenu *helpMenu = customMenuBar->addMenu("Справка");
+    helpMenu->addAction(ui->action_3);
+    helpMenu->addAction(ui->action_4);
+
+    // 6. Собираем элементы в ИДЕАЛЬНОМ вертикальном порядке (Шапка -> Menu -> Файлы)
+    topLayout->addWidget(ui->customTitleBarPanel); // 1. Самый верх приложения
+    topLayout->addWidget(customMenuBar);           // 2. Строго под шапкой
+    if (ui->widget_3) {
+        topLayout->addWidget(ui->widget_3);       // 3. Строго под меню
+    }
+
+    // 7. Регистрируем собранный блок в главном окне
+    topContainerBar->addWidget(topWrapper);
+    this->addToolBar(Qt::TopToolBarArea, topContainerBar);
+
+    // 8. Корректируем углы док-виджетов
+    this->setCorner(Qt::TopLeftCorner, Qt::TopDockWidgetArea);
+    this->setCorner(Qt::TopRightCorner, Qt::TopDockWidgetArea);
+
+    // =================================================================
+    // НАСТРОЙКА КНОПОК УПРАВЛЕНИЯ ВНУТРИ ШАПКИ
+    // =================================================================
+
+    // Очищаем customTitleBarPanel от старого мусора из Designer
+    for (QWidget *child : ui->customTitleBarPanel->findChildren<QWidget*>()) {
+        child->deleteLater();
+    }
+
+    if (ui->customTitleBarPanel->layout()) {
+        ui->customTitleBarPanel->layout()->setParent(nullptr);
+    }
+
+    QHBoxLayout *panelLayout = new QHBoxLayout(ui->customTitleBarPanel);
+    panelLayout->setContentsMargins(0, 0, 0, 0); // Нулевые отступы для плотного прилегания кнопок к краю
+    panelLayout->setSpacing(0);
+
+    // Левая симметричная пружина
+    panelLayout->addStretch();
+
+    // Создаем текстовую метку программно
+    QLabel *titleLabel = new QLabel("PyTorch Studio", ui->customTitleBarPanel);
+    QFont titleFont = titleLabel->font();
+    titleFont.setBold(true);
+    titleLabel->setFont(titleFont);
+    panelLayout->addWidget(titleLabel);
+
+    // Правая симметричная пружина (надпись теперь строго по центру геометрии окна)
+    panelLayout->addStretch();
+
+    // 9. Создаем кнопки управления окном (ИСПРАВЛЕНЫ бинарные символы)
+    QPushButton *btnMinimize = new QPushButton("—", this);
+    QPushButton *btnMaximize = new QPushButton("🗖", this);
+    QPushButton *btnClose    = new QPushButton("🗙", this);
+
+    QSize btnSize(28, 28);
+    btnMinimize->setFixedSize(btnSize);
+    btnMaximize->setFixedSize(btnSize);
+    btnClose->setFixedSize(btnSize);
+
+    btnMinimize->setObjectName("btnMinimize");
+    btnMaximize->setObjectName("btnMaximize");
+    btnClose->setObjectName("btnClose");
+
+    btnMinimize->setFlat(true);
+    btnMaximize->setFlat(true);
+    btnClose->setFlat(true);
+
+    // Добавляем плоские кнопки в самый правый край шапки
+    panelLayout->addWidget(btnMinimize);
+    panelLayout->addWidget(btnMaximize);
+    panelLayout->addWidget(btnClose);
+
+    // Логика сигналов для кнопок управления окном
+    connect(btnMinimize, &QPushButton::clicked, this, &Neuro_programm::showMinimized);
+    connect(btnClose, &QPushButton::clicked, this, &Neuro_programm::close);
+    connect(btnMaximize, &QPushButton::clicked, this, [this, btnMaximize]() {
+        if (this->isMaximized()) {
+            this->showNormal();
+            btnMaximize->setText("🗖");
+        } else {
+            this->showMaximized();
+            btnMaximize->setText("🗗");
+        }
+    });
+
+    topContainerBar->installEventFilter(this);
+    topWrapper->installEventFilter(this);
+    ui->customTitleBarPanel->installEventFilter(this);
+    customMenuBar->installEventFilter(this);
+    if (ui->widget_3) {
+        ui->widget_3->installEventFilter(this);
+    }
+
+    // Активируем трекинг мыши, чтобы пробить защиту QToolBar
+    topContainerBar->setMouseTracking(true);
+    topWrapper->setMouseTracking(true);
+    ui->customTitleBarPanel->setMouseTracking(true);
 
     self = this;
     trainingProcess = nullptr;
@@ -663,14 +794,19 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // titleLayout->setSpacing(0);
 
     // 2. Создаем красивый текстовый заголовок
-    QLabel *titleLabel = new QLabel("📁 Открытые файлы и проект", customTitleWidget);
+    QLabel *titleLabel1 = new QLabel("📁 Открытые файлы и проект", customTitleWidget);
+
+    // ЗАЩИТА: Если метка не была найдена в Designer, создаем её сами прямо сейчас
+    if (!titleLabel) {
+        titleLabel = new QLabel("PyTorch Studio", ui->customTitleBarPanel);
+    }
 
     // Настраиваем строгий полужирный шрифт в стиле Breeze
-    QFont titleFont = titleLabel->font();
-    titleFont.setBold(true);
-    titleFont.setPointSize(10); // Аккуратный компактный размер
-    titleLabel->setFont(titleFont);
-    titleLabel->setStyleSheet("color: #232629;"); // Контрастный темно-серый цвет Breeze
+    QFont titleFont1 = titleLabel->font();
+    titleFont1.setBold(true);
+    titleFont1.setPointSize(10); // Аккуратный компактный размер
+    titleLabel1->setFont(titleFont1);
+    titleLabel1->setStyleSheet("color: #232629;"); // Контрастный темно-серый цвет Breeze
 
     // 3. НАМЕРТВО УСТАНАВЛИВАЕМ КАСТОМНУЮ ШАПКУ В ВАШ ЛЕВЫЙ ДОК
     // (Замените leftDockWidget на реальное objectName вашего дока из Designer)
@@ -3011,56 +3147,93 @@ void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completion
 
 bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
 {
-    // Проверяем, что окно автодополнения сейчас открыто и нажата клавиша
+    // =================================================================
+    // БЛОК 1: СИСТЕМНОЕ ПЕРЕТАСКИВАНИЕ + ДВОЙНОЙ ЩЕЛЧОК ДЛЯ РАЗВОРAЧИВАНИЯ
+    // =================================================================
+    if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick)
+    {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+
+        if (mouseEvent->button() == Qt::LeftButton)
+        {
+            // Защита: если кликнули по кнопкам управления или меню, отдаем управление им
+            QString className = obj->metaObject()->className();
+            if (className == "QPushButton" || className == "QMenuBar" ||
+                className == "QComboBox" || (obj->parent() && obj->parent()->metaObject()->className() == "QComboBox"))
+            {
+                return false;
+            }
+
+            // Переводим позицию курсора на экране в координаты главного окна
+            QPoint windowLocalPos = this->mapFromGlobal(QCursor::pos());
+
+            // Если клик пришелся на верхнюю область шапки (первые 75 пикселей по высоте)
+            if (windowLocalPos.y() >= 0 && windowLocalPos.y() <= 75)
+            {
+                // 1. ОБРАБОТКА ДВОЙНОГО ЩЕЛЧКА (Разворачивание / Сворачивание в нормальный размер)
+                if (event->type() == QEvent::MouseButtonDblClick)
+                {
+                    if (this->isMaximized()) {
+                        this->showNormal();
+                        // Если у вас на кнопке btnMaximize меняется текст, обновите его:
+                        // ui->btnMaximize->setText("🗖");
+                    } else {
+                        this->showMaximized();
+                        // ui->btnMaximize->setText("🗗");
+                    }
+                    return true; // Перехватываем событие, дальше код не идет
+                }
+
+                // 2. ОБРАБОТКА ОДИНОЧНОГО КЛИКА (Перетаскивание силами ОС)
+                if (event->type() == QEvent::MouseButtonPress && this->windowHandle())
+                {
+                    this->windowHandle()->startSystemMove();
+                    return true;
+                }
+            }
+        }
+    }
+
+    // =================================================================
+    // БЛОК 2: КОД ДЛЯ РАБОТЫ С JEDI (ПОЛНОСТЬЮ ИЗОЛИРОВАН ОТ МЫШИ)
+    // =================================================================
     if (this->activeCompletionPopup && event->type() == QEvent::KeyPress)
     {
         QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
         QListWidget *listWidget = this->activeCompletionPopup->findChild<QListWidget*>("completionListWidget");
-
-        // Получаем доступ к самому CodeEditor. Так как фильтр висит на viewport(),
-        // сам класс редактора кода является его родителем (parent)
         CodeEditor *editor = qobject_cast<CodeEditor*>(obj->parent());
 
         if (listWidget && editor)
         {
-            // -----------------------------------------------------------------
-            // 1. УПРАВЛЕНИЕ СТРЕЛКАМИ ВВЕРХ / ВНИЗ
-            // -----------------------------------------------------------------
+            // --- 1. УПРАВЛЕНИЕ СТРЕЛКАМИ ВВЕРХ / ВНИЗ ---
             if (keyEvent->key() == Qt::Key_Up) {
                 int currentRow = listWidget->currentRow();
-                // Листаем вверх, пропуская скрытые фильтром элементы
                 for (int i = currentRow - 1; i >= 0; --i) {
                     if (!listWidget->item(i)->isHidden()) {
                         listWidget->setCurrentRow(i);
                         break;
                     }
                 }
-                return true; // Перехватываем, чтобы курсор в тексте не прыгал вверх
+                return true;
             }
 
             if (keyEvent->key() == Qt::Key_Down) {
                 int currentRow = listWidget->currentRow();
-                // Листаем вниз, пропуская скрытые фильтром элементы
                 for (int i = currentRow + 1; i < listWidget->count(); ++i) {
                     if (!listWidget->item(i)->isHidden()) {
                         listWidget->setCurrentRow(i);
                         break;
                     }
                 }
-                return true; // Перехватываем, чтобы курсор в тексте не прыгал вниз
+                return true;
             }
 
-            // -----------------------------------------------------------------
-            // 2. ПОДТВЕРЖДЕНИЕ ВЫБОРА (ENTER / RETURN / TAB)
-            // -----------------------------------------------------------------
+            // --- 2. ПОДТВЕРЖДЕНИЕ ВЫБОРА (ENTER / RETURN / TAB) ---
             if (keyEvent->key() == Qt::Key_Enter || keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Tab) {
-                // Вызываем активацию элемента списка программно
                 QListWidgetItem *currentItem = listWidget->currentItem();
                 if (currentItem && !currentItem->isHidden()) {
                     QString itemText = currentItem->text();
                     QTextCursor tc = editor->textCursor();
-
-                    // Стираем префикс, который успели набрать
                     tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, editor->property("prefixLength").toInt());
                     tc.beginEditBlock();
                     tc.insertText(itemText);
@@ -3072,51 +3245,43 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
                 return true;
             }
 
-            // 3. ЗАКРЫТИЕ ПО ESC
+            // --- 3. ЗАКРЫТИЕ ПО ESC ---
             if (keyEvent->key() == Qt::Key_Escape) {
                 this->activeCompletionPopup->close();
                 editor->setFocus();
                 return true;
             }
 
-            // -----------------------------------------------------------------
-            // 4. ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ НА ЛЕТУ ПРИ ВВОДЕ СИМВОЛОВ
-            // -----------------------------------------------------------------
-            // Проверяем, что нажата обычная печатная клавиша (буква, цифра или знак)
+            // --- 4. ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ НА ЛЕТУ ---
             if (!keyEvent->text().isEmpty() && keyEvent->key() != Qt::Key_Backspace &&
                 keyEvent->key() != Qt::Key_Left && keyEvent->key() != Qt::Key_Right)
             {
-                // Сначала принудительно отдаем букву текстовому редактору, чтобы она напечаталась
                 QCoreApplication::sendEvent(obj, event);
 
                 int startPos = editor->property("startPosition").toInt();
                 int currentPos = editor->textCursor().position();
-
-                // Вычисляем длину набранного префикса
                 int prefixLength = currentPos - startPos;
                 editor->setProperty("prefixLength", prefixLength);
 
-                // Вырезаем то, что набрал пользователь после точки
                 QTextCursor tc = editor->textCursor();
                 tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, prefixLength);
                 QString currentPrefix = tc.selectedText().toLower();
 
                 int firstVisibleRow = -1;
-                // Запускаем фильтрацию по всему списку подсказок Jedi
                 for (int i = 0; i < listWidget->count(); ++i) {
                     QListWidgetItem *item = listWidget->item(i);
                     bool matches = item->text().toLower().contains(currentPrefix);
-                    item->setHidden(!matches); // Скрываем несовпавшие элементы
+                    item->setHidden(!matches);
 
                     if (matches && firstVisibleRow == -1) {
-                        firstVisibleRow = i; // Фокусируемся на первом совпадении
+                        firstVisibleRow = i;
                     }
                 }
 
                 if (firstVisibleRow != -1) {
                     listWidget->setCurrentRow(firstVisibleRow);
                 } else {
-                    this->activeCompletionPopup->close(); // Закрываем, если совпадений нет
+                    this->activeCompletionPopup->close();
                 }
 
                 return true;
@@ -3124,9 +3289,10 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
         }
     }
 
-    // Во всех остальных случаях отдаем события базовому классу Qt
+    // Во всех остальных случаях отдаем события базовому классу QMainWindow
     return QMainWindow::eventFilter(obj, event);
 }
+
 
 void Neuro_programm::sendInitialWelcomeRequest()
 {
@@ -3724,21 +3890,88 @@ void Neuro_programm::on_actionOpenSettings_triggered()
     dialog.exec();
 }
 
-// Перехват клика мыши на заголовке
-void Neuro_programm::mousePressEvent(QMouseEvent *event)
-{
-    // Если кликнули в зоне нашего titleBarWidget
-    if (titleBarWidget && titleBarWidget->geometry().contains(event->pos())) {
-        m_dragPosition = event->globalPosition().toPoint() - frameGeometry().topLeft();
-        event->accept();
-    }
+void Neuro_programm::applyThemeColors(bool /*isDarkTheme*/) {
+    QPalette sysPalette = qApp->palette();
+    QString colorHighlight = sysPalette.color(QPalette::Highlight).name();
+
+    QString colorBreezeLight   = "#eff0f1";
+    QString colorBreezeText    = "#232629";
+    QString colorWidget3Bg     = "#f5f6f7";
+    QString colorBorder        = "#bcbebf"; // Оставляем только для нижней панели файлов widget_3
+
+    QString style = QString(
+                        // Полностью убираем любые рамки и линии у главного окна и тулбара
+                        "QMainWindow, QToolBar {"
+                        "   background: %1 !important;"
+                        "   background-color: %1 !important;"
+                        "   border: none !important;"
+                        "   padding: 0px !important;"
+                        "   spacing: 0px !important;"
+                        "}"
+
+                        // ЖЕСТКО УБИРАЕМ ЛИНИЮ У ЗАГОЛОВКА: выставляем border: none для всей панели
+                        "QWidget#customTitleBarPanel {"
+                        "   background: %1 !important;"
+                        "   background-color: %1 !important;"
+                        "   border: none !important;" // Никаких рамок и линий ни с одной из сторон!
+                        "   padding: 0px !important;"
+                        "   margin: 0px !important;"
+                        "}"
+
+                        "QLabel { color: %2 !important; }"
+
+                        // КНОПКИ УПРАВЛЕНИЯ ОКНОМ
+                        "QPushButton#btnMinimize, QPushButton#btnMaximize, QPushButton#btnClose {"
+                        "   background-color: transparent !important;"
+                        "   border: 0px solid transparent !important;"
+                        "   border-radius: 0px; outline: none;"
+                        "   color: %2 !important;"
+                        "   font-size: 11px;"
+                        "}"
+                        "QPushButton#btnMinimize:hover, QPushButton#btnMaximize:hover {"
+                        "   background-color: #e1e2e3 !important;"
+                        "}"
+                        "QPushButton#btnClose:hover {"
+                        "   background-color: #e81123 !important;"
+                        "   color: white !important;"
+                        "}"
+
+                        // МЕНЮБАР (Сливается с заголовком без разделителей)
+                        "QMenuBar {"
+                        "   background-color: %1 !important;"
+                        "   color: %2 !important;"
+                        "   border: none !important;"
+                        "}"
+                        "QMenuBar::item:selected {"
+                        "   background-color: %3 !important;"
+                        "   color: white !important;"
+                        "}"
+
+                        // Линию оставляем ТОЛЬКО под widget_3, чтобы рабочая область визуально отделялась от шапки
+                        "QWidget#widget_3 {"
+                        "   background-color: %5 !important;"
+                        "   color: %2 !important;"
+                        "   border-top: none !important;"
+                        "   border-left: none !important;"
+                        "   border-right: none !important;"
+                        "   border-bottom: 1px solid %4 !important;"
+                        "}"
+                        )
+                        .arg(colorBreezeLight) // %1
+                        .arg(colorBreezeText)  // %2
+                        .arg(colorHighlight)   // %3
+                        .arg(colorBorder)      // %4
+                        .arg(colorWidget3Bg);  // %5
+
+    this->setStyleSheet(style);
 }
 
-// Перетаскивание окна вслед за курсором
-void Neuro_programm::mouseMoveEvent(QMouseEvent *event)
-{
-    if (titleBarWidget && titleBarWidget->geometry().contains(event->pos()) && (event->buttons() & Qt::LeftButton)) {
-        move(event->globalPosition().toPoint() - m_dragPosition);
-        event->accept();
-    }
+void Neuro_programm::showEvent(QShowEvent *event) {
+    QMainWindow::showEvent(event);
+
+    // Просто вызываем нашу новую светлую палитру
+    applyThemeColors(false);
+
+    // Заставляем Qt гарантированно обновить интерфейс на экране
+    this->update();
 }

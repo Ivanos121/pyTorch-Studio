@@ -49,8 +49,7 @@ signals:
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
-    void mousePressEvent(QMouseEvent *event) override;
-    void mouseMoveEvent(QMouseEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 protected slots:
     void new_progect();
@@ -78,6 +77,7 @@ private:
     void handlePythonErrors();
     void onQuickActionTriggered(QListWidgetItem *item);
     QPushButton *btnStatusAI = nullptr;
+    void applyThemeColors(bool isDarkTheme);
 
 
 
@@ -135,5 +135,6 @@ private:
     QPushButton *topBtnInfo = nullptr;
     QPushButton *topBtnStatus = nullptr;
     QPushButton *topBtnSettings = nullptr;
+    bool m_dragging = false;
 };
 #endif // NEURO_PROGRAMM_H

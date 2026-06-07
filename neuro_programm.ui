@@ -500,9 +500,6 @@ QTextEdit#inputChatText:focus {
       </widget>
      </widget>
     </item>
-    <item row="0" column="0">
-     <widget class="QWidget" name="widget_2" native="true"/>
-    </item>
     <item row="2" column="0">
      <widget class="QListWidget" name="quickActionsList">
       <property name="minimumSize">
@@ -676,6 +673,16 @@ QPushButton:disabled {
       <property name="maximumSize">
        <size>
         <width>16777215</width>
+        <height>0</height>
+       </size>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="0" colspan="2">
+     <widget class="QWidget" name="customTitleBarPanel" native="true">
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
         <height>0</height>
        </size>
       </property>
