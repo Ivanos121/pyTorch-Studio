@@ -48,6 +48,9 @@ void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &contex
 
 int main(int argc, char *argv[])
 {
+    qputenv("QT_QPA_PLATFORMTHEME", "kde");
+    qputenv("XDG_CURRENT_DESKTOP", "KDE");
+
     QApplication a(argc, argv);
 
     qInstallMessageHandler(linuxConsoleMessageHandler);

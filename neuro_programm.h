@@ -50,6 +50,7 @@ signals:
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
     void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override; // <--- ДОБАВЬТЕ ЭТУ СТРОКУ
 
 protected slots:
     void new_progect();
@@ -61,7 +62,7 @@ private:
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
     void sendSystemNotification(const QString &title, const QString &text);
-    void initProjectTreeModel(const QString &path);
+    void initProjectTreeModel(QString path);
     void initLossChart();
     void updateRecentProjectActions();   // Метод перерисовки списка в меню
     void addProjectToRecent(const QString &projectPath); // Метод добавления нового пути
@@ -136,5 +137,7 @@ private:
     QPushButton *topBtnStatus = nullptr;
     QPushButton *topBtnSettings = nullptr;
     bool m_dragging = false;
+    class QSpacerItem *leftPaddingSpacer = nullptr; // Указатель на левый отступ фальш-панели
+    void updateWidget3Padding();
 };
 #endif // NEURO_PROGRAMM_H

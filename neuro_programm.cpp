@@ -57,6 +57,8 @@
 #include <QToolBar>
 #include <QBoxLayout>
 #include <QWindow>
+#include <QSpacerItem>
+#include <QResizeEvent>
 
 
 Neuro_programm* Neuro_programm::self = nullptr;
@@ -67,10 +69,37 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 {
     ui->setupUi(this);
 
-    ui->setupUi(this);
-
     // 1. Отключаем нативную рамку ОС
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
+
+    recentProjectsMenu = new QMenu(" Открыть недавние", this);
+    for (int i = 0; i < MaxRecentFiles; ++i) {
+        recentProjectActions[i] = new QAction(this);
+        recentProjectActions[i]->setVisible(false); // Прячем, пока список пуст
+        connect(recentProjectActions[i], &QAction::triggered, this, &Neuro_programm::openRecentProject);
+        recentProjectsMenu->addAction(recentProjectActions[i]);
+    }
+    // Сразу считываем историю с диска из ~/.config/PyTorchStudio/IDE.conf
+    updateRecentProjectActions();
+
+    // =========================================================================
+    // 2. СОЗДАНИЕ ДИНАМИЧЕСКИХ ДЕЙСТВИЙ (ЭКШЕНОВ) ДЛЯ ФАЙЛОВ И ПРОЕКТА
+    // =========================================================================
+    // Действие "Сохранить" (Ctrl + S)
+    QAction *actionSave = new QAction(" Сохранить", this);
+    actionSave->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
+    connect(actionSave, &QAction::triggered, this, &Neuro_programm::saveCurrentActiveFile);
+
+    // Действие "Сохранить всё" (Ctrl + Shift + S)
+    QAction *actionSaveAll = new QAction(" Сохранить всё", this);
+    actionSaveAll->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    connect(actionSaveAll, &QAction::triggered, this, &Neuro_programm::saveAllProjectChanges);
+
+    // Действие "Закрыть проект" (Ctrl + W)
+    QAction *actionCloseProject = new QAction(" Закрыть проект", this);
+    actionCloseProject->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
+    connect(actionCloseProject, &QAction::triggered, this, &Neuro_programm::onCloseProjectClicked);
+
 
     // 2. Полностью УДАЛЯЕМ встроенный системный менюбар, который лезет наверх
     if (this->menuBar()) {
@@ -100,8 +129,20 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     fileMenu->addAction(ui->New_progect);
     fileMenu->addAction(ui->new_file);
     fileMenu->addAction(ui->open_progect);
-    fileMenu->addAction(ui->save_files);
+    fileMenu->addSeparator();
+    fileMenu->addAction(actionSave);
+    fileMenu->addAction(actionSaveAll);
+    fileMenu->addSeparator();
+    fileMenu->addMenu(recentProjectsMenu);
+    fileMenu->addSeparator();
+    //fileMenu->addAction(ui->save_files);
     fileMenu->addAction(ui->Exit);
+
+    // 1. Создаем подменю "Открыть недавние"
+    recentProjectsMenu = new QMenu("Открыть недавние", this);
+
+
+
 
     QMenu *editMenu = customMenuBar->addMenu("Правка");
 
@@ -115,9 +156,22 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 6. Собираем элементы в ИДЕАЛЬНОМ вертикальном порядке (Шапка -> Menu -> Файлы)
     topLayout->addWidget(ui->customTitleBarPanel); // 1. Самый верх приложения
     topLayout->addWidget(customMenuBar);           // 2. Строго под шапкой
-    if (ui->widget_3) {
+    if (ui->widget_3)
+    {
+        ui->widget_3->setStyleSheet("");
         topLayout->addWidget(ui->widget_3);       // 3. Строго под меню
     }
+
+        // Убеждаемся, что сигналы подключены к нашей новой функции отступов
+        connect(ui->leftDockWidget, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+            Q_UNUSED(visible);
+            this->updateWidget3Padding();
+        });
+
+        // Сдвигаем виджеты сразу после старта, когда Qt отрисует геометрию дока
+        QTimer::singleShot(100, this, &Neuro_programm::updateWidget3Padding);
+
+
 
     // 7. Регистрируем собранный блок в главном окне
     topContainerBar->addWidget(topWrapper);
@@ -281,7 +335,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     ui->statusbar->addWidget(btnSearch);
     ui->statusbar->addWidget(btnLogs);
     ui->statusbar->addWidget(btnAIChat);
-    ui->statusbar->addPermanentWidget(btnTogglePip);
     ui->statusbar->addPermanentWidget(btnTogglePip);
 
     // 2. СВЯЗЫВАЕМ СИГНАЛЫ КНОПОК С УМНЫМ ТРИГГЕРОМ ПОКАЗА/СКРЫТИЯ
@@ -748,39 +801,63 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     // Найдите этот блок внутри конструктора Neuro_programm::Neuro_programm:
 
+    // СИНХРОНИЗАЦИЯ СМЕНЫ ВКЛАДОК (КОРРЕКТНЫЙ ВАРИАНТ)
     connect(ui->fileComboBox, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (index >= 0 && index < ui->centralStackedWidget->count())
         {
-            // Перелистываем страницу стэка
+            // Перелистываем страницу стэка редактора кода
             ui->centralStackedWidget->setCurrentIndex(index);
 
-            // Сразу синхронизируем выделение строки в левом боковом списке
+            // Синхронизируем выделение строки в левом боковом списке открытых документов
             if (ui->openFilesListWidget) {
                 ui->openFilesListWidget->setCurrentRow(index);
             }
 
-            // Умное управление док-виджетом на основе ключа userData
             QString currentKey = ui->fileComboBox->itemData(index).toString();
 
-            if (currentKey == "MAIN_SCREEN") {
-                //if (ui->rightDockWidget) ui->rightDockWidget->setVisible(true); // Возвращаем док параметров
-                if (btnTerminal) btnTerminal->setChecked(true); // Подсвечиваем кнопку Терминала в статусбаре
-                if (btnAIChat)   btnAIChat->setChecked(false);
+            if (currentKey == "MAIN_SCREEN")
+            {
+                if (btnTerminal) btnTerminal->setChecked(true);
+                if (btnAIChat) btnAIChat->setChecked(false);
+
+                // На сервисных экранах плавно скрываем нижний список документов в 0px
+                if (ui->openFilesContainer && ui->leftVerticalSplitter) {
+                    ui->openFilesContainer->setVisible(false);
+                    ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
+                }
             }
-            else if (currentKey == "AI_CHAT_SCREEN") {
-                //if (ui->rightDockWidget) ui->rightDockWidget->setVisible(false); // Прячем док
-                if (btnAIChat)   btnAIChat->setChecked(true);  // Зажигаем кнопку ИИ в статусбаре
+            else if (currentKey == "AI_CHAT_SCREEN")
+            {
+                if (btnAIChat) btnAIChat->setChecked(true);
                 if (btnTerminal) btnTerminal->setChecked(false);
+
+                // На экране чата тоже скрываем нижнюю панель документов в 0px
+                if (ui->openFilesContainer && ui->leftVerticalSplitter) {
+                    ui->openFilesContainer->setVisible(false);
+                    ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
+                }
             }
-            else {
-                // Если выбран любой динамический файл кода (индексы >= 2)
-                //if (ui->rightDockWidget) ui->rightDockWidget->setVisible(false);
+            else
+            {
+                // ЕСЛИ ВЫБРАН ЛЮБОЙ РЕАЛЬНЫЙ С КРИПТ ИЛИ ФАЙЛ КОДА (ИНДЕКСЫ >= 2)
                 if (btnTerminal) btnTerminal->setChecked(false);
-                if (btnAIChat)   btnAIChat->setChecked(false);
+                if (btnAIChat) btnAIChat->setChecked(false);
+
+                // ГЛАВНЫЙ ИСПРАВЛЯЮЩИЙ ТРИГГЕР: Выдвигаем нижнюю панель на экран!
+                if (ui->openFilesContainer && ui->leftVerticalSplitter)
+                {
+                    ui->openFilesContainer->setVisible(true);
+
+                    // Задаем жесткие, видимые пропорции сплиттеру (180 пикселей под список файлов)
+                    int totalHeight = ui->leftVerticalSplitter->height();
+                    if (totalHeight <= 0) totalHeight = 600; // Страховка для старта
+
+                    ui->leftVerticalSplitter->setSizes(QList<int>({totalHeight - 180, 180}));
+                    ui->leftVerticalSplitter->update();
+                }
             }
         }
     });
-
 
     // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm ---
 
@@ -823,42 +900,212 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         "}"
         );
 
-    // 1. Очищаем боковой список
+    // =========================================================================
+    // НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ (СТРОГАЯ IDE СТРУКТУРА)
+    // =========================================================================
+    // 1. Очищаем боковой список открытых документов от тестового мусора из Designer
     ui->openFilesListWidget->clear();
 
-    // Добавляем постоянный заголовок панели обучения в боковой список открытых документов
+    // Добавляем постоянные системные вкладки среды разработки
     QListWidgetItem *mainScreenItem = new QListWidgetItem("🎛 Панель обучения ИИ", ui->openFilesListWidget);
     mainScreenItem->setData(Qt::UserRole, QString("MAIN_SCREEN"));
 
-    // Добавляем постоянный заголовок ИИ-чата в боковой список
     QListWidgetItem *chatScreenItem = new QListWidgetItem("💬 ИИ-Ассистент", ui->openFilesListWidget);
     chatScreenItem->setData(Qt::UserRole, QString("AI_CHAT_SCREEN"));
 
-    // По умолчанию при старте выделена первая строка (Панель ИИ)
+    // По умолчанию при старте выделяем первую строку (Панель ИИ)
     ui->openFilesListWidget->setCurrentRow(0);
 
-    // 2. ЖЕСТКО СКРЫВАЕМ НИЖНИЙ КОНТЕЙНЕР (Скроется и список, и его заголовок!)
+    // ХИРУРГИЧЕСКИЙ ФИКС НАЛОЖЕНИЯ ТЕКСТА:
+    // Намертво удаляем старые текстовые метки из Designer, чтобы они не слипались в углу
+    // if (ui->label) {
+    //     ui->label->setParent(nullptr);
+    //     ui->label->deleteLater();
+    // }
+    // if (ui->label_2) {
+    //     ui->label_2->setParent(nullptr);
+    //     ui->label_2->deleteLater();
+    // }
+
+    // 2. ИЗНАЧАЛЬНО СКРЫВАЕМ НИЖНИЙ КОНТЕЙНЕР ПРИ ЗАПУСКЕ ПРОГРАММЫ
     if (ui->openFilesContainer) {
         ui->openFilesContainer->setVisible(false);
     }
 
-    // НАСТРОЙКА КОРРЕКТНОЙ ГЕОМЕТРИИ СПЛИТТЕРА ПРИ СТАРТЕ
+    // 3. СБОРКА ВЕРТИКАЛЬНОГО СПЛИТТЕРА БЕЗ РАЗРЫВА РОДИТЕЛЬСКИХ СВЯЗЕЙ
+    // =========================================================================
+    // ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПУСТОТЫ И НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ
+    // =========================================================================
+
+    // =========================================================================
+    // ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПУСТОТЫ И НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ (ФИНАЛ)
+    // =========================================================================
+    // =========================================================================
+    // ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПУСТОТЫ И НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ (ФИНАЛ)
+    // =========================================================================
+    if (ui->leftDockWidget)
+    {
+        // 1. Сбрасываем минимальные лимиты высоты из Designer (строка 11)
+        ui->leftDockWidget->setMinimumSize(QSize(300, 0));
+        ui->leftDockWidget->setMaximumSize(QSize(300, 524287));
+
+        // 2. Убираем встроенную плашку заголовка QDockWidget
+        QWidget *emptyTitleWidget = new QWidget(ui->leftDockWidget);
+        ui->leftDockWidget->setTitleBarWidget(emptyTitleWidget);
+
+        // 3. Срезаем скрытые рамки у самих списков
+        ui->leftDockWidget->setStyleSheet(
+            "QDockWidget { border: 1px solid #b0b0b0; padding: 0px !important; margin: 0px !important; }"
+            "QDockWidget > QWidget { padding: 0px !important; margin: 0px !important; background: #ffffff; }"
+            "QTreeView, QListWidget { border: none; padding: 0px; margin: 0px; background: #ffffff; }"
+        );
+
+        // Считываем подложку дока и принудительно зануляем её макет
+        QWidget *dockContents = ui->leftDockWidget->widget();
+        if (dockContents && dockContents->layout()) {
+            dockContents->layout()->setContentsMargins(0, 0, 0, 0);
+            dockContents->layout()->setSpacing(0);
+        }
+    }
+
+    // =========================================================================
+    // ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПУСТОТЫ И НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ (ФИНАЛ)
+    // =========================================================================
+    if (ui->leftDockWidget)
+    {
+        // 1. Сбрасываем минимальные лимиты высоты из Designer
+        ui->leftDockWidget->setMinimumSize(QSize(300, 0));
+        ui->leftDockWidget->setMaximumSize(QSize(300, 524287));
+
+        // 2. Убираем встроенную плашку заголовка QDockWidget
+        QWidget *emptyTitleWidget = new QWidget(ui->leftDockWidget);
+        emptyTitleWidget->setFixedHeight(0); // Схлопываем невидимую заглушку в ноль
+        emptyTitleWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        ui->leftDockWidget->setTitleBarWidget(emptyTitleWidget);
+
+        // 3. ХИРУРГИЧЕСКИЙ CSS-СДВИГ: Выталкиваем первые элементы списков вверх,
+        // полностью уничтожая скрытые XML-пустоты под надписями!
+        ui->leftDockWidget->setStyleSheet(
+                    "QDockWidget {"
+                       " border: 1px solid #b0b0b0;"
+                       " padding: 0px !important;"
+                       " margin: 0px !important;"
+                       "}"
+                       "QDockWidget > QWidget {"
+                       " padding: 0px !important;"
+                       " margin: 0px !important;"
+                       " background: #ffffff;"
+                       "}"
+                       "QTreeView, QListWidget {"
+                       " border: none;"
+                       " margin: 0px !important;"
+                       " padding: 0px !important;"
+                       " background: #ffffff;"
+                       "}"
+                       "QTreeView::item, QListWidget::item {"
+                       " padding-top: 2px !important;"
+                       " padding-bottom: 2px !important;"
+                       "}"
+                   );
+
+        // Считываем подложку дока и принудительно зануляем её макет
+        QWidget *dockContents = ui->leftDockWidget->widget();
+        if (dockContents && dockContents->layout()) {
+            dockContents->layout()->setContentsMargins(0, 0, 0, 0);
+            dockContents->layout()->setSpacing(0);
+        }
+    }
+
+
     if (ui->leftVerticalSplitter)
     {
-        // 1. Разрешаем сплиттеру полностью "схлопывать" нижнюю панель в ноль пикселей!
-        ui->leftVerticalSplitter->setCollapsible(0, false); // Верхнее дерево схлопывать нельзя
-        ui->leftVerticalSplitter->setCollapsible(1, true);  // Нижний список — МОЖНО схлопнуть
+        // Убираем толщину внутренней ручки-разделителя сплиттера
+        ui->leftVerticalSplitter->setHandleWidth(0);
 
-        // 2. КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Жестко отдаем ВСЁ место верхнему элементу (дереву),
-        // а нижнему контейнеру прописываем ровно 0 пикселей.
+        // Принудительно сбрасываем любые сохраненные ограничения контейнеров из Designer
+        ui->projectContainer->setMinimumSize(QSize(0, 0));
+        ui->openFilesContainer->setMinimumSize(QSize(0, 0));
+
+        ui->projectContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);
+        ui->openFilesContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);
+
+        // БЕЗОПАСНЫЙ ФИКС БЕЗ УДАЛЕНИЯ: Настраиваем существующие макеты из XML прямо в памяти
+        // Настраиваем верхнюю сетку gridLayout_2 (Страница 12 вашего XML)
+        // БЕЗОПАСНЫЙ ФИКС БЕЗ УДАЛЕНИЯ: Настраиваем существующие макеты из XML прямо в памяти
+        // Настраиваем верхнюю сетку gridLayout_2 (Страница 12 вашего XML)
+        if (ui->gridLayout_2) {
+            // 1. Полностью удаляем старую сетку из контейнера, чтобы она не мешала
+            delete ui->gridLayout_2;
+
+            // 2. Создаем чистый вертикальный компоновщик с абсолютно НУЛЕВЫМИ отступами
+            QVBoxLayout *projectLayout = new QVBoxLayout(ui->projectContainer);
+            projectLayout->setContentsMargins(6, 0, 6, 0); // 6px по бокам для Breeze, 0px сверху/снизу
+            projectLayout->setSpacing(2);                 // Зазор ровно 2 пикселя между текстом и деревом
+
+            // 3. Создаем компактный заголовок
+            QLabel *lblProjectTitle = new QLabel(" Структура проекта", ui->projectContainer);
+            lblProjectTitle->setStyleSheet(
+                "font-weight: bold; "
+                "color: #505050; "
+                "font-size: 11px; "
+                "padding: 0px; "
+                "margin: 0px !important;"
+            );
+            lblProjectTitle->setFixedHeight(14); // Жестко фиксируем высоту текста
+
+            // 4. Просто складываем их по порядку сверху вниз
+            projectLayout->addWidget(lblProjectTitle);
+            projectLayout->addWidget(ui->treeView);
+        }
+
+
+        // Настраиваем нижнюю сетку gridLayout_3 (Страница 12 вашего XML)
+        if (ui->gridLayout_3) {
+            ui->gridLayout_3->setContentsMargins(6, 4, 6, 0);
+            ui->gridLayout_3->setSpacing(0);
+            ui->gridLayout_3->setVerticalSpacing(0); // Намертво убираем пустой шаг между строками
+
+            QLabel *lblFilesTitle = new QLabel("📝 Открытые документы", ui->openFilesContainer);
+            lblFilesTitle->setStyleSheet("font-weight: bold; color: #505050; font-size: 11px; padding: 0px; margin: 0px; background: transparent;");
+
+            ui->gridLayout_3->removeWidget(ui->openFilesListWidget);
+            ui->gridLayout_3->addWidget(lblFilesTitle, 0, 0);
+            ui->gridLayout_3->addWidget(ui->openFilesListWidget, 1, 0);
+
+            ui->gridLayout_3->setRowMinimumHeight(0, 15);
+            ui->gridLayout_3->setRowMinimumHeight(1, 0);
+
+            ui->gridLayout_3->setRowStretch(0, 0);
+            ui->gridLayout_3->setRowStretch(1, 1);
+        }
+
+        ui->treeView->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+        ui->openFilesListWidget->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+
+        // Фиксируем двухкомпонентную иерархию сплиттера
+        ui->leftVerticalSplitter->insertWidget(0, ui->projectContainer);
+        ui->leftVerticalSplitter->insertWidget(1, ui->openFilesContainer);
+
+        ui->leftVerticalSplitter->setStretchFactor(0, 1);
+        ui->leftVerticalSplitter->setStretchFactor(1, 1);
+
+        ui->leftVerticalSplitter->setCollapsible(0, false);
+        ui->leftVerticalSplitter->setCollapsible(1, true);
+
+        // Схлопываем нижнюю панель в 0 при старте, отдавая всё место дереву файлов
         ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
     }
 
-    connect(ui->openFilesListWidget, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onOpenFileListItemDoubleClicked);
+    ui->treeView->setIndentation(20);
 
+    // Полностью убираем мелкую системную рамку-заголовок DockWidget
+    QWidget *emptyTitleWidget = new QWidget(ui->leftDockWidget);
+    ui->leftDockWidget->setTitleBarWidget(emptyTitleWidget);
 
-    // 1. Привязываем кнопку отправки (наш коннект)
-    connect(ui->btnSendChat, &QPushButton::clicked, this, &Neuro_programm::sendChatMessageToAI);
+    // Коннект для обработки двойного клика по строкам списка открытых документов
+    connect(ui->openFilesListWidget, &QListWidget::itemDoubleClicked, this,
+            &Neuro_programm::onOpenFileListItemDoubleClicked);
+
 
     // 2. Устанавливаем фильтр клавиатуры на многострочное текстовое поле
     // (Это заставит работать комбинацию Ctrl + Enter, которую мы писали в eventFilter)
@@ -1007,105 +1254,82 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm в файле neuro_programm.cpp ---
 
-    // 1. Создаем подменю "Открыть недавние"
-    recentProjectsMenu = new QMenu("Открыть недавние", this);
 
-    QMenuBar *bar = this->menuBar();
-    if (bar) {
-        // Сканируем все существующие вкладки (Файл, Справка и т.д.)
-        QList<QAction*> actions = bar->actions();
-        bool attached = false;
-
-        for (QAction *action : actions) {
-            // Если нашли меню, текст которого содержит слово "Файл" (или "File")
-            if (action->menu() && (action->text().contains("Файл") || action->text().contains("File"))) {
-                action->menu()->addMenu(recentProjectsMenu); // Встраиваем подменю "Открыть недавние" внутрь него
-                attached = true;
-                break;
-            }
-        }
-
-        // Резервный вариант: если меню "Файл" вдруг не нашлось по тексту,
-        // мы просто добавим "Открыть недавние" прямой кнопкой на верхнюю панель
-        if (!attached) {
-            bar->addMenu(recentProjectsMenu);
-        }
-    }
 
     // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm в файле neuro_programm.cpp ---
 
-    // 1. Создаем действие "Сохранить" (Ctrl + S)
-    QAction *actionSave = new QAction("💾 Сохранить", this);
-    actionSave->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S)); // Подсказка горячих клавиш в меню
-    connect(actionSave, &QAction::triggered, this, &Neuro_programm::saveCurrentActiveFile);
+    // // 1. Создаем действие "Сохранить" (Ctrl + S)
+    // QAction *actionSave = new QAction("💾 Сохранить", this);
+    // actionSave->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S)); // Подсказка горячих клавиш в меню
+    // connect(actionSave, &QAction::triggered, this, &Neuro_programm::saveCurrentActiveFile);
 
-    // 2. Создаем действие "Сохранить всё" (Ctrl + Shift + S)
-    QAction *actionSaveAll = new QAction("📚 Сохранить всё", this);
-    actionSaveAll->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
-    connect(actionSaveAll, &QAction::triggered, this, &Neuro_programm::saveAllProjectChanges);
+    // // 2. Создаем действие "Сохранить всё" (Ctrl + Shift + S)
+    // QAction *actionSaveAll = new QAction("📚 Сохранить всё", this);
+    // actionSaveAll->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    // connect(actionSaveAll, &QAction::triggered, this, &Neuro_programm::saveAllProjectChanges);
 
     // 3. Создаем наше старое подменю "Открыть недавние"
     recentProjectsMenu = new QMenu("📁 Открыть недавние", this);
 
     // 4. ИНТЕГРАЦИЯ В ВЕРХНЕЕ МЕНЮ "ФАЙЛ" ПО ЕГО НАЗВАНИЮ
     //QMenuBar *bar = this->menuBar();
-    if (bar)
-    {
-        QList<QAction*> actions = bar->actions();
-        bool attached = false;
+    // if (bar)
+    // {
+    //     QList<QAction*> actions = bar->actions();
+    //     bool attached = false;
 
-        for (QAction *action : actions)
-        {
-            // Ищем вкладку меню, которая содержит слово "Файл" или "File"
-            if (action->menu() && (action->text().contains("Файл") || action->text().contains("File")))
-            {
-                QMenu *fileMenu = action->menu();
+    //     for (QAction *action : actions)
+    //     {
+    //         // Ищем вкладку меню, которая содержит слово "Файл" или "File"
+    //         if (action->menu() && (action->text().contains("Файл") || action->text().contains("File")))
+    //         {
+    //             QMenu *fileMenu = action->menu();
 
-                fileMenu->addSeparator();             // Рисуем тонкую разделительную линию Breeze
-                fileMenu->addAction(actionSave);      // Вставляем пункт "Сохранить"
-                fileMenu->addAction(actionSaveAll);   // Вставляем пункт "Сохранить всё"
-                fileMenu->addSeparator();             // Рисуем вторую линию разделителя
-                fileMenu->addMenu(recentProjectsMenu); // Вставляем наш список недавних проектов
+    //             fileMenu->addSeparator();             // Рисуем тонкую разделительную линию Breeze
+    //             fileMenu->addAction(actionSave);      // Вставляем пункт "Сохранить"
+    //             fileMenu->addAction(actionSaveAll);   // Вставляем пункт "Сохранить всё"
+    //             fileMenu->addSeparator();             // Рисуем вторую линию разделителя
+    //             fileMenu->addMenu(recentProjectsMenu); // Вставляем наш список недавних проектов
 
-                attached = true;
-                break;
-            }
-        }
+    //             attached = true;
+    //             break;
+    //         }
+    //     }
 
-        // Создаем действие "Закрыть проект"
-        QAction *actionCloseProject = new QAction("❌ Закрыть проект", this);
-        actionCloseProject->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
-        connect(actionCloseProject, &QAction::triggered, this, &Neuro_programm::onCloseProjectClicked);
+        // // Создаем действие "Закрыть проект"
+        // QAction *actionCloseProject = new QAction("❌ Закрыть проект", this);
+        // actionCloseProject->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
+        // connect(actionCloseProject, &QAction::triggered, this, &Neuro_programm::onCloseProjectClicked);
 
-        // ИНТЕГРИРУЕМ В НАШ СУЩЕСТВУЮЩИЙ ЦИКЛ ДИНАМИЧЕСКОГО ПОИСКА ВКЛАДКИ "ФАЙЛ"
-        QMenuBar *bar = this->menuBar();
-        if (bar)
-        {
-            QList<QAction*> actions = bar->actions();
-            for (QAction *action : actions)
-            {
-                if (action->menu() && (action->text().contains("Файл") || action->text().contains("File")))
-                {
-                    QMenu *fileMenu = action->menu();
+        // // ИНТЕГРИРУЕМ В НАШ СУЩЕСТВУЮЩИЙ ЦИКЛ ДИНАМИЧЕСКОГО ПОИСКА ВКЛАДКИ "ФАЙЛ"
+        // QMenuBar *bar = this->menuBar();
+        // if (bar)
+        // {
+        //     QList<QAction*> actions = bar->actions();
+        //     for (QAction *action : actions)
+        //     {
+        //         if (action->menu() && (action->text().contains("Файл") || action->text().contains("File")))
+        //         {
+        //             QMenu *fileMenu = action->menu();
 
-                    // =================================================================
-                    // ИСПРАВЛЕНИЕ: Просто добавляем кнопку в конец меню без угадывания имен!
-                    // =================================================================
-                    fileMenu->addSeparator();            // Тонкая разделительная черта Breeze
-                    fileMenu->addAction(actionCloseProject); // Вставляем пункт "Закрыть проект"
-                    break;
-                }
-            }
-        }
+        //             // =================================================================
+        //             // ИСПРАВЛЕНИЕ: Просто добавляем кнопку в конец меню без угадывания имен!
+        //             // =================================================================
+        //             fileMenu->addSeparator();            // Тонкая разделительная черта Breeze
+        //             fileMenu->addAction(actionCloseProject); // Вставляем пункт "Закрыть проект"
+        //             break;
+        //         }
+        //     }
+        // }
 
 
-        // Резервный вариант: если меню "Файл" не найдено, выводим элементы на верхнюю панель напрямую
-        if (!attached) {
-            bar->addAction(actionSave);
-            bar->addAction(actionSaveAll);
-            bar->addMenu(recentProjectsMenu);
-        }
-    }
+        // // Резервный вариант: если меню "Файл" не найдено, выводим элементы на верхнюю панель напрямую
+        // if (!attached) {
+        //     bar->addAction(actionSave);
+        //     bar->addAction(actionSaveAll);
+        //     bar->addMenu(recentProjectsMenu);
+        // }
+  //  }
 
 
     // 2. Инициализируем массив скрытых действий (экшенов) для недавних проектов
@@ -1345,17 +1569,34 @@ bool Neuro_programm::bootstrapProjectStructure(const QString &rootPath)
 
 void Neuro_programm::open_project()
 {
-    // 1. ОТКРЫВАЕМ СИСТЕМНЫЙ ДИАЛОГ ВЫБОРА ФАЙЛА ПРОЕКТА
-    QString selectedFile = QFileDialog::getOpenFileName(
-        this,
-        "Открыть проект PyTorch Studio",
-        QDir::homePath(),
-        "Файлы проекта PyTorch Studio (*.pystudio)"
-        );
+    // =========================================================================
+    // 1. ВЫЗОВ ОРИГИНАЛЬНОГО ОКНА KDE PLASMA НАПРЯМУЮ ЧЕРЕЗ СИСТЕМНЫЙ КАНАЛ KDIALOG
+    // =========================================================================
+    QProcess kdialogProcess;
+    QStringList arguments;
+    arguments << "--title" << "Открыть проект PyTorch Studio"
+              << "--getopenfilename" << QDir::homePath()
+              << "*.pystudio | Файлы проекта PyTorch Studio (*.pystudio)";
 
+    // Запускаем процесс kdialog (нативный компонент KDE Plasma)
+    kdialogProcess.start("kdialog", arguments);
+
+    // Ждем, пока пользователь выберет файл (таймаут 60 секунд)
+    if (!kdialogProcess.waitForFinished(60000)) {
+        kdialogProcess.kill();
+        return;
+    }
+
+    // Считываем чистый путь к выбранному файлу, удаляя лишние символы переноса строки
+    QString selectedFile = QString::fromUtf8(kdialogProcess.readAllStandardOutput()).trimmed();
+
+    // Если пользователь закрыл окно kdialog или нажал "Отмена" — безопасно выходим
     if (selectedFile.isEmpty()) return;
 
-    // 2. ОТКРЫВАЕМ И ЧИТАЕМ JSON КОНФИГУРАЦИЮ
+
+    // =========================================================================
+    // 2. ОТКРЫВАЕМ И ЧИТАЕМ JSON КОНФИГУРАЦИЮ ФАЙЛА ПРОЕКТА
+    // =========================================================================
     QFile configFile(selectedFile);
     if (!configFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
         sendSystemNotification("Ошибка открытия", "❌ Не удалось прочитать файл проекта");
@@ -1373,7 +1614,10 @@ void Neuro_programm::open_project()
 
     QJsonObject configObject = jsonDoc.object();
 
-    // 3. ИЗВЛЕКАЕМ СОХРАНЕННЫЕ ДАННЫЕ ПРОЕКТА (ОЧИЩЕНО ОТ ДУБЛИКАТОВ)
+
+    // =========================================================================
+    // 3. ИЗВЛЕКАЕМ СОХРАНЕННЫЕ ДАННЫЕ ПРОЕКТА
+    // =========================================================================
     QString projName     = configObject["project_name"].toString("New_Project");
     QString datasetPath  = configObject["dataset_path"].toString("");
     QString architecture = configObject["architecture"].toString("CUDA");
@@ -1390,41 +1634,40 @@ void Neuro_programm::open_project()
 
 
     // =========================================================================
-    // 4. КРИТИЧЕСКИЙ ШАГ: СНАЧАЛА ИНИЦИАЛИЗИРУЕМ МОДЕЛЬ ДЕРЕВА И СТЭК-ВИДЖЕТ!
+    // 4. ИНИЦИАЛИЗИРУЕМ МОДЕЛЬ ДЕРЕВА И СТЭК-ВИДЖЕТ ПАНЕЛИ
     // =========================================================================
     initProjectTreeModel(fullProjectPath);
 
-    // Синхронизируем фокус на главную страницу (индекс 0)
+    // Синхронизируем фокус главного экрана на Панель обучения (индекс 0)
     ui->centralStackedWidget->setCurrentIndex(0);
     if (ui->fileComboBox) ui->fileComboBox->setCurrentIndex(0);
     if (ui->openFilesListWidget) ui->openFilesListWidget->setCurrentRow(0);
 
+
     // =========================================================================
-    // 5. ВЫПОЛНЕНИЕ ВАШЕГО ГЛАВНОГО УСЛОВИЯ: ОБЯЗАТЕЛЬНЫЙ ПЕРЕОПРОС ЖЕЛЕЗА ПРИ ОТКРЫТИИ
+    // 5. ОБЯЗАТЕЛЬНЫЙ ПЕРЕОПРОС ЖЕЛЕЗА ДЛЯ ЭТОГО КОНКРЕТНОГО ПК
     // =========================================================================
-    // Этот метод полностью очистит comboDevice и заполнит его РЕАЛЬНЫМИ картами ПК прямо сейчас!
     detectCudaDevices();
 
-    // 6. СИНХРОНИЗАЦИЯ С СХРАНЕННЫМИ НАСТРОЙКАМИ
-    // Выставляем числовые значения в счетчики
-    // if (ui->spinBoxEpochs) ui->spinBoxEpochs->setValue(epochs);
-    // if (ui->spinBoxLR) ui->spinBoxLR->setValue(lr);
 
-    // Выставляем размер батча
-    // if (ui->comboBatchSize) {
-    //     int batchIdx = ui->comboBatchSize->findText(QString::number(batchSize));
-    //     if (batchIdx != -1) ui->comboBatchSize->setCurrentIndex(batchIdx);
-    // }
+    // =========================================================================
+    // 6. СИНХРОНИЗАЦИЯ ИНТЕРФЕЙСА С СОХРАНЕННЫМИ НАСТРОЙКАМИ JSON
+    // =========================================================================
+    if (ui->spinBoxEpochs) ui->spinBoxEpochs->setValue(epochs);
+    if (ui->spinBoxLR) ui->spinBoxLR->setValue(lr);
 
-    // УМНАЯ ПРОВЕРКА ДЕВАЙСА: Проверяем, доступно ли на ЭТОМ компьютере сохраненное устройство
+    // Выставляем сохраненный размер батча нейросети
+    if (ui->comboBatchSize) {
+        int batchIdx = ui->comboBatchSize->findText(QString::number(batchSize));
+        if (batchIdx != -1) ui->comboBatchSize->setCurrentIndex(batchIdx);
+    }
+
+    // УМНАЯ ПРОВЕРКА ДЕВАЙСА: Проверяем, доступна ли на ТЕКУЩЕМ компьютере сохраненная видеокарта CUDA
     if (ui->comboDevice) {
         int deviceIdx = ui->comboDevice->findText(savedDevice);
         if (deviceIdx != -1) {
-            // Если сохраненная карта (например, cuda:0) найдена в системе — включаем её
             ui->comboDevice->setCurrentIndex(deviceIdx);
         } else {
-            // Если в проекте была записана CUDA, но на ЭТОМ ПК видеокарты нет —
-            // принудительно сбрасываем на безопасный cpu и выдаем D-Bus предупреждение!
             ui->comboDevice->setCurrentIndex(0);
             sendSystemNotification("Конфигурация железа",
                                    "⚠️ Предупреждение: Сохраненное устройство CUDA недоступно на этом ПК. Сброшено на CPU.");
@@ -1436,7 +1679,7 @@ void Neuro_programm::open_project()
         panelOther->setCurrentProjectPath(fullProjectPath);
     }
 
-    // Обновляем заголовок главного окна ИИ-студии
+    // Обновляем заголовок главного окна ИИ-студии и уведомляем пользователя
     this->setWindowTitle(QString("PyTorch Studio - %1 [%2]").arg(projName).arg(fullProjectPath));
     sendSystemNotification("PyTorch Studio", QString("✔ Проект '%1' успешно загружен").arg(projName));
     addProjectToRecent(selectedFile);
@@ -1445,12 +1688,11 @@ void Neuro_programm::open_project()
 
 void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
 {
-    // Извлекаем абсолютный путь к файлу из модели дерева проекта (Ваш рабочий код из PDF)
+    // 1. ИЗВЛЕКАЕМ АБСОЛЮТНЫЙ ПУТЬ К ФАЙЛУ ИЗ МОДЕЛИ ДЕРЕВА (Ваш рабочий код)
     QString filePath = projectModel->fileInfo(index).absoluteFilePath();
     QFile file(filePath);
-
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qCritical() << "🔴 [ОШИБКА] Не удалось физически прочитать файл с жесткого диска:" << filePath;
+        qCritical() << " [ОШИБКА] Не удалось физически прочитать файл с диска:" << filePath;
         return;
     }
 
@@ -1458,7 +1700,7 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
     QString fileContent = QString::fromUtf8(file.readAll());
     file.close();
 
-    // Проверяем, не открыт ли этот документ уже в соседней вкладке StackedWidget (Ваш код из PDF)
+    // 2. ПРОВЕРЯЕМ, НЕ ОТКРЫТ ЛИ ЭТОТ ДОКУМЕНТ УЖЕ В СОСЕДНЕЙ ВКЛАДКЕ
     for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
         QWidget *page = ui->centralStackedWidget->widget(i);
         if (page && page->objectName() == filePath) {
@@ -1473,24 +1715,20 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         }
     }
 
-    // Создаем новую графическую страницу-контейнер внутри stacked-панели
+    // 3. СОЗДАЕМ НОВУЮ ГРАФИЧЕСКУЮ СТРАНИЦУ-КОНТЕЙНЕР ВНУТРИ STACKED-ПАНЕЛИ
     QWidget *newPage = new QWidget(ui->centralStackedWidget);
     QVBoxLayout *layout = new QVBoxLayout(newPage);
     layout->setContentsMargins(0, 0, 0, 0);
 
-    // Инициализируем наш кастомный текстовый редактор автодополнения
+    // Инициализируем кастомный текстовый редактор автодополнения
     CodeEditor *editor = new CodeEditor(newPage);
 
-    // =========================================================================
-    // ЖЕСТКАЯ АРХИТЕКТУРНАЯ СВЯЗКА ПУТЕЙ Qt C++:
-    // Записываем абсолютный путь к файлу в объектное имя самого виджета!
-    // Благодаря этому метод keyPressEvent всегда будет мгновенно знать свой URI.
-    // =========================================================================
+    // Записываем абсолютный путь к файлу в объектное имя самого виджета для связки путей
     editor->setObjectName(filePath);
-    newPage->setObjectName(filePath); // Дублируем в контейнер страницы
+    newPage->setObjectName(filePath);
 
-    // Настраиваем Breeze-параметры отображения кода на экране ноутбука
-    editor->setLineWrapMode(QPlainTextEdit::NoWrap); // Отключаем ломающий синтаксис Python перенос строк
+    // Настраиваем параметры отображения кода на экране (отключаем ломающий перенос строк)
+    editor->setLineWrapMode(QPlainTextEdit::NoWrap);
     layout->addWidget(editor);
 
     // Добавляем созданную страницу в StackedWidget и выводим её на экран
@@ -1500,48 +1738,88 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
     // Загружаем в редактор считанный код Python-файла
     editor->setPlainText(fileContent);
 
-    // 1. Проверяем или запускаем сервер Jedi (если он запущен при открытии проекта — сработает замок)
+    // 4. ИНИЦИАЛИЗИРУЕМ СЕРВЕР JEDI И ОТПРАВЛЯЕМ DIDOPEN ЗАПРОС
     this->initLspServer();
 
-    // 2. ======================================================================
-    // ГАРАНТИРОВАННЫЙ ВЫСТРЕЛ DIDOPEN ПРИ РЕАЛЬНОМ ОТКРЫТИИ ВКЛАДКИ ФАЙЛА!
-    // Мы берем живой, непустой fileContent с диска, намертво очищаем его от мусорных
-    // переносов строк '\r' и принудительно скармливаем серверу Jedi через метод sendLspRequest!
-    // ======================================================================
     if (this->lspProcess && this->lspProcess->state() == QProcess::Running)
     {
         QJsonObject openParams;
         QJsonObject textDocument;
 
-        // Собираем идеальный каноничный URI-путь через QUrl (file:///) символ в символ
+        // Собираем идеальный каноничный URI-путь через QUrl (file:///)
         textDocument["uri"] = QUrl::fromLocalFile(filePath).toString();
         textDocument["languageId"] = "python";
-
-        this->globalLspDocVersion = 1; // Устанавливаем стартовую сквозную версию документа по стандарту LSP
+        this->globalLspDocVersion = 1;
         textDocument["version"] = this->globalLspDocVersion;
 
-        // Очищаем стартовый буфер текста от скрытых DOS-переносов строк \r для точной сетки координат
+        // Очищаем стартовый буфер текста от скрытых DOS-переносов строк \r
         QString cleanStartText = fileContent;
         cleanStartText.remove('\r');
         textDocument["text"] = cleanStartText;
-
         openParams["textDocument"] = textDocument;
 
-        // Отправляем официальный didOpen. Теперь Jedi примет его со 100% успешностью!
+        // Отправляем официальный didOpen запрос серверу Jedi
         this->sendLspRequest("textDocument/didOpen", openParams);
-
-        std::cerr << "🔓 [LSP СИСТЕМНЫЙ УСПЕХ] Файл официально ИНДЕКСИРОВАН в памяти Jedi с текстом! Путь: "
-                  << filePath.toStdString() << std::endl;
-        std::cerr.flush();
     }
 
-    // Добавляем имя файла в верхний комбобокс открытых документов (Ваш рабочий код из PDF)
+    // =========================================================================
+    // 5. НАПОЛНЕНИЕ СПИСКОВ И ЖЕСТКАЯ АКТИВАЦИЯ КОНТЕЙНЕРА НА ЭКРАНЕ
+    // =========================================================================
+    QFileInfo info(filePath);
+
+    // Шаг А: Добавляем имя файла в нижний боковой список документов, если он есть
+    if (ui->openFilesListWidget) {
+        // Проверяем, нет ли уже такого файла в списке, чтобы не дублировать строки
+        bool exists = false;
+        for (int i = 0; i < ui->openFilesListWidget->count(); ++i) {
+            if (ui->openFilesListWidget->item(i)->data(Qt::UserRole).toString() == filePath) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            QListWidgetItem *newDocItem = new QListWidgetItem(info.fileName(), ui->openFilesListWidget);
+            newDocItem->setData(Qt::UserRole, filePath);
+        }
+    }
+
+    // Шаг Б: Добавляем имя файла в верхний комбобокс открытых документов
     if (ui->fileComboBox) {
-        QFileInfo info(filePath);
         ui->fileComboBox->addItem(info.fileName(), filePath);
         ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
     }
 
+    // ШАГ В (ГЛАВНЫЙ СУПЕР-ФИКС ГЕОМЕТРИИ):
+    // Принудительно разворачиваем нижний контейнер, ломая любые запреты из Qt Designer
+    if (ui->openFilesContainer && ui->leftVerticalSplitter)
+    {
+        // 1. Делаем контейнер видимым
+        ui->openFilesContainer->setVisible(true);
+
+        // 2. ЖЕСТКО СТИРАЕМ ОГРАНИЧЕНИЯ ДИЗАЙНЕРА:
+        // Переключаем политику размеров нижнего контейнера на Ignored по вертикали.
+        // Это заставит сплиттер беспрекословно принять те размеры, которые мы укажем в коде!
+        ui->openFilesContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);
+        ui->openFilesContainer->setMaximumHeight(10000); // Сбрасываем жесткий лимит высоты, если он был
+
+        // 3. Расчет высоты
+        int totalHeight = ui->leftVerticalSplitter->height();
+        if (totalHeight <= 0) totalHeight = this->height() - 150; // Страховка на основе высоты главного окна
+
+        // Выделяем под дерево проекта верхнюю часть, а нижнему списку документов отдаем 180 пикселей
+        int topSize = totalHeight - 180;
+        if (topSize < 100) topSize = 350; // Защита от ухода в отрицательные пиксели
+
+        // Принудительно заталкиваем массив размеров в сплиттер
+        ui->leftVerticalSplitter->setSizes(QList<int>({topSize, 180}));
+
+        // ИСПРАВЛЕННЫЙ ФИКС ОБНОВЛЕНИЯ: Принудительно пересчитываем сетку виджета
+        ui->leftVerticalSplitter->updateGeometry();
+        ui->leftVerticalSplitter->refresh();
+        ui->leftVerticalSplitter->update();
+    }
+
+    // Обновляем шрифты интерфейса
     this->applyGlobalFonts();
 }
 
@@ -1713,37 +1991,57 @@ void Neuro_programm::sendSystemNotification(const QString &title, const QString 
     notifyInterface.callWithArgumentList(QDBus::NoBlock, "Notify", args);
 }
 
-void Neuro_programm::initProjectTreeModel(const QString &path)
+void Neuro_programm::initProjectTreeModel(QString path)
 {
-    // Если модель уже существовала от старого проекта — безопасно удаляем её из памяти
+    QString safePath = path.trimmed();
+    if (safePath.isEmpty() || safePath == "") {
+        qWarning() << " [LSP ПРЕДУПРЕЖДЕНИЕ] Вызван initProjectTreeModel с пустым путем. Пропуск.";
+        return;
+    }
+
     if (projectModel) {
         projectModel->deleteLater();
         projectModel = nullptr;
     }
 
-    // 1. Создаем модель строго в момент реального открытия или создания проекта!
     projectModel = new QFileSystemModel(this);
     projectModel->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::AllDirs);
-
-    // 2. Накатываем фильтр скрытия venv и показа всех остальных файлов в корне
     projectModel->setNameFilters(QStringList() << "[^v]*" << "v[^e]*" << "ve[^n]*" << "ven[^v]*" << "venv?*");
-    projectModel->setNameFilterDisables(false); // Полное скрытие из видимости
+    projectModel->setNameFilterDisables(false);
+    projectModel->setRootPath(safePath);
 
-    // 3. Задаем корень сканирования файловой системы
-    projectModel->setRootPath(path);
-
-    // 4. Монтируем модель к виджету дерева на экране
     ui->treeView->setModel(projectModel);
 
-    // 5. Очищаем геометрию колонок (Стиль профессиональной IDE)
-    QModelIndex rootIndex = projectModel->index(path);
+    QModelIndex rootIndex = projectModel->index(safePath);
     ui->treeView->setRootIndex(rootIndex);
-    ui->treeView->expand(rootIndex); // Автоматически раскрываем корневую папку
+    ui->treeView->expand(rootIndex);
 
-    for (int i = 1; i < projectModel->columnCount(); ++i) {
-        ui->treeView->hideColumn(i); // Оставляем видимым строго имя файла
+    if (projectModel != nullptr && ui->treeView->model() != nullptr)
+    {
+        for (int i = 1; i < projectModel->columnCount(); ++i) {
+            ui->treeView->hideColumn(i);
+        }
+    }
+
+    // =========================================================================
+    // БЕЗОПАСНЫЙ И ПУЛЕНЕПРОБИВАЕМЫЙ ФИКС СКРЫТИЯ ЗАЗОРА (БЕЗ УДАЛЕНИЯ ОБЪЕКТА)
+    // =========================================================================
+    if (ui->treeView->header())
+    {
+        // 1. Скрываем текстовое поле заголовка ("Имя")
+        ui->treeView->setHeaderHidden(true);
+
+        // 2. Схлопываем высоту скрытого заголовка в 0 пикселей,
+        // чтобы он физически больше не расталкивал пустое пространство!
+        ui->treeView->header()->setMaximumHeight(0);
+        ui->treeView->header()->setMinimumSectionSize(0);
+        ui->treeView->header()->resizeSections(QHeaderView::Fixed);
+
+        // 3. Отключаем любые отступы рамки заголовка
+        ui->treeView->header()->setStyleSheet("QHeaderView { margin: 0px; padding: 0px; height: 0px; border: none; }");
     }
 }
+
 
 void Neuro_programm::sendChatMessageToAI()
 {
@@ -2608,15 +2906,6 @@ void Neuro_programm::onCloseProjectClicked()
     qInfo() << "✔ [IDE] Проект успешно закрыт. Интерфейс переведен в стерильное стартовое состояние.";
     sendSystemNotification("PyTorch Studio", "📁 Проект успешно закрыт.");
 }
-
-#include <QProcessEnvironment>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
-#include <QUrl>
-#include <QFileInfo>
-#include <QCoreApplication>
-#include <iostream>
 
 void Neuro_programm::initLspServer()
 {
@@ -3751,7 +4040,7 @@ void Neuro_programm::applyGlobalFonts()
                             "/* КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Находим шапку левого дока и жестко отодвигаем её под кнопки! */"
                             "QDockWidget, QTreeView, QTreeWidget, QListWidget, #leftDockWidget { "
                             "   background-color: " + containerBgHex + " !important; "
-                           "   margin-top: 36px !important; " // Отодвигает надпись "Проект" ровно под линию кнопок
+                           //"   margin-top: 36px !important; " // Отодвигает надпись "Проект" ровно под линию кнопок
                            "}"
                            "QGroupBox QTreeView, QTabWidget QTreeView { margin-top: 0px !important; }" // Сброс для внутренних окон
 
@@ -3974,4 +4263,117 @@ void Neuro_programm::showEvent(QShowEvent *event) {
 
     // Заставляем Qt гарантированно обновить интерфейс на экране
     this->update();
+}
+
+void Neuro_programm::updateWidget3Padding()
+{
+    if (!ui->widget_3 || !ui->leftDockWidget) return;
+
+    int currentDockWidth = 0;
+
+    // 1. Сохраняем идеальное выравнивание по левому краю QTextBrowser
+    if (ui->leftDockWidget->isVisible() && !ui->leftDockWidget->isFloating()) {
+        currentDockWidth = ui->leftDockWidget->frameGeometry().width();
+        currentDockWidth += 28;
+    }
+
+    // 2. Извлекаем или принудительно создаем горизонтальный макет
+    QHBoxLayout *layout = qobject_cast<QHBoxLayout*>(ui->widget_3->layout());
+    if (!layout) {
+        layout = new QHBoxLayout(ui->widget_3);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(10);
+        layout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+        // Находим комбобоксы и кнопку внутри widget_3
+        QComboBox *fileCombo = ui->widget_3->findChild<QComboBox*>("fileComboBox");
+        QComboBox *deviceCombo = ui->widget_3->findChild<QComboBox*>("comboDevice");
+        QPushButton *anyButton = ui->widget_3->findChild<QPushButton*>();
+
+        // СТИЛЬ ПОЛНОСТЬЮ ПЛОСКИХ КОМБОБОКСОВ С ПРИНУДИТЕЛЬНОЙ СТРЕЛОЧКОЙ
+        QString flatComboStyle =
+            "QComboBox {"
+            "    border: 1px solid transparent;"
+            "    background-color: rgba(0, 0, 0, 0);" // Прозрачный фон
+            "    border-radius: 4px;"
+            "    padding: 4px 26px 4px 8px;"
+            "    min-width: 150px;"
+            "    color: #232629;"
+            "}"
+            "QComboBox:hover {"
+            "    background-color: rgba(61, 174, 233, 0.1);" // Синяя подсветка Breeze
+            "    border: 1px solid #3daee9;"
+            "}"
+            // Принудительно выделяем область под стрелочку, делая её видимой
+            "QComboBox::drop-down {"
+            "    subcontrol-origin: padding;"
+            "    subcontrol-position: top right;"
+            "    width: 20px;"
+            "    border: none;"
+            "    background: transparent;"
+            "}"
+            // ФОРСИРОВАННАЯ ОТРИСОВКА СТРЕЛОЧКИ-ТРЕУГОЛЬНИКА
+            "QComboBox::down-arrow {"
+            "    border-left: 4px solid transparent !important;"
+            "    border-right: 4px solid transparent !important;"
+            "    border-top: 5px solid #232629 !important;" // Четкий темный треугольник
+            "    width: 0px !important;"
+            "    height: 0px !important;"
+            "    visibility: visible !important;" // Игнорируем попытки Qt скрыть стрелку
+            "}"
+            "QComboBox QAbstractItemView {"
+            "    border: 1px solid #babdbf;"
+            "    background-color: #ffffff;"
+            "    selection-background-color: #3daee9;"
+            "    selection-color: #ffffff;"
+            "}";
+
+        // СТИЛЬ ДЛЯ СОВЕРШЕННО ПЛОСКОЙ КНОПКИ
+        QString flatButtonStyle =
+            "QPushButton {"
+            "    border: 1px solid transparent;"
+            "    background: transparent;"
+            "    border-radius: 4px;"
+            "    padding: 4px 12px;"
+            "    color: #232629;"
+            "    font-weight: bold;"
+            "}"
+            "QPushButton:hover {"
+            "    background-color: rgba(61, 174, 233, 0.1);"
+            "    border: 1px solid #3daee9;"
+            "}"
+            "QPushButton:pressed {"
+            "    background-color: rgba(61, 174, 233, 0.2);"
+            "}";
+
+        if (fileCombo) {
+            fileCombo->setStyleSheet(flatComboStyle);
+            layout->addWidget(fileCombo);
+        }
+
+        if (deviceCombo) {
+            deviceCombo->setStyleSheet(flatComboStyle);
+            layout->addWidget(deviceCombo);
+        }
+
+        if (anyButton) {
+            anyButton->setStyleSheet(flatButtonStyle);
+            layout->addWidget(anyButton);
+        }
+
+        layout->addStretch();
+    }
+
+    // 3. Применяем проверенный динамический отступ
+    layout->setContentsMargins(currentDockWidth, 0, 0, 0);
+    layout->invalidate();
+    layout->activate();
+}
+
+void Neuro_programm::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+
+    // Корректируем левый отступ widget_3 вслед за изменением окна
+    updateWidget3Padding();
 }
