@@ -764,6 +764,12 @@ QListWidget#quickActionsList::item:selected {
     <property name="title">
      <string>Правка</string>
     </property>
+    <addaction name="action"/>
+    <addaction name="action_2"/>
+    <addaction name="action_5"/>
+    <addaction name="action_6"/>
+    <addaction name="action_7"/>
+    <addaction name="action_8"/>
    </widget>
    <widget class="QMenu" name="menu_3">
     <property name="title">
@@ -929,6 +935,36 @@ QListWidget#quickActionsList::item:selected {
   <action name="action_settngs">
    <property name="text">
     <string>Настройки</string>
+   </property>
+  </action>
+  <action name="action">
+   <property name="text">
+    <string>Отменить действие</string>
+   </property>
+  </action>
+  <action name="action_2">
+   <property name="text">
+    <string>Повторить действие</string>
+   </property>
+  </action>
+  <action name="action_5">
+   <property name="text">
+    <string>Вырезать</string>
+   </property>
+  </action>
+  <action name="action_6">
+   <property name="text">
+    <string>КОпировать</string>
+   </property>
+  </action>
+  <action name="action_7">
+   <property name="text">
+    <string>Вставить</string>
+   </property>
+  </action>
+  <action name="action_8">
+   <property name="text">
+    <string>Удалить</string>
    </property>
   </action>
  </widget>

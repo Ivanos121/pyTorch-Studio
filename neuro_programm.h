@@ -99,6 +99,7 @@ private slots:
     void readLspResponse();
     void showCompletionMenuInGuiThread(const QStringList &completions);
     void on_actionOpenSettings_triggered();
+    void triggerEditAction();
 
 private:
     Start_progect *rsc;
@@ -139,5 +140,7 @@ private:
     bool m_dragging = false;
     class QSpacerItem *leftPaddingSpacer = nullptr; // Указатель на левый отступ фальш-панели
     void updateWidget3Padding();
+    QString currentFilePath;
+    void updateTabName();
 };
 #endif // NEURO_PROGRAMM_H

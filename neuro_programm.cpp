@@ -72,6 +72,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 1. Отключаем нативную рамку ОС
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
 
+    ui->centralStackedWidget->setCurrentIndex(0);
+
     recentProjectsMenu = new QMenu(" Открыть недавние", this);
     for (int i = 0; i < MaxRecentFiles; ++i) {
         recentProjectActions[i] = new QAction(this);
@@ -145,6 +147,60 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
 
     QMenu *editMenu = customMenuBar->addMenu("Правка");
+
+    // =========================================================================
+    // НАПОЛНЕНИЕ МЕНЮ "ПРАВКА" (Undo, Redo, Cut, Copy, Paste, Delete)
+    // =========================================================================
+
+    // 1. Создаем экшены, вешаем иконки (по желанию), шорткаты и объектные имена
+    QAction *actionUndo = new QAction("Отменить", this);
+    actionUndo->setShortcut(QKeySequence::Undo); // Автоматически выставит Ctrl+Z
+    actionUndo->setObjectName("actionUndo");
+    connect(actionUndo, &QAction::triggered, this, &Neuro_programm::triggerEditAction);
+
+    QAction *actionRedo = new QAction("Повторить", this);
+    actionRedo->setShortcut(QKeySequence::Redo); // Автоматически выставит Ctrl+Y (или Ctrl+Shift+Z)
+    actionRedo->setObjectName("actionRedo");
+    connect(actionRedo, &QAction::triggered, this, &Neuro_programm::triggerEditAction);
+
+    QAction *actionCut = new QAction("Вырезать", this);
+    actionCut->setShortcut(QKeySequence::Cut); // Ctrl+X
+    actionCut->setObjectName("actionCut");
+    connect(actionCut, &QAction::triggered, this, &Neuro_programm::triggerEditAction);
+
+    QAction *actionCopy = new QAction("Копировать", this);
+    actionCopy->setShortcut(QKeySequence::Copy); // Ctrl+C
+    actionCopy->setObjectName("actionCopy");
+    connect(actionCopy, &QAction::triggered, this, &Neuro_programm::triggerEditAction);
+
+    QAction *actionPaste = new QAction("Вставить", this);
+    actionPaste->setShortcut(QKeySequence::Paste); // Ctrl+V
+    actionPaste->setObjectName("actionPaste");
+    connect(actionPaste, &QAction::triggered, this, &Neuro_programm::triggerEditAction);
+
+    QAction *actionDelete = new QAction("Удалить", this);
+    actionDelete->setShortcut(QKeySequence::Delete); // Delete
+    actionDelete->setObjectName("actionDelete");
+    connect(actionDelete, &QAction::triggered, this, &Neuro_programm::triggerEditAction);
+
+    QAction *actionSelectAll = new QAction("Выделить всё", this);
+    actionSelectAll->setShortcut(QKeySequence::SelectAll); // Автоматически назначит Ctrl+A
+    actionSelectAll->setObjectName("actionSelectAll");
+    connect(actionSelectAll, &QAction::triggered, this, &Neuro_programm::triggerEditAction);
+
+    // 2. Добавляем созданные пункты в меню "Правка" с разделителями
+    editMenu->addAction(actionUndo);
+    editMenu->addAction(actionRedo);
+    editMenu->addSeparator();
+    editMenu->addAction(actionCut);
+    editMenu->addAction(actionCopy);
+    editMenu->addAction(actionPaste);
+    editMenu->addSeparator();
+    editMenu->addAction(actionDelete);
+    editMenu->addAction(actionSelectAll);
+
+
+
 
     QMenu *toolsMenu = customMenuBar->addMenu("Инструменты");
     toolsMenu->addAction(ui->action_settngs);
@@ -4376,4 +4432,81 @@ void Neuro_programm::resizeEvent(QResizeEvent *event)
 
     // Корректируем левый отступ widget_3 вслед за изменением окна
     updateWidget3Padding();
+}
+
+void Neuro_programm::triggerEditAction()
+{
+    // Получаем указатель на экшен, который вызвал этот слот
+    QAction *senderAction = qobject_cast<QAction*>(sender());
+    if (!senderAction) return;
+
+    // Находим виджет, который сейчас находится в фокусе ввода
+    QWidget *focusedWidget = QApplication::focusWidget();
+    if (!focusedWidget) return;
+
+    QString actionName = senderAction->objectName();
+
+    // Сценарий 1: Фокус на текстовом редакторе (QTextEdit или QPlainTextEdit)
+    // Подходит для окон с кодом, логов, терминалов
+    if (QPlainTextEdit *textEdit = qobject_cast<QPlainTextEdit*>(focusedWidget)) {
+        if (actionName == "actionUndo")        textEdit->undo();
+        else if (actionName == "actionRedo")   textEdit->redo();
+        else if (actionName == "actionCut")    textEdit->cut();
+        else if (actionName == "actionCopy")   textEdit->copy();
+        else if (actionName == "actionPaste")  textEdit->paste();
+        else if (actionName == "actionDelete") textEdit->textCursor().deleteChar();
+        else if (actionName == "actionSelectAll") textEdit->selectAll();
+    }
+    else if (QTextEdit *richTextEdit = qobject_cast<QTextEdit*>(focusedWidget)) {
+        if (actionName == "actionUndo")        richTextEdit->undo();
+        else if (actionName == "actionRedo")   richTextEdit->redo();
+        else if (actionName == "actionCut")    richTextEdit->cut();
+        else if (actionName == "actionCopy")   richTextEdit->copy();
+        else if (actionName == "actionPaste")  richTextEdit->paste();
+        else if (actionName == "actionDelete") richTextEdit->textCursor().deleteChar();
+        else if (actionName == "actionSelectAll") richTextEdit->selectAll();
+    }
+    // Сценарий 2: Фокус на однострочном поле ввода (QLineEdit)
+    // Например, при переименовании файлов или поиске
+    else if (QLineEdit *lineEdit = qobject_cast<QLineEdit*>(focusedWidget)) {
+        if (actionName == "actionUndo")        lineEdit->undo();
+        else if (actionName == "actionRedo")   lineEdit->redo();
+        else if (actionName == "actionCut")    lineEdit->cut();
+        else if (actionName == "actionCopy")   lineEdit->copy();
+        else if (actionName == "actionPaste")  lineEdit->paste();
+        else if (actionName == "actionDelete") lineEdit->backspace();
+        else if (actionName == "actionSelectAll") lineEdit->selectAll();
+    }
+    // Сценарий 3: Фокус на списках (QListWidget, QTreeView)
+    // Если нужно обрабатывать физическое удаление файлов/элементов из проекта
+    else if (actionName == "actionDelete") {
+        if (focusedWidget == ui->openFilesListWidget) {
+            // Вызываем ваш собственный метод закрытия вкладки/файла
+            // Например: onCloseCurrentTab();
+        }
+        else if (focusedWidget == ui->treeView) {
+            // Вызываем метод удаления файла с диска / из дерева проекта
+            // Например: onDeleteFileFromProject();
+        }
+    }
+}
+
+void Neuro_programm::updateTabName()
+{
+    QString baseName;
+
+    if (!currentFilePath.isEmpty())
+    {
+        // QFileInfo автоматически извлекает "script.py" из "/home/user/path/script.py"
+        QFileInfo fileInfo(currentFilePath);
+        baseName = fileInfo.fileName();
+    } else {
+        baseName = "Без названия";
+    }
+
+    // Формируем имя с маркером изменения [*]
+    QString displayName = baseName + "[*]";
+
+    // Если файл открыт в главном окне:
+    this->setWindowTitle(displayName);
 }
