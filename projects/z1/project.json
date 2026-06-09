@@ -1,0 +1,6 @@
+{
+    "batch_size": 32,
+    "device": 0,
+    "epochs": 10,
+    "learning_rate": 0.001
+}

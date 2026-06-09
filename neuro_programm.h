@@ -57,6 +57,8 @@ protected slots:
 
     void openNewFileInEditor(const QString &absoluteFilePath);
     void open_settings();
+    void onOpenProjectMenuTriggered(); // Для открытия .pystudio
+    void onSaveProjectMenuTriggered(); // Для сохранения .pystudio
 
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
@@ -79,8 +81,7 @@ private:
     void onQuickActionTriggered(QListWidgetItem *item);
     QPushButton *btnStatusAI = nullptr;
     void applyThemeColors(bool isDarkTheme);
-
-
+    QString getSafeSaveFolderPath();
 
 private slots:
     void onFileDoubleClicked(const QModelIndex &index);
@@ -141,6 +142,12 @@ private:
     class QSpacerItem *leftPaddingSpacer = nullptr; // Указатель на левый отступ фальш-панели
     void updateWidget3Padding();
     QString currentFilePath;
+    QTimer *monitorTimer;
     void updateTabName();
+    void setFileModifiedState(CodeEditor *editor, bool modified);
+    bool archiveProject(const QString &sourceDir, const QString &outputSavePath);
+    bool unarchiveProject(const QString &saveFilePath, const QString &targetExtractDir);
+    void saveProjectParameters(const QString &tmpDir);
+    void loadProjectParameters(const QString &tmpDir);
 };
 #endif // NEURO_PROGRAMM_H

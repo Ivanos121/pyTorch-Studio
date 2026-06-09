@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE QtCreatorProject>
-<!-- Written by QtCreator 19.0.2, 2026-06-08T03:44:41. -->
+<!-- Written by QtCreator 19.0.2, 2026-06-09T04:49:10. -->
 <qtcreator>
  <data>
   <variable>EnvironmentId</variable>
@@ -102,8 +102,8 @@
    <value type="qlonglong" key="ProjectExplorer.Target.ActiveRunConfiguration">1</value>
    <valuemap type="QVariantMap" key="ProjectExplorer.Target.BuildConfiguration.0">
     <value type="int" key="EnableQmlDebugging">0</value>
-    <value type="QString" key="ProjectExplorer.BuildConfiguration.BuildDirectory">/home/elf/neuro_programm/neuro/build/Desktop-u041eu0442u043bu0430u0434u043au0430</value>
-    <value type="QString" key="ProjectExplorer.BuildConfiguration.BuildDirectory.shadowDir">/home/elf/neuro_programm/neuro/build/Desktop-u041eu0442u043bu0430u0434u043au0430</value>
+    <value type="QString" key="ProjectExplorer.BuildConfiguration.BuildDirectory">/home/elf/pyTorch-Studio/build</value>
+    <value type="QString" key="ProjectExplorer.BuildConfiguration.BuildDirectory.shadowDir">/home/elf/pyTorch-Studio/build</value>
     <valuemap type="QVariantMap" key="ProjectExplorer.BuildConfiguration.BuildStepList.0">
      <valuemap type="QVariantMap" key="ProjectExplorer.BuildStepList.Step.0">
       <value type="bool" key="ProjectExplorer.BuildStep.Enabled">true</value>
