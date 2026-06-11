@@ -782,8 +782,8 @@ QListWidget#quickActionsList::item:selected {
      <string>Справка</string>
     </property>
     <addaction name="separator"/>
-    <addaction name="action_3"/>
-    <addaction name="action_4"/>
+    <addaction name="action_help"/>
+    <addaction name="aboutProgram"/>
    </widget>
    <addaction name="menu"/>
    <addaction name="menu_2"/>
@@ -902,12 +902,12 @@ QListWidget#quickActionsList::item:selected {
     <string>Выход</string>
    </property>
   </action>
-  <action name="action_3">
+  <action name="action_help">
    <property name="text">
     <string>Справка</string>
    </property>
   </action>
-  <action name="action_4">
+  <action name="aboutProgram">
    <property name="text">
     <string>О программе</string>
    </property>

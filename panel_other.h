@@ -16,18 +16,22 @@ public:
     explicit Panel_other(QWidget *parent = nullptr);
     ~Panel_other();
     void startVenvInstallation(const QString &projectPath, const QString &archType);
-    void setTerminalPageActive();
     void setSearchPageActive();
     void setLogsPageActive();
     void togglePipPanel(bool visible);
     void setCurrentProjectPath(const QString &path);
     void appendLiveLogText(const QString &text);
+    void setTerminalPageActive();
+    void setPipPageActive();
 
 
 signals:
     void pipPanelClosed();
     void signalSendChunkToConsole(const QString &text);
+    void panelClosed();
 
+protected slots:
+    void on_btnClosePanel_clicked();
 private slots:
     void executeCustomPipCommand(const QString &packageName);
 

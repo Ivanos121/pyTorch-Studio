@@ -15,6 +15,8 @@
 #include "panel_other.h"
 #include <QTcpSocket>
 #include "settings.h"
+#include "statusbuttonstyle.h"
+#include "about_program.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -42,6 +44,14 @@ public:
     int globalLspDocVersion = 1;
     int lspRequestId = 0;
     void applyGlobalFonts();
+    struct LspErrorData {
+        int line;
+        int startChar;
+        int endChar;
+        bool isError;
+    };
+    static QList<LspErrorData> globalLspErrors;
+
 
 signals:
     void signalSendChunkToConsole(const QString &text);
@@ -57,8 +67,9 @@ protected slots:
 
     void openNewFileInEditor(const QString &absoluteFilePath);
     void open_settings();
-    void onOpenProjectMenuTriggered(); // Для открытия .pystudio
-    void onSaveProjectMenuTriggered(); // Для сохранения .pystudio
+    void onOpenProjectMenuTriggered();
+    void onSaveProjectMenuTriggered();
+    void open_about_program();
 
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
@@ -105,6 +116,8 @@ private slots:
 private:
     Start_progect *rsc;
     Settings    *rsc2;
+    About_program *rsc3;
+    QWidget *rsc4;
     Panel_other *panelOther;
     QSplitter   *mainVerticalSplitter;
     QPushButton *btnTerminal;
@@ -149,5 +162,6 @@ private:
     bool unarchiveProject(const QString &saveFilePath, const QString &targetExtractDir);
     void saveProjectParameters(const QString &tmpDir);
     void loadProjectParameters(const QString &tmpDir);
+    void sendLspDidOpenForFile(const QString &filePath, const QString &fileContent);
 };
 #endif // NEURO_PROGRAMM_H

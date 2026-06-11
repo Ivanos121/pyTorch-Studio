@@ -21,6 +21,8 @@ Panel_other::Panel_other(QWidget *parent)
     ui->consoleOutput->verticalScrollBar()->setStyle(QStyleFactory::create("Fusion"));
     ui->pipToolBar->setVisible(false);
 
+    connect(ui->btnClose, &QPushButton::clicked, this, &Panel_other::on_btnClosePanel_clicked);
+
 
     // 2. Накатываем пуленепробиваемый плоский StyleSheet
     // Замените финальный блок setStyleSheet для скроллбара в конструкторе Panel_other::Panel_other на этот код:
@@ -384,5 +386,30 @@ void Panel_other::setCurrentProjectPath(const QString &path)
     std::cout.flush();
 }
 
+void Panel_other::on_btnClosePanel_clicked()
+{
+    this->setVisible(false); // Скрываем саму панель
+    emit panelClosed();      // Посылаем сигнал во внешний мир (для Neuro_programm)
+}
 
+// void Panel_other::setTerminalPageActive()
+// {
+//     // Замените stackedWidget на реальное objectName вашего стэка в панели логов
+//     ui->stackedWidget->setCurrentIndex(0);
 
+//     // ПРИНУДИТЕЛЬНО ПРЯЧЕМ PIP-ТЕНДЕР, если открыт обычный терминал
+//     if (ui->pipToolBar) {
+//         ui->pipToolBar->setVisible(false);
+//     }
+// }
+
+void Panel_other::setPipPageActive()
+{
+    // Переключаем на нужный экран с консолью
+    ui->stackedWidget->setCurrentIndex(0);
+
+    // ПРИНУДИТЕЛЬНО ВКЛЮЧАЕМ ВЕРХНЮЮ ПАНЕЛЬ ВВОДА ИМЕНИ ПАКЕТА
+    if (ui->pipToolBar) {
+        ui->pipToolBar->setVisible(true);
+    }
+}

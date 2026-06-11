@@ -4,6 +4,7 @@
 #include "panel_other.h"
 #include "ui_panel_other.h"
 #include "settings.h"
+#include "breezeflatstyle.h"
 
 #include <QFileSystemModel>
 #include <QInputDialog>
@@ -63,6 +64,7 @@
 #include <QMessageBox>
 
 Neuro_programm* Neuro_programm::self = nullptr;
+QList<Neuro_programm::LspErrorData> Neuro_programm::globalLspErrors;
 
 Neuro_programm::Neuro_programm(QWidget *parent)
     : QMainWindow(parent)
@@ -262,8 +264,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     toolsMenu->addAction(ui->action_settngs);
 
     QMenu *helpMenu = customMenuBar->addMenu("Справка");
-    helpMenu->addAction(ui->action_3);
-    helpMenu->addAction(ui->action_4);
+    helpMenu->addAction(ui->action_help);
+    helpMenu->addAction(ui->aboutProgram);
 
     // 6. Собираем элементы в ИДЕАЛЬНОМ вертикальном порядке (Шапка -> Menu -> Файлы)
     topLayout->addWidget(ui->customTitleBarPanel); // 1. Самый верх приложения
@@ -292,6 +294,36 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 8. Корректируем углы док-виджетов
     this->setCorner(Qt::TopLeftCorner, Qt::TopDockWidgetArea);
     this->setCorner(Qt::TopRightCorner, Qt::TopDockWidgetArea);
+
+    connect(ui->action_help, &QAction::triggered, this, [this]() {
+
+        // Если окно еще ни разу не создавалось — инициализируем его
+        if (!rsc4) {
+            // Создаем виджет. Передаем 'this' (главное окно) как родителя,
+            // чтобы при закрытии основной программы память автоматически очищалась.
+            rsc4 = new QWidget(this);
+
+            // ХИТРОСТЬ: Задаем флаг Qt::Window. Он принудительно отрывает виджет
+            // от главного окна и превращает его в полноценное независимое окно ОС.
+            rsc4->setWindowFlags(Qt::Window);
+
+            // Настраиваем базовые свойства окна
+            rsc4->setWindowTitle("Автономный Терминал");
+            rsc4->resize(600, 400);
+
+            // Сюда вы можете добавить любые внутренние компоненты, например:
+            // QVBoxLayout *layout = new QVBoxLayout(mySeparateWindow);
+            // layout->addWidget(new QTextEdit(mySeparateWindow));
+        }
+
+        // Если окно было свернуто или скрыто — восстанавливаем его и выводим на передний план
+        if (rsc4->isMinimized()) {
+            rsc4->showNormal();
+        }
+
+        rsc4->showMaximized();
+        rsc4->activateWindow(); // Переводит фокус ОС на это окно
+    });
 
     // =================================================================
     // НАСТРОЙКА КНОПОК УПРАВЛЕНИЯ ВНУТРИ ШАПКИ
@@ -426,20 +458,16 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     btnLogs->setChecked(false);
     btnTogglePip->setChecked(false);
 
-    // Настраиваем плоский аккуратный стиль в стиле Breeze
-    QString statusBarBtnStyle =
-        "QPushButton { "
-        "   border: none; "
-        "   padding: 4px 12px; "
-        "   background: transparent; "
-        "   font-weight: bold; "
-        "}";
+    btnTerminal->setAutoExclusive(false);
+    btnTerminal->setStyle(new StatusButtonStyle(btnTerminal->style()));
 
-    btnTerminal->setStyleSheet(statusBarBtnStyle);
-    btnSearch->setStyleSheet(statusBarBtnStyle);
-    btnLogs->setStyleSheet(statusBarBtnStyle);
-    btnTogglePip->setStyleSheet(statusBarBtnStyle);
-    btnAIChat->setStyleSheet(statusBarBtnStyle);
+    btnTerminal->setStyleSheet("QPushButton { border: none; padding: 4px 12px; color: #ffffff; font-weight: bold; }");
+
+    //btnTerminal->setStyleSheet(statusBarBtnStyle);
+    // btnSearch->setStyleSheet(statusBarBtnStyle);
+    // btnLogs->setStyleSheet(statusBarBtnStyle);
+    // btnTogglePip->setStyleSheet(statusBarBtnStyle);
+    // btnAIChat->setStyleSheet(statusBarBtnStyle);
 
     // 2. Добавляем кнопку в левую часть статусбара
     ui->statusbar->addWidget(leftSpacer);
@@ -452,6 +480,38 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 2. СВЯЗЫВАЕМ СИГНАЛЫ КНОПОК С УМНЫМ ТРИГГЕРОМ ПОКАЗА/СКРЫТИЯ
 
     // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm в файле neuro_programm.cpp ---
+
+    // --- Добавить в neuro_programm.cpp (Ориентировочно Страница 8-9) ---
+    // --- Полностью заменить коннект для btnTogglePip (neuro_programm.cpp, Страница 8) ---
+    connect(btnTogglePip, &QPushButton::clicked, this, [this](bool checked) {
+        if (checked) {
+            // 1. Отжимаем остальные кнопки навигации в статусбаре
+            btnTerminal->setChecked(false);
+            btnSearch->setChecked(false);
+            btnLogs->setChecked(false);
+            btnAIChat->setChecked(false);
+
+            // 2. Раскрываем нижнюю панель и активируем PIP-режим напрямую
+            if (panelOther) {
+                panelOther->setVisible(true);
+                panelOther->setPipPageActive(); // Аппаратный вызов метода из Шага 2 (0.1.35)
+            }
+
+            // 3. Раздвигаем вертикальный сплиттер на фиксированные 250 пикселей под консоль
+            if (mainVerticalSplitter) {
+                mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
+            }
+        }
+        else {
+            // Повторный клик (кнопка отжалась) -> полностью закрываем нижнюю панель
+            if (panelOther) {
+                panelOther->setVisible(false);
+            }
+        }
+    });
+
+
+
 
     connect(btnAIChat, &QPushButton::clicked, this, [this](bool checked) {
         if (checked) {
@@ -487,65 +547,40 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         }
     });
 
+    // --- neuro_programm.cpp (Страница 9) ---
+    connect(btnTerminal, &QPushButton::toggled, this, [this](bool checked) {
+        // Получаем текущую палитру кнопки
+        QPalette palette = btnTerminal->palette();
 
-    // connect(btnTerminal, &QPushButton::clicked, this, [this]() { btnAIChat->setChecked(false); });
-    // connect(btnSearch,   &QPushButton::clicked, this, [this]() { btnAIChat->setChecked(false); });
-    // connect(btnLogs,     &QPushButton::clicked, this, [this]() { btnAIChat->setChecked(false); });
-
-    connect(btnTerminal, &QPushButton::clicked, this, [this]() {
-        // Если панель была открыта именно на Терминале, то повторный клик её СКРЫВАЕТ
-        if (panelOther->isVisible() && ui->statusbar->findChild<QPushButton*>("", Qt::FindDirectChildrenOnly) == nullptr /* проверка текущего индекса ниже */)
-        {
-            // Но проще и надежнее проверить напрямую состояние:
-            // Если кнопка была нажата, а сейчас мы кликнули и индекс совпадает:
-            static int lastIndex = -1;
-
-            // Упростим логику до идеала:
-            if (btnTerminal->isChecked()) {
-                // Отжимаем все остальные кнопки навигации в статусбаре
-                btnSearch->setChecked(false);
-                btnLogs->setChecked(false);
-                btnTogglePip->setChecked(false);
-
-                panelOther->setVisible(true);
-                panelOther->setTerminalPageActive();
-                if (mainVerticalSplitter) mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
-            } else {
-                // Повторный клик! Скрываем панель
-                panelOther->setVisible(false);
-            }
-        }
-    });
-
-    // Чтобы код не раздувать, сделаем красивее и компактнее (Идеальный вариант для C++):
-    // Перепишем обработчики кнопок на чистое переключение:
-
-    connect(btnTerminal, &QPushButton::clicked, this, [this](bool checked) {
         if (checked) {
-            btnSearch->setChecked(false);
-            btnLogs->setChecked(false);
-            btnTogglePip->setChecked(false);
+            // --- ПЕРВЫЙ ЩЕЛЧОК: кнопка нажата ---
+            // Задаем темный цвет для фона кнопки и подсвечиваем текст
+            palette.setColor(QPalette::Button, QColor(18, 18, 18));     // Темный фон
+            palette.setColor(QPalette::ButtonText, QColor(0, 122, 204)); // Синий/яркий текст
+
+            // Логика компонента
             panelOther->setVisible(true);
             panelOther->setTerminalPageActive();
-            if (mainVerticalSplitter) mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
-        } else {
-            panelOther->setVisible(false);
-            panelOther->togglePipPanel(false);
+
+            if (mainVerticalSplitter) {
+                mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
+            }
         }
+        else {
+            // --- ПОВТОРНЫЙ ЩЕЛЧОК: кнопка отжата ---
+            // Возвращаем исходные стандартные цвета (светлый фон и белый текст)
+            palette.setColor(QPalette::Button, QColor::fromRgb(43, 43, 43));     // Светлый фон статусбара
+            palette.setColor(QPalette::ButtonText, QColor::fromRgb(255, 255, 255)); // Белый текст
+
+            // Логика компонента
+            panelOther->setVisible(false);
+        }
+
+        // Принудительно применяем измененную палитру к кнопке и обновляем её на экране
+        btnTerminal->setPalette(palette);
+        btnTerminal->update();
     });
 
-    connect(btnSearch, &QPushButton::clicked, this, [this](bool checked) {
-        if (checked) {
-            btnTerminal->setChecked(false);
-            btnLogs->setChecked(false);
-            btnTogglePip->setChecked(false);
-            panelOther->setVisible(true);
-            panelOther->setSearchPageActive();
-            if (mainVerticalSplitter) mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
-        } else {
-            panelOther->setVisible(false);
-        }
-    });
 
 
     // 2. Новый переделанный коннект для управления панелью ИИ
@@ -584,29 +619,27 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         ui->quickActionsList->hide();
     }
 
-
-    connect(btnTogglePip, &QPushButton::clicked, this, [this](bool checked) {
+    // Полностью независимый коннект для btnTerminal
+    connect(btnTerminal, &QPushButton::toggled, this, [this](bool checked) {
         if (checked) {
-            // При включении PIP автоматически нажимается кнопка Терминала
-            btnTerminal->setChecked(true);
-            btnSearch->setChecked(false);
-            btnLogs->setChecked(false);
-
+            // Кнопка нажата -> Показываем панель и активируем вкладку терминала
             panelOther->setVisible(true);
-            panelOther->togglePipPanel(true);
-            if (mainVerticalSplitter) mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
-        } else {
-            // При повторном клике по кнопке управления пакетами - скрываем только строку ввода,
-            // но сам терминал логов оставляем открытым
-            panelOther->togglePipPanel(false);
+            panelOther->setTerminalPageActive();
+
+            if (mainVerticalSplitter) {
+                mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
+            }
         }
+        else {
+            // Кнопка отжата -> Просто скрываем панель
+            panelOther->setVisible(false);
+        }
+
+        // Принудительное обновление графического движка Qt для перерисовки QSS стиля
+        btnTerminal->style()->unpolish(btnTerminal);
+        btnTerminal->style()->polish(btnTerminal);
+        btnTerminal->update();
     });
-
-    // // Если пользователь закрыл PIP-панель крестиком внутри консоли:
-    // connect(panelOther, &Panel_other::pipPanelClosed, this, [this]() {
-    //     if (btnTogglePip) btnTogglePip->setChecked(false);
-    // });
-
 
     connect(btnSearch, &QPushButton::clicked, this, [this]() {
         if (btnTogglePip) btnTogglePip->setChecked(false);
@@ -618,234 +651,13 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     projectModel = nullptr;
 
-
-    // projectModel = new QFileSystemModel(this);
-
-    // // 1. Указываем модели отображать АБСОЛЮТНО ВСЕ файлы и папки (включая скрытые, если нужно)
-    // projectModel->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::AllDirs);
-
-    // // Указываем модели, на какой путь смотреть по умолчанию при старте программы (например, домашняя папка)
-    // //projectModel->setRootPath(QDir::homePath());
-
-    // projectModel->setNameFilters(QStringList() << "[^v]*" << "v[^e]*" << "ve[^n]*" << "ven[^v]*" << "venv?*");
-    // projectModel->setNameFilterDisables(false);
-
-    // // Привязываем к QTreeView из Designer
-    // ui->treeView->setModel(projectModel);
-
-    // // Скрываем служебные колонки ОС (Размер, Тип, Дата изменения)
-    // ui->treeView->setHeaderHidden(true);
-    // for (int i = 1; i < projectModel->columnCount(); ++i) {
-    //     ui->treeView->hideColumn(i);
-    // }
-
-    // // Настраиваем режим плавного раскрытия папок по одинарному клику (опционально)
-    // ui->treeView->setAnimated(true);
     ui->treeView->setIndentation(20);
-
-    // ИСПРАВЛЕННЫЙ STYLE SHEET (Все стыки с деревом и статусбаром строго 1px)
-//     this->setStyleSheet(R"(
-//         /* --- НАСТРОЙКА МЕНЮБЛOКОВ --- */
-//         QMenuBar {
-//             background-color: #f0f0f0;
-//             color: #333333;
-//             margin: 0px;
-//             padding: 0px;
-//             border-top: none;
-//             border-bottom: 1px solid #b0b0b0;
-//         }
-
-//         QMenuBar::item {
-//             background-color: transparent;
-//             padding: 4px 8px;
-//         }
-
-//         QMenuBar::item:selected {
-//             background-color: #e0e0e0;
-//         }
-
-//         QMenu {
-//             background-color: #f0f0f0;
-//             border: 1px solid #b0b0b0;
-//             color: #333333;
-//         }
-
-//         QMenu::item:selected {
-//             background-color: #e0e0e0;
-//         }
-
-//         /* --- НАСТРОЙКА ЗАГОЛОВКОВ QDOCKWIDGET --- */
-//         QDockWidget::title {
-//             background-color: #f0f0f0;
-//             color: #333333;
-//             border-left: 1px solid #b0b0b0;
-//             border-right: 1px solid #b0b0b0;
-//             border-bottom: 1px solid #b0b0b0;
-//             border-top: none;
-//             padding-left: 6px;
-//             padding-top: 4px;
-//             padding-bottom: 4px;
-//             height: 18px;
-//             margin: 0px;
-//         }
-
-//         /* Скрываем кнопки доков в обычном состоянии */
-//         QDockWidget::close-button, QDockWidget::float-button {
-//             qproperty-icon: none;
-//             background: transparent;
-//             border: none;
-//             width: 0px;
-//             height: 0px;
-//         }
-
-//         /* Показываем кнопки только при наведении на заголовок дока */
-//         QDockWidget::title:hover QDockWidget::close-button,
-//         QDockWidget::title:hover QDockWidget::float-button {
-//             qproperty-icon: theme("window-close");
-//             width: 16px;
-//             height: 16px;
-//             padding: 2px;
-//         }
-
-//         QDockWidget::close-button:hover, QDockWidget::float-button:hover {
-//             background-color: #e0e0e0;
-//             border-radius: 2px;
-//         }
-
-//         /* Внутреннее содержимое дока (контейнер) */
-//         /* Оставляем рамку только по бокам, нижнюю убираем, чтобы она не сливалась со статусбаром */
-//         #dockWidgetContents {
-//             border-left: 1px solid #b0b0b0;
-//             border-right: 1px solid #b0b0b0;
-//             border-bottom: none;
-//             border-top: none;
-//         }
-
-//         /* --- НАСТРОЙКА ЦЕНТРАЛЬНОЙ ФАЛЬШ-ПАНЕЛИ --- */
-//         #widget_3 {
-//             background-color: #f0f0f0;
-//             border-top: none;
-//             border-bottom: 1px solid #b0b0b0;
-//             border-left: none;
-//             border-right: none;
-//             min-height: 29px;
-//             max-height: 29px;
-//             margin-left: -2px;
-//             margin-right: -2px;
-//             margin-top: 0px;
-//             margin-bottom: 0px;
-//             padding-left: 0px;
-//             padding-right: 0px;
-//         }
-
-//         /* Системные разделители QMainWindow */
-//         QMainWindow::separator {
-//             background-color: #b0b0b0;
-//             width: 1px;
-//             height: 1px;
-//             margin: 0px;
-//             padding: 0px;
-//         }
-
-//         /* --- НАСТРОЙКА ДЕРЕВА (QTreeView) --- */
-//         QTreeView {
-//             background-color: #ffffff;
-//             color: #333333;
-
-//             /* КОРРЕКЦИЯ ЗДЕСЬ: Жестко отключаем рамку у самого дерева, */
-//             /* так как внешние границы формирует контейнер дока */
-//             border: none;
-
-//             show-decoration-selected: 1;
-//         }
-
-//         QTreeView::item:hover {
-//             background-color: #f2f2f2;
-//         }
-
-//         QTreeView::item:selected {
-//             background-color: #e0e0e0;
-//             color: #000000;
-//         }
-
-//         /* --- НАСТРОЙКА СТРОКИ СОСТОЯНИЯ (QStatusBar) --- */
-//         QStatusBar {
-//             background-color: #f0f0f0;
-//             color: #333333;
-
-//             /* КОРРЕКЦИЯ ЗДЕСЬ: Рисуем тонкую линию СВЕРХУ статусбара. */
-//             /* На нее будут ровно опираться доки своим бесшовным нижним краем */
-//             border-top: 1px solid #b0b0b0;
-//             border-bottom: none;
-//             border-left: none;
-//             border-right: none;
-//         }
-//         /* --- НАСТРОЙКА COMBOBOX НА ФАЛЬШ-ПАНЕЛИ (ИДЕАЛЬНЫЙ FLAT UI) --- */
-// #widget_3 QComboBox {
-//         background-color: transparent !important;
-
-//         /* Плоские линии рамок (без верхней) */
-//         border-left: 1px solid #d0d0d0 !important;
-//         border-right: 1px solid #d0d0d0 !important;
-//         border-bottom: 1px solid #d0d0d0 !important;
-//         border-top: none !important;
-//         border-radius: 0px !important;
-
-//         /* Отступы: зажимаем текст слева и справа */
-//         padding-left: 6px !important;
-//         padding-right: 25px !important;
-//         color: #333333 !important;
-//         font-size: 11px !important;
-//     }
-
-//     /* Подсветка комбобокса при наведении — МЯГКО И ЦЕЛИКОМ */
-//     #widget_3 QComboBox:hover {
-//         border-left: 1px solid #b0b0b0 !important;
-//         border-right: 1px solid #b0b0b0 !important;
-//         border-bottom: 1px solid #b0b0b0 !important;
-//         border-top: none !important;
-//         background-color: #e5e5e5 !important;
-//     }
-
-//     #widget_3 QComboBox:on {
-//         border-left: 1px solid #b0b0b0 !important;
-//         border-right: 1px solid #b0b0b0 !important;
-//         border-bottom: 1px solid #b0b0b0 !important;
-//         border-top: none !important;
-//         background-color: #ffffff !important;
-//     }
-
-//     /* НАМЕРТВО УНИЧТОЖАЕМ СИСТЕМНУЮ КНОПКУ BREEZE, КОТОРАЯ ДАВАЛА СБОЙНЫЙ ПРЯМОУГОЛЬНИК */
-//     #widget_3 QComboBox::drop-down,
-//     #widget_3 QComboBox::drop-down:hover {
-//         width: 0px !important;
-//         border: none !important;
-//         background: transparent !important;
-//     }
-//     #widget_3 QComboBox::down-arrow {
-//         image: none !important;
-//         border: none !important;
-//     }
-
-//     /* Настройка выпадающего списка */
-//     #widget_3 QComboBox QAbstractItemView {
-//         background-color: #ffffff !important;
-//         border: 1px solid #b0b0b0 !important;
-//         border-radius: 0px !important;
-//         color: #333333 !important;
-//         selection-background-color: #e0e0e0 !important;
-//         selection-color: #000000 !important;
-//         outline: none !important;
-//     }
-
-
-//     )");
-
-    //panelOther->setVisible(false);
 
     connect(ui->New_progect, &QAction::triggered, this, &Neuro_programm::new_progect);
     //connect(ui->open_progect, &QAction::triggered, this, &Neuro_programm::open_project);
     connect(ui->action_settngs, &QAction::triggered, this, &Neuro_programm::open_settings);
+    connect(ui->aboutProgram, &QAction::triggered, this, &Neuro_programm::open_about_program);
+
     // Привязываем вызов меню открытия проекта
     connect(ui->open_progect, &QAction::triggered, this, &Neuro_programm::onOpenProjectMenuTriggered);
 
@@ -891,12 +703,14 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
             // Умное управление док-виджетами и кнопками на основе ключа userData
             QString currentKey = ui->fileComboBox->itemData(index).toString();
-
-            if (currentKey == "MAIN_SCREEN")
-            {
-                //if (ui->rightDockWidget) ui->rightDockWidget->setVisible(true); // Показываем док
-                if (btnTerminal) btnTerminal->setChecked(true);  // Подсвечиваем Терминал
-                if (btnAIChat)   btnAIChat->setChecked(false);   // Тушим Чат в статусбаре
+            if (currentKey == "MAIN_SCREEN") {
+                if (btnTerminal) {
+                    btnTerminal->setChecked(true);
+                    btnTerminal->setProperty("active", true); // Добавить эту строчку!
+                    btnTerminal->style()->unpolish(btnTerminal);
+                    btnTerminal->style()->polish(btnTerminal);
+                }
+                if (btnAIChat) btnAIChat->setChecked(false);
             }
             else if (currentKey == "AI_CHAT_SCREEN")
             {
@@ -1556,6 +1370,18 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     connect(ui->quickActionsList, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onQuickActionTriggered);
     connect(ui->quickActionsList, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onQuickActionTriggered);
 
+    for (QComboBox *combo : this->findChildren<QComboBox*>()) {
+        if (combo) combo->setStyle(new BreezeFlatStyle(combo->style()));
+    }
+
+    for (QSpinBox *spin : this->findChildren<QSpinBox*>()) {
+        if (spin) spin->setStyle(new BreezeFlatStyle(spin->style()));
+    }
+
+    for (QDoubleSpinBox *dSpin : this->findChildren<QDoubleSpinBox*>()) {
+        if (dSpin) dSpin->setStyle(new BreezeFlatStyle(dSpin->style()));
+    }
+
     sendInitialWelcomeRequest();
 
     this->applyGlobalFonts();
@@ -1850,6 +1676,30 @@ void Neuro_programm::open_project()
     initLspServer();
 }
 
+void Neuro_programm::sendLspDidOpenForFile(const QString &filePath, const QString &fileContent)
+{
+    if (!lspProcess || lspProcess->state() != QProcess::Running || filePath.isEmpty()) return;
+
+    QJsonObject params;
+    QJsonObject textDocument;
+
+    // Передаем точный URI файла по спецификации LSP
+    textDocument["uri"] = "file://" + filePath;
+    textDocument["languageId"] = "python";
+    textDocument["version"] = 1; // Начальная версия сессии всегда 1
+    textDocument["text"] = fileContent; // Передаем стартовый текст для инициализации кэша Jedi
+
+    params["textDocument"] = textDocument;
+
+    // Отправляем системное уведомлениеdidOpen через ваш рабочий транспорт запросов
+    this->sendLspRequest("textDocument/didOpen", params);
+
+    std::clog << " [LSP] Сессия файла успешно открыта на сервере через didOpen. URI: "
+              << textDocument["uri"].toString().toStdString() << std::endl;
+    std::clog.flush();
+}
+
+
 void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
 {
     // 1. ИЗВЛЕКАЕМ АБСОЛЮТНЫЙ ПУТЬ К ФАЙЛУ ИЗ МОДЕЛИ ДЕРЕВА (Ваш рабочий код)
@@ -1886,6 +1736,19 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
     layout->setContentsMargins(0, 0, 0, 0);
 
     CodeEditor *editor = new CodeEditor(newPage);
+
+    // КРИТИЧЕСКИЙ ФИКС: Передаем реальный путь к файлу прямо в созданный объект редактора!
+    // (Замените 'fullFilePath' на имя вашей переменной, которая хранит путь к открываемому файлу скрипта)
+    editor->currentFilePath = filePath;
+    editor->isLspFreeze = false;
+    editor->sendLspDidOpen();
+
+    // Здесь же связываем сигнал логирования с вашей нижней консолью отладки приложения
+    connect(editor, &CodeEditor::logMessage, this, [this](const QString &message) {
+        QTextEdit *console = panelOther->findChild<QTextEdit*>("consoleOutput");
+        if (console) console->append(message);
+    });
+
     // ВАЖНО: objectName должен быть задан ДО загрузки текста!
     editor->setObjectName(filePath);
     newPage->setObjectName(filePath);
@@ -1894,16 +1757,23 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
 
     // БЛОКИРУЕМ СИГНАЛЫ НА ВРЕМЯ ПЕРВОНАЧАЛЬНОЙ ВСТАВКИ КОДА
     editor->blockSignals(true);
+    if (editor->document()) {
+        editor->document()->blockSignals(true);
+    }
     editor->setPlainText(fileContent);
-    editor->blockSignals(false);
-
     layout->addWidget(editor);
 
     ui->centralStackedWidget->addWidget(newPage);
     ui->centralStackedWidget->setCurrentWidget(newPage);
 
+    editor->blockSignals(false);
+    if (editor->document()) {
+        editor->document()->blockSignals(false);
+    }
+
     // Загружаем в редактор считанный код Python-файла
-    editor->setPlainText(fileContent);
+    this->sendLspDidOpenForFile(filePath, fileContent);
+    editor->setFocus();
 
     // 4. ИНИЦИАЛИЗИРУЕМ СЕРВЕР JEDI И ОТПРАВЛЯЕМ DIDOPEN ЗАПРОС
     this->initLspServer();
@@ -3257,11 +3127,27 @@ void Neuro_programm::sendLspRequest(const QString &method, QJsonObject params)
     requestObj["jsonrpc"] = "2.0";
     requestObj["method"] = method;
 
+    // --- МОДЕРНИЗАЦИЯ: ПЕРЕХВАТ ПАКЕТА INITIALIZE ДЛЯ ВКЛЮЧЕНИЯ ЛИНТИНГА ВНУТРИ ФУНКЦИЙ DEF ---
+    if (method == "initialize") {
+        // Создаем объект конфигурации для jedi-language-server
+        QJsonObject initializationOptions;
+        QJsonObject diagnosticsOpts;
+
+        diagnosticsOpts["enable"] = true;    // Принудительно включаем встроенный линтер Jedi
+        diagnosticsOpts["didChange"] = true; // Даем команду проверять код сразу при изменении текста, а не при сохранении
+
+        initializationOptions["diagnostics"] = diagnosticsOpts;
+
+        // Внедряем эти опции внутрь переданного объекта параметров params
+        params["initializationOptions"] = initializationOptions;
+    }
+    // ---------------------------------------------------------------------------------------
+
     // Супер-фикс для валидатора pygls (убирает KeyError)
     if (method == "initialized") {
         requestObj["params"] = QJsonValue::Null;
     } else {
-        requestObj["params"] = params;
+        requestObj["params"] = params; // Для initialize сюда уйдут наши новые настройки diagnostics
     }
 
     // Проверяем: если метод НЕ является системным уведомлением (Notification),
@@ -3285,6 +3171,133 @@ void Neuro_programm::sendLspRequest(const QString &method, QJsonObject params)
     lspProcess->waitForBytesWritten(50);
 }
 
+
+// void Neuro_programm::readLspResponse()
+// {
+//     if (!lspProcess) return;
+
+//     // 1. Забираем только свежие сырые байты из пайпа
+//     QByteArray rawData = lspProcess->readAllStandardOutput();
+//     if (rawData.isEmpty()) return;
+
+//     // Накапливаем байты в статическом буфере класса
+//     static QByteArray lspBuffer;
+//     lspBuffer.append(rawData);
+
+//     // =========================================================================
+//     // СТАНДАРТНЫЙ ИНДУСТРИАЛЬНЫЙ СТРИМ-ПАРСЕР ДЛЯ LSP ПРОТОКОЛА
+//     // =========================================================================
+//     while (!lspBuffer.isEmpty())
+//     {
+//         // Находим, где в буфере начинается сам JSON-объект (ищем первую фигурную скобку)
+//         int jsonStartIndex = lspBuffer.indexOf('{');
+
+//         if (jsonStartIndex == -1) {
+//             // Если фигурной скобки вообще нет, значит в буфере лежит только текстовый заголовок.
+//             // Мы просто выходим и ждем, когда из пайпа догрузится сам JSON.
+//             return;
+//         }
+
+//         // Проверяем, если перед фигурной скобкой застрял заголовок Content-Length,
+//         // мы временно заглядываем в него, чтобы узнать точную длину пакета.
+//         int headerIndex = lspBuffer.indexOf("Content-Length:");
+//         int expectedLength = 0;
+//         if (headerIndex != -1 && headerIndex < jsonStartIndex) {
+//             int headerEndIndex = lspBuffer.indexOf("\r\n\r\n", headerIndex);
+//             if (headerEndIndex != -1) {
+//                 int valStart = headerIndex + 15;
+//                 expectedLength = lspBuffer.mid(valStart, headerEndIndex - valStart).trimmed().toInt();
+//             }
+//         }
+
+//         // Если мы смогли узнать ожидаемую длину, проверяем, накопилось ли столько байт в буфере.
+//         // Если буфер меньше, значит пакет еще долетает по сети. Выходим и ждем readyRead!
+//         if (expectedLength > 0 && lspBuffer.size() < (jsonStartIndex + expectedLength)) {
+//             return;
+//         }
+
+//         // Вырезаем кусок буфера, начиная строго от фигурной скобки '{' и до конца буфера
+//         QByteArray jsonCandidate = lspBuffer.mid(jsonStartIndex);
+
+//         // Позволяем встроенному парсеру Qt САМОМУ распарсить JSON.
+//         // Qt безупречно определяет реальные границы объекта по балансу фигурных скобок {},
+//         // полностью игнорируя любые проблемы со смещениями строк в заголовках!
+//         QJsonParseError parseError;
+//         QJsonDocument doc = QJsonDocument::fromJson(jsonCandidate, &parseError);
+
+//         // СЛУЧАЙ 1: Пакет оборван на полуслове (парсер ругается на неожиданный конец файла)
+//         if (parseError.error == QJsonParseError::UnterminatedObject ||
+//             parseError.error == QJsonParseError::UnterminatedArray)
+//         {
+//             return; // Спокойно выходим и ждем, когда QProcess догрузит оставшиеся байты
+//         }
+
+//         // СЛУЧАЙ 2: Пакет успешно распарсился!
+//         if (parseError.error == QJsonParseError::NoError)
+//         {
+//             // Вычисляем, сколько байт реально занял этот JSON-объект на диске
+//             int actualJsonSize = doc.toJson(QJsonDocument::Compact).size();
+
+//             // Намертво стираем из буфера обработанный заголовок и сам JSON,
+//             // продвигая очередь строго к следующему LSP-пакету
+//             lspBuffer.remove(0, jsonStartIndex + actualJsonSize);
+
+//             // Обрабатываем валидный JSON-объект
+//             QJsonObject rootObj = doc.object();
+
+//             // Пропускаем пакеты асинхронной диагностики синтаксиса
+//             if (!rootObj.contains("id")) {
+//                 continue; // Переходим к следующему пакету в цикле while
+//             }
+
+//             int responseId = rootObj["id"].toInt();
+
+//             // Ответ на initialize (id: 1) — завершаем рукопожатие
+//             if (responseId == 1) {
+//                 std::clog << " [LSP УСПЕХ] Рукопожатие с Jedi пройдено!" << std::endl;
+//                 std::clog.flush();
+//                 QJsonObject initializedParams;
+//                 this->sendLspRequest("initialized", initializedParams);
+//                 continue;
+//             }
+
+//             // Обрабатываем долгожданный пакет автодополнения (textDocument/completion)
+//             if (rootObj.contains("result"))
+//             {
+//                 QJsonValue resultVal = rootObj["result"];
+//                 QJsonArray itemsArray;
+
+//                 if (resultVal.isArray()) {
+//                     itemsArray = resultVal.toArray();
+//                 } else if (resultVal.isObject() && resultVal.toObject().contains("items")) {
+//                     itemsArray = resultVal.toObject()["items"].toArray();
+//                 }
+
+//                 QStringList completionList;
+//                 for (int i = 0; i < itemsArray.size(); ++i) {
+//                     QJsonObject item = itemsArray[i].toObject();
+//                     QString label = item["label"].toString();
+//                     if (!label.isEmpty()) completionList.append(label);
+//                 }
+
+//                 std::clog << " [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов: "
+//                           << completionList.size() << ". Отправляю в GUI..." << std::endl;
+//                 std::clog.flush();
+
+//                 if (!completionList.isEmpty()) {
+//                     // Испускаем сигнал межпотокового взаимодействия для вывода QMenu
+//                     emit this->completionDataReceived(completionList);
+//                 }
+//             }
+//             continue;
+//         }
+
+//         // СЛУЧАЙ 3: Если в буфере застрял совсем непонятный мусор, из-за которого Qt выдает ошибку,
+//         // мы просто сдвигаем буфер на 1 байт вперед, чтобы не зайти в бесконечный цикл зависания.
+//         lspBuffer.remove(0, jsonStartIndex + 1);
+//     }
+// }
+
 void Neuro_programm::readLspResponse()
 {
     if (!lspProcess) return;
@@ -3304,7 +3317,6 @@ void Neuro_programm::readLspResponse()
     {
         // Находим, где в буфере начинается сам JSON-объект (ищем первую фигурную скобку)
         int jsonStartIndex = lspBuffer.indexOf('{');
-
         if (jsonStartIndex == -1) {
             // Если фигурной скобки вообще нет, значит в буфере лежит только текстовый заголовок.
             // Мы просто выходим и ждем, когда из пайпа догрузится сам JSON.
@@ -3333,8 +3345,6 @@ void Neuro_programm::readLspResponse()
         QByteArray jsonCandidate = lspBuffer.mid(jsonStartIndex);
 
         // Позволяем встроенному парсеру Qt САМОМУ распарсить JSON.
-        // Qt безупречно определяет реальные границы объекта по балансу фигурных скобок {},
-        // полностью игнорируя любые проблемы со смещениями строк в заголовках!
         QJsonParseError parseError;
         QJsonDocument doc = QJsonDocument::fromJson(jsonCandidate, &parseError);
 
@@ -3349,16 +3359,84 @@ void Neuro_programm::readLspResponse()
         if (parseError.error == QJsonParseError::NoError)
         {
             // Вычисляем, сколько байт реально занял этот JSON-объект на диске
-            int actualJsonSize = doc.toJson(QJsonDocument::Compact).size();
-
-            // Намертво стираем из буфера обработанный заголовок и сам JSON,
-            // продвигая очередь строго к следующему LSP-пакету
-            lspBuffer.remove(0, jsonStartIndex + actualJsonSize);
-
-            // Обрабатываем валидный JSON-объект
             QJsonObject rootObj = doc.object();
 
-            // Пропускаем пакеты асинхронной диагностики синтаксиса
+                     // 2. Вычисляем, сколько байт реально занял этот JSON-объект на диске
+                     int actualJsonSize = doc.toJson(QJsonDocument::Compact).size();
+
+                     // КРИТИЧЕСКИЙ ФИКС ДЛЯ ОЧИСТКИ БУФЕРА ОТ ХВОСТОВЫХ \r\n
+                     // Мы продвигаем очередь, стирая и заголовки, и сам JSON, и символы переноса строки за ним!
+                     int bytesToRemove = jsonStartIndex + actualJsonSize;
+                     while (bytesToRemove < lspBuffer.size() && (lspBuffer[bytesToRemove] == '\r' || lspBuffer[bytesToRemove] == '\n')) {
+                         bytesToRemove++; // Поглощаем скрытый мусор \r\n, который ломал парсер на следующей итерации!
+                     }
+                     lspBuffer.remove(0, bytesToRemove);
+
+                     // =========================================================================
+                     // НАШ ПЕРЕХВАТЧИК ДИАГНОСТИКИ ОШИБОК (DIAGNOSTICS) - ПУЛЕНЕПРОБИВАЕМЫЙ
+                     // =========================================================================
+                     if (rootObj.value("method").toString() == "textDocument/publishDiagnostics") {
+                         QJsonObject params = rootObj.value("params").toObject();
+                         QJsonArray diagnostics = params.value("diagnostics").toArray();
+
+                         // Намертво очищаем старый глобальный массив активных ошибок
+                         Neuro_programm::globalLspErrors.clear();
+
+                         // Наполняем массив координатами ошибок от Jedi
+                         for (int i = 0; i < diagnostics.size(); ++i) {
+                             QJsonObject diagObj = diagnostics[i].toObject();
+                             int severity = diagObj.value("severity").toInt();
+
+                             QJsonObject range = diagObj.value("range").toObject();
+                             QJsonObject start = range.value("start").toObject();
+                             QJsonObject end = range.value("end").toObject();
+
+                             Neuro_programm::LspErrorData errorBlock;
+                             errorBlock.line = start.value("line").toInt();
+                             errorBlock.startChar = start.value("character").toInt();
+                             errorBlock.endChar = end.value("character").toInt();
+                             errorBlock.isError = (severity == 1);
+
+                             Neuro_programm::globalLspErrors.append(errorBlock);
+                         }
+
+                         // ПОТОКОБЕЗОПАСНЫЙ И УМНЫЙ ВЫЗОВ ПЕРЕРИСОВКИ ЧЕРЕЗ QPOINTER
+                         if (ui->centralStackedWidget) {
+                             QWidget *currentWidget = ui->centralStackedWidget->currentWidget();
+                             if (currentWidget) {
+                                 CodeEditor *editor = currentWidget->findChild<CodeEditor*>();
+                                 if (editor && editor->document()) {
+
+                                     int totalChars = static_cast<int>(editor->document()->characterCount());
+
+                                     // ХИТРОСТЬ: Заворачиваем сырой указатель в умный QPointer.
+                                     // Если за время нахождения в очереди GUI-потока виджет editor будет уничтожен,
+                                     // safeEditor автоматически превратится в nullptr, предотвращая Segmentation fault!
+                                     QPointer<CodeEditor> safeEditor(editor);
+
+                                     QMetaObject::invokeMethod(this, [safeEditor, totalChars]() {
+                                         // ПРОВЕРЯЕМ: Если safeEditor равен null, значит виджет уже удален.
+                                         // Мы просто безопасно выходим из функции без падения программы!
+                                         if (safeEditor.isNull()) {
+                                             return;
+                                         }
+
+                                         // Дополнительно проверяем валидность внутренних компонентов перед вызовом testAttribute
+                                         if (safeEditor->document() && safeEditor->viewport()) {
+                                             safeEditor->document()->markContentsDirty(0, totalChars);
+                                             safeEditor->viewport()->update();
+                                         }
+                                     }, Qt::QueuedConnection);
+                                 }
+                             }
+                         }
+                         continue; // Уведомление успешно обработано, переходим к следующему пакету в цикле while
+                     }
+
+
+            // =========================================================================
+            // ВАШ РОДНОЙ ИЗНАЧАЛЬНЫЙ КОД ОБРАБОТКИ ПАКЕТОВ С "id" (НЕИЗМЕНЯЕМЫЙ)
+            // =========================================================================
             if (!rootObj.contains("id")) {
                 continue; // Переходим к следующему пакету в цикле while
             }
@@ -3379,7 +3457,6 @@ void Neuro_programm::readLspResponse()
             {
                 QJsonValue resultVal = rootObj["result"];
                 QJsonArray itemsArray;
-
                 if (resultVal.isArray()) {
                     itemsArray = resultVal.toArray();
                 } else if (resultVal.isObject() && resultVal.toObject().contains("items")) {
@@ -4099,6 +4176,13 @@ void Neuro_programm::open_settings()
     rsc2->exec();
 }
 
+void Neuro_programm::open_about_program()
+{
+    rsc3 = new About_program(this);
+    rsc3->setWindowTitle("О программе");
+    rsc3->exec();
+}
+
 void Neuro_programm::applyGlobalFonts()
 {
     QSettings settings("PyTorchStudio", "EditorSettings");
@@ -4110,7 +4194,15 @@ void Neuro_programm::applyGlobalFonts()
     QFont editorFont(editorFamily, editorSize);
     QPalette palette;
 
-    qApp->setStyle(QStyleFactory::create("Fusion"));
+    //qApp->setStyle(QStyleFactory::create("Fusion"));
+
+    if (QStyleFactory::keys().contains("Breeze")) {
+        qApp->setStyle(QStyleFactory::create("Breeze"));
+    } else if (QStyleFactory::keys().contains("breeze")) {
+        qApp->setStyle(QStyleFactory::create("breeze"));
+    } else {
+        qApp->setStyle(QStyleFactory::create("Fusion"));
+    }
 
     QString chatBgColor, chatTextColor, chatBorderColor;
     QString windowBgHex, containerBgHex, borderAccentHex, textAccentHex;
@@ -4130,11 +4222,11 @@ void Neuro_programm::applyGlobalFonts()
 
         QColor darkBg(windowBgHex);
         QColor darkWidget(containerBgHex);
-        QColor darkText("#eff0f1");
+        QColor darkText(QColor(239, 240, 241));
 
         palette.setColor(QPalette::Window, darkBg);
         palette.setColor(QPalette::WindowText, darkText);
-        palette.setColor(QPalette::Base, QColor("#1b1e20"));
+        palette.setColor(QPalette::Base, QColor(27, 30, 32));
         palette.setColor(QPalette::AlternateBase, darkBg);
         palette.setColor(QPalette::ToolTipBase, darkWidget);
         palette.setColor(QPalette::ToolTipText, darkText);
@@ -4160,7 +4252,7 @@ void Neuro_programm::applyGlobalFonts()
 
         QColor lightBg(windowBgHex);
         QColor lightWidget(containerBgHex);
-        QColor lightText("#232629");
+        QColor lightText(35, 38, 41);
 
         palette.setColor(QPalette::Window, lightBg);
         palette.setColor(QPalette::WindowText, lightText);
@@ -4198,14 +4290,29 @@ void Neuro_programm::applyGlobalFonts()
                             "   max-height: 34px; "
                             "}"
 
-                            "/* Карточки параметров обучения */"
-                            "QGroupBox, QTabWidget::panel { "
-                            "   background-color: " + containerBgHex + " !important; "
-                           "   border: 1px solid " + borderAccentHex + "; "
-                            "   border-radius: 6px; "
-                            "   margin-top: 10px; "
-                            "   padding: 15px; "
-                            "}"
+                                                                           "/* --- КАРТОЧКИ ПАРАМЕТРОВ ОБУЧЕНИЯ (ЖЕСТКАЯ ФИКСАЦИЯ СТИЛЯ) --- */"
+                                                                           "/* Карточки параметров обучения */"
+                                                                           "QGroupBox { "
+                                                                           "   background-color: " + containerBgHex + " !important; "
+                                                                           "   border: 1px solid " + borderAccentHex + " !important; "
+                                                                           "   border-radius: 6px !important; "
+                                                                           "   margin-top: 15px !important; "
+                                                                           "   padding-top: 25px !important; " /* Оставляем большой отступ сверху, чтобы освободить место для текста внутри */
+                                                                           "   padding-left: 15px !important; "
+                                                                           "   padding-right: 15px !important; "
+                                                                           "   padding-bottom: 15px !important; "
+                                                                           "}"
+
+
+
+
+                                                                           "/* Панель вкладок (оставляем старый стиль без изменений) */"
+                                                                           "QTabWidget::panel { "
+                                                                           "   background-color: " + containerBgHex + " !important; "
+                                                                           "   border: 1px solid " + borderAccentHex + "; "
+                                                                           "   border-radius: 6px; "
+                                                                           "}"
+
 
                             "/* КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Находим шапку левого дока и жестко отодвигаем её под кнопки! */"
                             "QDockWidget, QTreeView, QTreeWidget, QListWidget, #leftDockWidget { "
@@ -4214,23 +4321,49 @@ void Neuro_programm::applyGlobalFonts()
                            "}"
                            "QGroupBox QTreeView, QTabWidget QTreeView { margin-top: 0px !important; }" // Сброс для внутренних окон
 
-                           "QGroupBox::title { "
-                           "   subcontrol-origin: margin; "
-                           "   subcontrol-position: top left; "
-                           "   padding: 0 5px; "
-                           "   color: " + textAccentHex + "; "
-                          "   font-weight: bold; "
-                          "}"
 
-                          "/* Поля ввода и выпадающие списки */"
-                          "QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QHeaderView::section { "
-                          "   background-color: " + containerBgHex + " !important; "
-                           "   color: " + palette.color(QPalette::Text).name() + " !important; "
-                                                 "   border: 1px solid " + borderAccentHex + " !important; "
-                            "   border-radius: 4px; "
-                            "   padding: 4px 8px; "
-                            "   min-height: 22px; "
-                            "}"
+
+            "/* --- ПОЛЯ ВВОДА И СПИСКИ В СТИЛЕ KDE PLASMA BREEZE (ФИНАЛ) --- */"
+            "QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit { "
+            "   background-color: " + containerBgHex + " !important; "
+            "   color: " + palette.color(QPalette::Text).name() + " !important; "
+            "   border: 1px solid " + borderAccentHex + " !important; " /* Тонкая плоская рамка */
+            "   border-radius: 3px !important; "
+            "   padding: 4px 24px 4px 8px !important; " /* Отступ справа защищает текст от наложения на стрелочку */
+            "   min-height: 22px !important; "
+            "}"
+            "QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover, QLineEdit:hover, "
+            "QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QLineEdit:focus { "
+            "   border: 1px solid " + textAccentHex + " !important; " /* Подсветка Breeze */
+            "}"
+            /* Код защиты статусбара QStatusBar QPushButton оставляем ниже без изменений */
+
+
+
+
+
+                                                          "/* Нижний статусбар (Защита от черного цвета кнопок) */"
+                                                          "QStatusBar { "
+                                                          "   border-top: 1px solid " + borderAccentHex + "; "
+                                                          "   background-color: " + windowBgHex + " !important; "
+                                                          "}"
+                                                          "QStatusBar QPushButton { "
+                                                          "   background-color: transparent; " /* Прозрачный фон по умолчанию */
+                                                          "   color: " + palette.color(QPalette::WindowText).name() + " !important; "
+                                                          "   border: 1px solid transparent; "
+                                                          "   font-weight: bold; "
+                                                          "   padding: 4px 14px; "
+                                                          "   margin: 2px 4px; "
+                                                          "   border-radius: 4px; "
+                                                          "}"
+                                                          "QStatusBar QPushButton:hover { "
+                                                          "   background-color: " + (isDark ? "#35393d" : "#e6e6e6") + "; " /* Мягкий ховер, не ломающий Fusion */
+                                                          "}"
+                                                          "QStatusBar QPushButton:checked { "
+                                                          "   background-color: " + (isDark ? "#1b1e20" : "#cbd0d3") + " !important; " /* Фиксация серого цвета как в Qt Creator */
+                                                          "   color: " + (isDark ? "#ffffff" : "#232629") + " !important; "
+                                                          "}"
+
 
                             "/* Текстовые редакторы и ваш CodeEditor */"
                             "QPlainTextEdit, QTextEdit, CodeEditor, [class*='CodeEditor'] { "
@@ -4255,19 +4388,35 @@ void Neuro_programm::applyGlobalFonts()
                                                        "}"
                                                        "QMenuBar::item:selected { background-color: " + borderAccentHex + " !important; }"
 
-                            "/* Нижний статусбар */"
-                            "QStatusBar { "
-                            "   border-top: 1px solid " + borderAccentHex + "; "
-                            "   background-color: " + windowBgHex + " !important; "
-                        "}"
-                        "QStatusBar QPushButton, QStatusBar QLabel { "
-                        "   background-color: transparent !important; "
-                        "   color: " + palette.color(QPalette::WindowText).name() + " !important; "
-                                                       "   border: none; "
-                                                       "   font-weight: bold; "
-                                                       "   padding: 4px 12px; "
-                                                       "}"
-                                                       "QStatusBar QPushButton:hover { background-color: " + borderAccentHex + " !important; }"
+                                                                                                                          "/* Нижний статусбар */"
+                                                                                                                          "QStatusBar { "
+                                                                                                                          "   border-top: 1px solid " + borderAccentHex + "; "
+                                                                                                                          "   background-color: " + windowBgHex + " !important; "
+                                                                                                                          "}"
+                                                                                                                          "QStatusBar QPushButton { "
+                                                                                                                          "   background-color: transparent; "
+                                                                                                                          "   color: " + palette.color(QPalette::WindowText).name() + " !important; "
+                                                                                                                          "   border: none; "
+                                                                                                                          "   font-weight: bold; "
+                                                                                                                          "   padding: 4px 14px; "
+                                                                                                                          "   margin: 2px 4px; "
+                                                                                                                          "   border-radius: 6px; " /* Скругление углов как на скриншоте */
+                                                                                                                          "}"
+                                                                                                                          "/* Наведение курсора (в половину темного) */"
+                                                                                                                          "/* Наведение курсора (ЯРКОЕ ВЫДЕЛЕНИЕ) */"
+                                                                                                                          "QStatusBar QPushButton:hover { "
+                                                                                                                          "   background-color: " + (isDark ? "#3daee9" : "#bdecff") + " !important; " /* Насыщенный синий для темной / Яркий голубой для светлой темы */
+                                                                                                                          "   color: " + (isDark ? "#ffffff" : "#004b73") + " !important; "             /* Белый текст на темной / Контрастный синий на светлой теме */
+                                                                                                                          "}"
+                                                                                                                          "/* СОСТОЯНИЕ НАЖАТИЯ: точная копия вкладки со скриншота */"
+                                                                                                                          "QStatusBar QPushButton:checked { "
+                                                                                                                          "   background-color: #d6d6d6 !important; " /* Плотный серый фон */
+                                                                                                                          "   color: #232629 !important; "             /* Темный текст */
+                                                                                                                          "}"
+                                                                                                                          "QStatusBar QPushButton:checked:hover { "
+                                                                                                                          "   background-color: #cccccc !important; "
+                                                                                                                          "}";
+
 
                             "/* Окно переписки чата ИИ */"
                             "QTextBrowser#chatLogWidget { "

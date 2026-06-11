@@ -14,6 +14,8 @@
 #include <QSyntaxHighlighter>
 #include <QRegularExpression>
 #include <QTextCharFormat>
+#include <QProcess>
+#include <QTimer>
 
 class CodeEditor;
 class Neuro_program;
@@ -73,12 +75,24 @@ class CodeEditor : public QPlainTextEdit {
 
 public:
     CodeEditor(QWidget *parent = nullptr);
+    virtual ~CodeEditor();
     void lineNumberAreaPaintEvent(QPaintEvent *event);
     int lineNumberAreaWidth();
     void setCompleter(QCompleter *completer);
     QString textUnderCursor() const;
     QStringList temporaryOpenFilesBackup;
     void updateFoldingData();
+    struct LspErrorData {
+        int line;
+        int startChar;
+        int endChar;
+        bool isError;
+    };
+    static QList<LspErrorData> currentLspErrors;
+    QString currentFilePath;
+
+signals:
+    void logMessage(const QString &message);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -92,6 +106,9 @@ private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
     void highlightCurrentLine();
     void updateLineNumberArea(const QRect &rect, int dy);
+    void onLspReadyRead();
+    void sendLspDidChange();
+    void applySelectionsFromLsp();
 
 private:
     QWidget *lineNumberArea;
@@ -101,7 +118,16 @@ private:
     QListWidget *m_listWidget = nullptr;
     int m_startPosition = 0;
     FoldingArea *m_foldingArea = nullptr;
+    QProcess *lspProcess = nullptr;
+    QTimer *lspDelayTimer = nullptr;
     int foldingAreaWidth() { return 16; }
+    void clearErrorHighlights();
+    void highlightError(int startLine, int startChar, int endLine, int endChar, bool isError);
+    QList<QTextEdit::ExtraSelection> lspExtraSelections;
+    PythonHighlighter *m_highlighter = nullptr;
+    int lspDocumentVersion = 1;
+    QList<QTextEdit::ExtraSelection> m_lspSelectionsBuffer;
+    void sendLspDidOpen();
 };
 
 class FoldingArea : public QWidget

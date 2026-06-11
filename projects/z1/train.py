@@ -5,7 +5,7 @@ import sys
 import os
 import argparse
 import time
-import globss
+import globs
 
 # ОТКЛЮЧАЕМ ОКНА MATPLOTLIB ДЛЯ ФОНОВОГО РЕЖИМА C++
 import matplotlib
