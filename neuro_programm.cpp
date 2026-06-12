@@ -84,7 +84,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         if (!currentEditor) return;
 
         // Отключаем старые коннекты
-        disconnect(currentEditor, &CodeEditor::textChanged, this, nullptr);
+        //disconnect(currentEditor, &CodeEditor::textChanged, this, nullptr);
 
         // Подключаем чистый сигнал ввода текста
         // Убедитесь, что на странице 2 код внутри connect(currentEditor, &CodeEditor::textChanged...) выглядит так:
@@ -1389,16 +1389,44 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
 Neuro_programm::~Neuro_programm()
 {
-    if (lspProcess) {
-        lspProcess->disconnect(); // Намертво отключаем сигналы чтения логов
-        lspProcess->kill();       // Посылаем системный сигнал завершения
-        lspProcess->waitForFinished(300); // Даем 300мс на безопасную очистку ОЗУ
-    }
+    if (lspProcess && lspProcess->state() == QProcess::Running)
+    {
+        // 1. Отключаем асинхронные сигналы чтения, чтобы не спамить в закрывающийся интерфейс
+        lspProcess->disconnect(this);
 
-    if (trainingProcess) {
-        trainingProcess->disconnect();
-        trainingProcess->kill();
-        trainingProcess->waitForFinished(300);
+        // 2. Отправляем СИНХРОННЫЙ пакет деинициализации "shutdown"
+        QJsonObject jsonObject;
+        jsonObject["jsonrpc"] = "2.0";
+        jsonObject["id"] = 9999;
+        jsonObject["method"] = "shutdown";
+        jsonObject["params"] = QJsonObject();
+
+        QJsonDocument jsonDocument(jsonObject);
+        lspProcess->write(jsonDocument.toJson(QJsonDocument::Compact));
+        lspProcess->waitForBytesWritten(300); // Выталкиваем байты в пайп Linux
+
+        // 3. ЖДЕМ ОТВЕТА ОТ СЕРВЕРА (Критично, чтобы Python успел дописать результат в сокет)
+        if (lspProcess->waitForReadyRead(300)) {
+            lspProcess->readAllStandardOutput(); // Вычитываем ответ сервера "в пустоту"
+        }
+
+        // 4. Отправляем уведомление "exit" (у него по стандарту LSP нет id)
+        jsonObject["method"] = "exit";
+        jsonObject.remove("id");
+        jsonDocument.setObject(jsonObject);
+
+        lspProcess->write(jsonDocument.toJson(QJsonDocument::Compact));
+        lspProcess->waitForBytesWritten(300);
+
+        // 5. БРОНИРОВАННЫЙ ФИКС ДЛЯ КОДА 1:
+        // Мы отвязываем указатель на процесс от дерева Qt, чтобы деструктор
+        // главного окна не уничтожал дескрипторы пайпов насильно!
+        lspProcess->setParent(nullptr);
+
+        // Вежливо просим процесс завершиться силами ОС в фоне Linux
+        if (lspProcess->state() == QProcess::Running) {
+            lspProcess->terminate();
+        }
     }
 
     delete ui;
@@ -2746,6 +2774,7 @@ void Neuro_programm::saveCurrentActiveFile()
     }
 
     CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+    if (!currentEditor) return;
     if (currentEditor) {
         QFile file(absoluteFilePath);
         if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -2794,9 +2823,6 @@ void Neuro_programm::saveCurrentActiveFile()
     }
 }
 
-// =============================================================================
-// 2. АЛГОРИТМ СОХРАНЕНИЯ ВСЕГО ПРОЕКТА ЦЕЛИКОМ (Ctrl + Shift + S)
-// =============================================================================
 void Neuro_programm::saveAllProjectChanges()
 {
     // ШАГ А. Принудительно перезаписываем живые параметры пульта (эпохи, батчи) в .pystudio
@@ -3015,9 +3041,11 @@ void Neuro_programm::initLspServer()
 
     // Перехватчик потока ошибок (Для отлова внутренних сбоев Jedi)
     connect(lspProcess, &QProcess::readyReadStandardError, this, [this]() {
-        QByteArray errData = lspProcess->readAllStandardError();
-        std::cerr << " [JEDI СИСТЕМНЫЙ ВЫВОД ERR]:\n" << errData.toStdString() << std::endl;
-        std::cerr.flush();
+        QByteArray lspErrors = lspProcess->readAllStandardError();
+        if (!lspErrors.isEmpty()) {
+            fprintf(stderr, "\n[JEDI PYTHON ВНУТРЕННИЙ ЛОГ]: %s\n", lspErrors.constData());
+            fflush(stderr);
+        }
     });
 
     // Мониторинг непредвиденного падения процесса
@@ -3119,56 +3147,34 @@ void Neuro_programm::initLspServer()
     std::cerr.flush();
 }
 
-void Neuro_programm::sendLspRequest(const QString &method, QJsonObject params)
+void Neuro_programm::sendLspRequest(const QString &method, const QJsonObject &params, int id)
 {
     if (!lspProcess || lspProcess->state() != QProcess::Running) return;
 
-    QJsonObject requestObj;
-    requestObj["jsonrpc"] = "2.0";
-    requestObj["method"] = method;
+    // 1. Собираем чистый JSON-пакет
+    QJsonObject jsonObject;
+    jsonObject["jsonrpc"] = "2.0";
+    jsonObject["method"] = method;
+    jsonObject["params"] = params;
 
-    // --- МОДЕРНИЗАЦИЯ: ПЕРЕХВАТ ПАКЕТА INITIALIZE ДЛЯ ВКЛЮЧЕНИЯ ЛИНТИНГА ВНУТРИ ФУНКЦИЙ DEF ---
-    if (method == "initialize") {
-        // Создаем объект конфигурации для jedi-language-server
-        QJsonObject initializationOptions;
-        QJsonObject diagnosticsOpts;
-
-        diagnosticsOpts["enable"] = true;    // Принудительно включаем встроенный линтер Jedi
-        diagnosticsOpts["didChange"] = true; // Даем команду проверять код сразу при изменении текста, а не при сохранении
-
-        initializationOptions["diagnostics"] = diagnosticsOpts;
-
-        // Внедряем эти опции внутрь переданного объекта параметров params
-        params["initializationOptions"] = initializationOptions;
-    }
-    // ---------------------------------------------------------------------------------------
-
-    // Супер-фикс для валидатора pygls (убирает KeyError)
-    if (method == "initialized") {
-        requestObj["params"] = QJsonValue::Null;
-    } else {
-        requestObj["params"] = params; // Для initialize сюда уйдут наши новые настройки diagnostics
+    if (id > 0) {
+        jsonObject["id"] = id;
     }
 
-    // Проверяем: если метод НЕ является системным уведомлением (Notification),
-    // то генерируем инкрементальный ID, чтобы сервер прислал нам ответ в readLspResponse
-    QString lowerMethod = method.toLower();
-    if (!lowerMethod.contains("didchange") && !lowerMethod.contains("didopen") &&
-        !lowerMethod.contains("didsave") && lowerMethod != "initialized")
-    {
-        // Это Request (например, textDocument/completion) — ему необходим ID!
-        this->lspRequestId++;
-        requestObj["id"] = this->lspRequestId;
-    }
+    QJsonDocument jsonDocument(jsonObject);
+    // Берем компактный сырой JSON-текст без лишних пробелов
+    QByteArray jsonBytes = jsonDocument.toJson(QJsonDocument::Compact);
 
-    // Упаковываем в монолитный JSON-RPC 2.0 пакет по спецификации LSP
-    QByteArray jsonData = QJsonDocument(requestObj).toJson(QJsonDocument::Compact);
-    QByteArray headerData = QString("Content-Length: %1\r\n\r\n").arg(jsonData.size()).toUtf8();
-    QByteArray monolithicPacket = headerData + jsonData;
+    // 2. СТРОГО ПО СПЕЦИФИКАЦИИ LSP: Формируем правильный заголовок!
+    // Длина должна считаться именно в БАЙТАХ (jsonBytes.size()), а не в символах строки!
+    QByteArray lspHeader = QString("Content-Length: %1\r\n\r\n").arg(jsonBytes.size()).toUtf8();
 
-    // Пишем напрямую в поток запущенного процесса venv
-    lspProcess->write(monolithicPacket);
-    lspProcess->waitForBytesWritten(50);
+    // 3. Отправляем в пайп СНАЧАЛА заголовок, а ЗАТЕМ сам JSON
+    lspProcess->write(lspHeader);
+    lspProcess->write(jsonBytes);
+
+    // Принудительно выталкиваем данные в Linux пайп, чтобы убрать микрофризы
+    lspProcess->waitForBytesWritten(30);
 }
 
 
@@ -3350,7 +3356,7 @@ void Neuro_programm::readLspResponse()
 
         // СЛУЧАЙ 1: Пакет оборван на полуслове (парсер ругается на неожиданный конец файла)
         if (parseError.error == QJsonParseError::UnterminatedObject ||
-            parseError.error == QJsonParseError::UnterminatedArray)
+                parseError.error == QJsonParseError::UnterminatedArray)
         {
             return; // Спокойно выходим и ждем, когда QProcess догрузит оставшиеся байты
         }
@@ -3358,132 +3364,187 @@ void Neuro_programm::readLspResponse()
         // СЛУЧАЙ 2: Пакет успешно распарсился!
         if (parseError.error == QJsonParseError::NoError)
         {
-            // Вычисляем, сколько байт реально занял этот JSON-объект на диске
             QJsonObject rootObj = doc.object();
 
-                     // 2. Вычисляем, сколько байт реально занял этот JSON-объект на диске
-                     int actualJsonSize = doc.toJson(QJsonDocument::Compact).size();
+            // Вычисляем, сколько байт реально занял этот JSON-объект на диске
+            int actualJsonSize = doc.toJson(QJsonDocument::Compact).size();
 
-                     // КРИТИЧЕСКИЙ ФИКС ДЛЯ ОЧИСТКИ БУФЕРА ОТ ХВОСТОВЫХ \r\n
-                     // Мы продвигаем очередь, стирая и заголовки, и сам JSON, и символы переноса строки за ним!
-                     int bytesToRemove = jsonStartIndex + actualJsonSize;
-                     while (bytesToRemove < lspBuffer.size() && (lspBuffer[bytesToRemove] == '\r' || lspBuffer[bytesToRemove] == '\n')) {
-                         bytesToRemove++; // Поглощаем скрытый мусор \r\n, который ломал парсер на следующей итерации!
-                     }
-                     lspBuffer.remove(0, bytesToRemove);
-
-                     // =========================================================================
-                     // НАШ ПЕРЕХВАТЧИК ДИАГНОСТИКИ ОШИБОК (DIAGNOSTICS) - ПУЛЕНЕПРОБИВАЕМЫЙ
-                     // =========================================================================
-                     if (rootObj.value("method").toString() == "textDocument/publishDiagnostics") {
-                         QJsonObject params = rootObj.value("params").toObject();
-                         QJsonArray diagnostics = params.value("diagnostics").toArray();
-
-                         // Намертво очищаем старый глобальный массив активных ошибок
-                         Neuro_programm::globalLspErrors.clear();
-
-                         // Наполняем массив координатами ошибок от Jedi
-                         for (int i = 0; i < diagnostics.size(); ++i) {
-                             QJsonObject diagObj = diagnostics[i].toObject();
-                             int severity = diagObj.value("severity").toInt();
-
-                             QJsonObject range = diagObj.value("range").toObject();
-                             QJsonObject start = range.value("start").toObject();
-                             QJsonObject end = range.value("end").toObject();
-
-                             Neuro_programm::LspErrorData errorBlock;
-                             errorBlock.line = start.value("line").toInt();
-                             errorBlock.startChar = start.value("character").toInt();
-                             errorBlock.endChar = end.value("character").toInt();
-                             errorBlock.isError = (severity == 1);
-
-                             Neuro_programm::globalLspErrors.append(errorBlock);
-                         }
-
-                         // ПОТОКОБЕЗОПАСНЫЙ И УМНЫЙ ВЫЗОВ ПЕРЕРИСОВКИ ЧЕРЕЗ QPOINTER
-                         if (ui->centralStackedWidget) {
-                             QWidget *currentWidget = ui->centralStackedWidget->currentWidget();
-                             if (currentWidget) {
-                                 CodeEditor *editor = currentWidget->findChild<CodeEditor*>();
-                                 if (editor && editor->document()) {
-
-                                     int totalChars = static_cast<int>(editor->document()->characterCount());
-
-                                     // ХИТРОСТЬ: Заворачиваем сырой указатель в умный QPointer.
-                                     // Если за время нахождения в очереди GUI-потока виджет editor будет уничтожен,
-                                     // safeEditor автоматически превратится в nullptr, предотвращая Segmentation fault!
-                                     QPointer<CodeEditor> safeEditor(editor);
-
-                                     QMetaObject::invokeMethod(this, [safeEditor, totalChars]() {
-                                         // ПРОВЕРЯЕМ: Если safeEditor равен null, значит виджет уже удален.
-                                         // Мы просто безопасно выходим из функции без падения программы!
-                                         if (safeEditor.isNull()) {
-                                             return;
-                                         }
-
-                                         // Дополнительно проверяем валидность внутренних компонентов перед вызовом testAttribute
-                                         if (safeEditor->document() && safeEditor->viewport()) {
-                                             safeEditor->document()->markContentsDirty(0, totalChars);
-                                             safeEditor->viewport()->update();
-                                         }
-                                     }, Qt::QueuedConnection);
-                                 }
-                             }
-                         }
-                         continue; // Уведомление успешно обработано, переходим к следующему пакету в цикле while
-                     }
-
-
-            // =========================================================================
-            // ВАШ РОДНОЙ ИЗНАЧАЛЬНЫЙ КОД ОБРАБОТКИ ПАКЕТОВ С "id" (НЕИЗМЕНЯЕМЫЙ)
-            // =========================================================================
-            if (!rootObj.contains("id")) {
-                continue; // Переходим к следующему пакету в цикле while
+            // КРИТИЧЕСКИЙ ФИКС ДЛЯ ОЧИСТКИ БУФЕРА ОТ ХВОСТОВЫХ \r\n
+            int bytesToRemove = jsonStartIndex + actualJsonSize;
+            while (bytesToRemove < lspBuffer.size() && (lspBuffer[bytesToRemove] == '\r' || lspBuffer[bytesToRemove] == '\n')) {
+                bytesToRemove++; // Поглощаем скрытый мусор \r\n, который ломал парсер на следующей итерации!
             }
+            lspBuffer.remove(0, bytesToRemove);
 
-            int responseId = rootObj["id"].toInt();
+            // =========================================================================
+            // ВЕТКА А: НАШ ПЕРЕХВАТЧИК ДИАГНОСТИКИ ОШИБОК (DIAGNOSTICS)
+            // =========================================================================
+            if (rootObj.value("method").toString() == "textDocument/publishDiagnostics")
+            {
+                QJsonObject params = rootObj.value("params").toObject();
+                QJsonArray diagnostics = params.value("diagnostics").toArray();
 
-            // Ответ на initialize (id: 1) — завершаем рукопожатие
-            if (responseId == 1) {
-                std::clog << " [LSP УСПЕХ] Рукопожатие с Jedi пройдено!" << std::endl;
-                std::clog.flush();
-                QJsonObject initializedParams;
-                this->sendLspRequest("initialized", initializedParams);
+                // ФИКС СЧЕТЧИКА №1: Очищаем старый глобальный массив ОДИН РАЗ до цикла for
+                Neuro_programm::globalLspErrors.clear();
+
+                // Буфер для накопления графических маркеров ошибок
+                QList<QTextEdit::ExtraSelection> newSelections;
+
+                // Заранее находим активный CodeEditor в centralStackedWidget [на основе предыдущих контекстов]
+                CodeEditor* activeEditor = nullptr;
+                if (ui->centralStackedWidget) {
+                    QWidget* currentWidget = ui->centralStackedWidget->currentWidget();
+                    if (currentWidget) {
+                        activeEditor = currentWidget->findChild<CodeEditor*>();
+                    }
+                }
+
+                // Шаг А.1: Перебираем и наполняем массив всеми ошибками из пакета Jedi [на основе предыдущих контекстов]
+                for (int i = 0; i < diagnostics.size(); ++i)
+                {
+                    QJsonObject diagObj = diagnostics[i].toObject();
+                    int severity = diagObj.value("severity").toInt();
+                    QJsonObject range = diagObj.value("range").toObject();
+                    QJsonObject start = range.value("start").toObject();
+                    QJsonObject end = range.value("end").toObject();
+
+                    Neuro_programm::LspErrorData errorBlock;
+                    errorBlock.line = start.value("line").toInt();
+                    errorBlock.startChar = start.value("character").toInt();
+                    errorBlock.endChar = end.value("character").toInt();
+                    errorBlock.isError = (severity == 1);
+
+                    // Сохраняем ошибку в глобальный массив для внутренних нужд приложения
+                    Neuro_programm::globalLspErrors.append(errorBlock);
+
+                    // Сборка графического формата для конкретного слова на экране [на основе предыдущих контекстов]
+                    if (activeEditor && activeEditor->document())
+                    {
+                        QTextEdit::ExtraSelection selection;
+
+                        // ФИКС ЛИНЕЙКИ №1: Возвращаем чистую и яркую красную волну [на основе предыдущих контекстов]
+                        QColor brightRed("#ff2a2a");
+                        selection.format.setUnderlineColor(brightRed);
+                        selection.format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+                        selection.format.setFontUnderline(true); // Гарантия принудительной отрисовки
+
+                        // ФИКС ЛИНЕЙКИ №2: Выделяем текст полупрозрачным красным фоном (Стандарт VS Code/PyCharm)
+                        selection.format.setBackground(QColor(255, 42, 42, 35)); // 35 — мягкая прозрачность
+
+                        QTextCursor cursor(activeEditor->document());
+                        QTextBlock block = activeEditor->document()->findBlockByLineNumber(errorBlock.line);
+
+                        if (block.isValid()) {
+                            int startPos = block.position() + errorBlock.startChar;
+                            int endPos = block.position() + (errorBlock.endChar <= errorBlock.startChar ? errorBlock.startChar + 1 : errorBlock.endChar);
+
+                            cursor.setPosition(startPos);
+                            cursor.setPosition(endPos, QTextCursor::KeepAnchor);
+                            selection.cursor = cursor;
+
+                            newSelections.append(selection); // Добавляем маркер в общий список
+                        }
+                    }
+                } // <--- КОНЕЦ ЦИКЛА FOR (Все ошибки собраны в newSelections!)
+
+                // =====================================================================
+                // ФИКС СЧЕТЧИКА №2: ОТПРАВКА ПОЛНОГО ПАКЕТА ОШИБОК В GUI (ВНЕ ЦИКЛА FOR) [на основе предыдущих контекстов]
+                // =====================================================================
+                if (activeEditor && activeEditor->document())
+                {
+                    // 1. Передаем ВСЕ накопленные ExtraSelections в активный редактор за один вызов
+                    QMetaObject::invokeMethod(activeEditor, "applySelectionsFromLsp",
+                                              Qt::QueuedConnection,
+                                              Q_ARG(QList<QTextEdit::ExtraSelection>, newSelections));
+
+                    // 2. Обновляем вьюпорт редактора через очередь событий Qt [на основе предыдущих контекстов]
+                    int totalChars = static_cast<int>(activeEditor->document()->characterCount());
+                    QPointer<CodeEditor> safeEditor(activeEditor);
+                    QMetaObject::invokeMethod(this, [safeEditor, totalChars]() {
+                        if (safeEditor.isNull()) return;
+                        if (safeEditor->document() && safeEditor->viewport()) {
+                            safeEditor->document()->markContentsDirty(0, totalChars);
+                            safeEditor->viewport()->update();
+                        }
+                    }, Qt::QueuedConnection);
+                }
+
+                // 3. Выводим ТОЧНУЮ сумму всех ошибок пакета в StatusBar главного окна [на основе предыдущих контекстов]
+                if (ui->centralStackedWidget && this->statusBar()) {
+                    // 1. Полностью очищаем старое зависшее сообщение из памяти Qt
+                        this->statusBar()->clearMessage();
+
+                        if (!newSelections.isEmpty())
+                        {
+                            // 2. Выводим актуальное количество ошибок из свежего пакета Jedi
+                            this->statusBar()->showMessage(
+                                QString("Jedi: Обнаружено ошибок синтаксиса: %1").arg(newSelections.size())
+                            );
+                            this->statusBar()->setStyleSheet("QStatusBar { color: #ff2a2a; font-weight: bold; }");
+                        }
+                        else
+                        {
+                            // Если ошибок нет (пользователь всё исправил) — выводим чистый статус на 3 секунды
+                            this->statusBar()->showMessage("Jedi: Ошибок в коде не найдено", 3000);
+                            this->statusBar()->setStyleSheet("QStatusBar { color: #00ff00; font-weight: normal; }");
+                        }
+
+                        // 3. САМЫЙ ГЛАВНЫЙ ГРАФИЧЕСКИЙ ФИКС:
+                        // Мы принудительно заставляем операционную систему Linux мгновенно перерисовать
+                        // пиксели статус-бара на экране в обход общей асинхронной очереди Qt!
+                        this->statusBar()->repaint();
+                }
+
                 continue;
             }
-
-            // Обрабатываем долгожданный пакет автодополнения (textDocument/completion)
+            // <--- КОНЕЦ ВЕТКИ А// =========================================================================
+            // ВЕТКА Б: ВАШ РОДНОЙ ИЗНАЧАЛЬНЫЙ КОД ОБРАБОТКИ ПАКЕТОВ С "id" (НЕИЗМЕНЯЕМЫЙ)
+            // =========================================================================
             if (rootObj.contains("result"))
-            {
-                QJsonValue resultVal = rootObj["result"];
-                QJsonArray itemsArray;
-                if (resultVal.isArray()) {
-                    itemsArray = resultVal.toArray();
-                } else if (resultVal.isObject() && resultVal.toObject().contains("items")) {
-                    itemsArray = resultVal.toObject()["items"].toArray();
-                }
+                        {
+                            QJsonValue resultVal = rootObj["result"];
+                            QJsonArray itemsArray;
 
-                QStringList completionList;
-                for (int i = 0; i < itemsArray.size(); ++i) {
-                    QJsonObject item = itemsArray[i].toObject();
-                    QString label = item["label"].toString();
-                    if (!label.isEmpty()) completionList.append(label);
-                }
+                            if (resultVal.isArray()) {
+                                itemsArray = resultVal.toArray();
+                            } else if (resultVal.isObject() && resultVal.toObject().contains("items")) {
+                                itemsArray = resultVal.toObject()["items"].toArray();
+                            }
 
-                std::clog << " [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов: "
-                          << completionList.size() << ". Отправляю в GUI..." << std::endl;
-                std::clog.flush();
+                            QStringList completionList;
+                            for (int i = 0; i < itemsArray.size(); ++i)
+                            {
+                                QJsonObject item = itemsArray[i].toObject();
+                                QString label = item["label"].toString();
+                                if (!label.isEmpty()) completionList.append(label);
+                            }
 
-                if (!completionList.isEmpty()) {
-                    // Испускаем сигнал межпотокового взаимодействия для вывода QMenu
-                    emit this->completionDataReceived(completionList);
-                }
-            }
-            continue;
-        }
+                            // Железный низкоуровневый лог в терминал Linux
+                            qInfo() << "[ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Элементов:" << completionList.size();
 
-        // СЛУЧАЙ 3: Если в буфере застрял совсем непонятный мусор, из-за которого Qt выдает ошибку,
-        // мы просто сдвигаем буфер на 1 байт вперед, чтобы не зайти в бесконечный цикл зависания.
+                            if (!completionList.isEmpty()) {
+                                // Испускаем ваш родной сигнал межпотокового взаимодействия для вывода виджета
+                                emit this->completionDataReceived(completionList);
+                            }
+
+                            continue; // Успешно обработали пакет автодополнения, идем к следующему
+                        }
+
+                        // Ниже оставляем проверку на уникальные ID (например, наш Quick Fix с id: 999)
+                        if (rootObj.contains("id"))
+                        {
+                            int responseId = rootObj["id"].toInt();
+
+                            // Перехватчик ID: 999 (Быстрые исправления ошибок по Alt+Enter)
+                            if (responseId == 999) {
+                                // ... (тут ваш рабочий С++ код парсинга QuickFixAction и вызова showQuickFixMenu) ...
+                                continue;
+                            }
+                        }
+
+                        continue;
+
+        }// СЛУЧАЙ 3: Защита от зависания буфера при битых байтах
         lspBuffer.remove(0, jsonStartIndex + 1);
     }
 }

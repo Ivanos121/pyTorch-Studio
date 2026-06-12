@@ -16,7 +16,9 @@
 #include <QTcpSocket>
 #include "settings.h"
 #include "statusbuttonstyle.h"
+
 #include "about_program.h"
+#include <QIODevice>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -38,7 +40,7 @@ public:
     void forceOpenConsoleWithError(const QString &errorMessage);
     static Neuro_programm* self;
     QString getCurrentOpenFilePath() const;
-    void sendLspRequest(const QString &method, QJsonObject params);
+    void sendLspRequest(const QString &method, const QJsonObject &params, int id = 0);
     QStringList temporaryOpenFilesBackup;
     QProcess* getLspProcess() const { return lspProcess; }
     int globalLspDocVersion = 1;
@@ -51,6 +53,7 @@ public:
         bool isError;
     };
     static QList<LspErrorData> globalLspErrors;
+    QProcess *lspProcess = nullptr;
 
 
 signals:
@@ -135,7 +138,6 @@ private:
     static const int MaxRecentFiles = 5;
     QMenu *recentProjectsMenu;           // Подменю "Открыть недавние"
     QAction *recentProjectActions[MaxRecentFiles];
-    QProcess *lspProcess = nullptr;
     QCompleter *codeCompleter = nullptr;
     QStringListModel *completerModel = nullptr;
     QString venvPythonBinary;
@@ -151,6 +153,7 @@ private:
     QPushButton *topBtnInfo = nullptr;
     QPushButton *topBtnStatus = nullptr;
     QPushButton *topBtnSettings = nullptr;
+    QByteArray m_lspAccumulatedBuffer;
     bool m_dragging = false;
     class QSpacerItem *leftPaddingSpacer = nullptr; // Указатель на левый отступ фальш-панели
     void updateWidget3Padding();

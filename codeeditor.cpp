@@ -68,8 +68,6 @@ PythonHighlighter::PythonHighlighter(QTextDocument *parent)
     loadThemeSettings();
 }
 
-#include "codeeditor.h" // ОБЯЗАТЕЛЬНО проверьте наличие этого инклуда в самом верху cpp-файла!
-
 void PythonHighlighter::highlightBlock(const QString &text)
 {
     // 1. ВАШ РОДНОЙ ЦИКЛ ОБХОДА МАРКЕРОВ (Ключевые слова, def, class...)
@@ -104,31 +102,7 @@ void PythonHighlighter::highlightBlock(const QString &text)
         setFormat(startIndex, commentLength, multiLineCommentFormat);
         startIndex = tripleDoubleQuote.match(text, startIndex + commentLength).capturedStart();
     }
-
-    // =========================================================================
-    // 3. НАШ МОДЕРНИЗИРОВАННЫЙ СЛОЙ ОШИБОК LSP (ТЕПЕРЬ СТРОГО В САМОМ ФИНАЛЕ!)
-    // =========================================================================
-    if (text.trimmed().isEmpty()) return; // Защита от пустых строк
-
-    int currentLineNumber = currentBlock().blockNumber();
-
-    for (const auto &error : std::as_const(Neuro_programm::globalLspErrors)) {
-        if (error.line == currentLineNumber) {
-            // Выделяем всю строку, где зафиксирован SyntaxError внутри функции
-            int startChar = 0;
-            int length = text.length();
-
-            QTextCharFormat errorFormat;
-            errorFormat.setUnderlineStyle(QTextCharFormat::WaveUnderline); // Волнистая линия
-            errorFormat.setUnderlineColor(error.isError ? Qt::red : QColor(255, 165, 0)); // Красный / Оранжевый
-
-            // Накладываем графику в самый последний момент.
-            // Теперь Qt нарисует линию ПОВЕРХ любого кода, Docstring или комментария внутри функции!
-            setFormat(startChar, length, errorFormat);
-        }
-    }
-} // Самый конец функции highlightBlock
-
+}
 
 void PythonHighlighter::loadThemeSettings()
 {
@@ -174,11 +148,22 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
     this->lspDocumentVersion = 1; // Стартовая версия документа для сессии
 
     // --- 1. ЗАПУСК И АППАРАТНОЕ РУКОПОЖАТЬЕ LSP-СЕРВЕРА ---
-    lspProcess = new QProcess(this); //
-    QStringList arguments;
-    arguments << "-m" << "pylsp"; // Запуск python-lsp-server / jedi
+    lspProcess = new QProcess(this);
 
-    lspProcess->start("python3", arguments); //
+    QStringList arguments;
+    // ОБЯЗАТЕЛЬНО возвращаем этот флаг, чтобы запустить сервер, а не пустой интерпретатор!
+    arguments << "-m" << "pylsp";
+
+    // Указываем путь к python именно ВНУТРИ вашего venv
+    QString pythonExecutable = "/home/elf/projects/z1/venv/bin/python";
+
+    // Запускаем с флагом QIODevice::Unbuffered для отключения буферизации пайпов
+    lspProcess->start(pythonExecutable, arguments, QIODevice::ReadWrite | QIODevice::Unbuffered);
+
+    connect(lspProcess, &QProcess::errorOccurred, this, [](QProcess::ProcessError error) {
+        fprintf(stderr, "\n!!! [LSP КРИТИЧЕСКИЙ СБОЙ] Процесс Jedi выдал ошибку: %d !!!\n", error);
+        fflush(stderr);
+    });
 
     if (lspProcess->waitForStarted(2000)) { //
         qDebug() << "[LSP SUCCESS] Процесс запущен. PID:" << lspProcess->processId();
@@ -244,8 +229,15 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
     // Наш таймер дебаунса (остается без изменений)
     lspDelayTimer = new QTimer(this);
     lspDelayTimer->setSingleShot(true);
-    connect(lspDelayTimer, &QTimer::timeout, this, [this]() {
-        this->sendLspDidChange();
+    // connect(lspDelayTimer, &QTimer::timeout, this, [this]() {
+    //     this->sendLspDidChange();
+    // });
+
+    connect(lspDelayTimer, &QTimer::timeout, this, &CodeEditor::sendLspDidChange);
+
+    // При любом изменении текста перезапускаем таймер заново
+    connect(this, &CodeEditor::textChanged, this, [this]() {
+        lspDelayTimer->start();
     });
 
     // КРИТИЧЕСКИЙ АРХИТЕКТУРНЫЙ ФИКС ДЛЯ QT:
@@ -272,7 +264,7 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
     connect(this, &CodeEditor::cursorPositionChanged, this, &CodeEditor::highlightCurrentLine); //
 
     // Потокобезопасный асинхронный коннект чтения готовой диагностики от сервера
-    connect(lspProcess, &QProcess::readyReadStandardOutput, this, &CodeEditor::onLspReadyRead); //
+   // connect(lspProcess, &QProcess::readyReadStandardOutput, this, &CodeEditor::onLspReadyRead); //
 
     // Обновление геометрии фолдинга и отступов
     connect(this, &CodeEditor::textChanged, this, &CodeEditor::updateFoldingData); //
@@ -292,11 +284,20 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
 
 CodeEditor::~CodeEditor()
 {
-    // Безопасное завершение процесса фонового сервера Jedi
-    if (lspProcess && lspProcess->state() != QProcess::NotRunning) {
-        lspProcess->kill();               // Намертво завершаем процесс в ОС Linux
-        lspProcess->waitForFinished(1000); // Блокируем поток максимум на 1 сек, ожидая выхода
+    // Очищаем локальные буферы и таймеры конкретно этой вкладки
+    if (lspDelayTimer) {
+        lspDelayTimer->stop();
+        delete lspDelayTimer;
+        lspDelayTimer = nullptr;
     }
+
+    // --- УДАЛЯЕМ УБИЙСТВО ГЛОБАЛЬНОГО ПРОЦЕССА! ---
+    // Вкладка закрывается мирно, процесс lspProcess НЕ трогаем.
+    // Им теперь централизованно управляет главное окно Neuro_programm.
+    lspProcess = nullptr;
+
+    // Очищаем бэкапы файлов, если они создавались этой вкладкой
+    temporaryOpenFilesBackup.clear();
 }
 
 int CodeEditor::lineNumberAreaWidth() {
@@ -383,17 +384,22 @@ void CodeEditor::highlightCurrentLine()
 {
     QList<QTextEdit::ExtraSelection> extraSelections;
 
-    if (!isReadOnly())
-    {
+    // 1. Рисуем стандартную голубую/серую полосу под текущей строкой (ваш оригинальный код)
+    if (!isReadOnly()) {
         QTextEdit::ExtraSelection selection;
-        selection.format.setBackground(QColor(228, 242, 252));
+        selection.format.setBackground(QColor(228, 242, 252)); // цвет текущей строки
         selection.format.setProperty(QTextFormat::FullWidthSelection, true);
         selection.cursor = textCursor();
         selection.cursor.clearSelection();
         extraSelections.append(selection);
     }
 
-    setExtraSelections(extraSelections);
+    // 2. САМЫЙ КРИТИЧЕСКИЙ ФИКС: Принудительно склеиваем полосу строки с ошибками Jedi!
+    // Благодаря этому, когда Qt обновляет строку под курсором, красные линии НЕ ИСЧЕЗНУТ.
+    extraSelections.append(m_currentLspSelections);
+
+    // 3. Отдаем объединенный буфер в систему отображения Qt
+    this->setExtraSelections(extraSelections);
 }
 
 void CodeEditor::keyPressEvent(QKeyEvent *e)
@@ -403,33 +409,88 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
     // =========================================================================
     if (m_popupWindow && m_popupWindow->isVisible() && m_listWidget)
     {
-        // 1. Управление стрелками Up / Down внутри списка
-        if (e->key() == Qt::Key_Up) {
-            int currentRow = m_listWidget->currentRow();
-            for (int i = currentRow - 1; i >= 0; --i) {
-                if (!m_listWidget->item(i)->isHidden()) {
-                    m_listWidget->setCurrentRow(i);
-                    break;
+        if (m_popupWindow && m_popupWindow->isVisible() && m_listWidget)
+        {
+            switch (e->key())
+            {
+            case Qt::Key_Down: {
+                // Перемещаем выделение в списке на одну строку вниз
+                int currentRow = m_listWidget->currentRow();
+                if (currentRow < m_listWidget->count() - 1) {
+                    m_listWidget->setCurrentRow(currentRow + 1);
                 }
+                e->accept(); // Поглощаем событие, чтобы текстовый курсор не двигался вниз!
+                return;
             }
-            return; // Запрещаем курсору в текстовом поле прыгать вверх
+            case Qt::Key_Up: {
+                // Перемещаем выделение в списке на одну строку вверх
+                int currentRow = m_listWidget->currentRow();
+                if (currentRow > 0) {
+                    m_listWidget->setCurrentRow(currentRow - 1);
+                }
+                e->accept(); // Поглощаем событие, чтобы текстовый курсор не двигался вверх!
+                return;
+            }
+            case Qt::Key_PageDown: {
+                // Прокручиваем список на страницу вниз
+                int nextRow = qMin(m_listWidget->count() - 1, m_listWidget->currentRow() + 5);
+                m_listWidget->setCurrentRow(nextRow);
+                e->accept();
+                return;
+            }
+            case Qt::Key_PageUp: {
+                // Прокручиваем список на страницу вверх
+                int prevRow = qMax(0, m_listWidget->currentRow() - 5);
+                m_listWidget->setCurrentRow(prevRow);
+                e->accept();
+                return;
+            }
+            default:
+                break;
+            }
         }
 
-        if (e->key() == Qt::Key_Down) {
-            int currentRow = m_listWidget->currentRow();
-            for (int i = currentRow + 1; i < m_listWidget->count(); ++i) {
-                if (!m_listWidget->item(i)->isHidden()) {
-                    m_listWidget->setCurrentRow(i);
-                    break;
-                }
+
+        if (e->modifiers() == Qt::AltModifier && (e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return))
+        {
+            e->accept();
+
+            QJsonObject params;
+            QJsonObject textDocument;
+            textDocument["uri"] = "file://" + this->currentFilePath;
+            params["textDocument"] = textDocument;
+
+            // Передаем текущие координаты курсора
+            QTextCursor cursor = this->textCursor();
+            QJsonObject position;
+            position["line"] = cursor.blockNumber(); // В Qt строки с 0, Jedi это понимает
+            position["character"] = cursor.columnNumber();
+
+            QJsonObject range;
+            range["start"] = position;
+            range["end"] = position;
+            params["range"] = range;
+
+            // Контекст: передаем список ошибок, если они есть (опционально для Jedi)
+            QJsonObject context;
+            QJsonArray diagnostics;
+            context["diagnostics"] = diagnostics;
+            params["context"] = context;
+
+            // Отправляем асинхронный запрос через центральный транспорт
+            if (Neuro_programm::self) {
+                // Используем фиксированный ID для этого запроса (например, 999)
+                Neuro_programm::self->sendLspRequest("textDocument/codeAction", params, 999);
             }
-            return; // Запрещаем курсору в текстовом поле прыгать вниз
+            return;
         }
 
         // 2. Закрытие окна по Esc
         if (e->key() == Qt::Key_Escape) {
-            m_popupWindow->close();
+            m_popupWindow->hide();
+            m_popupWindow->deleteLater();
             m_popupWindow = nullptr;
+            e->accept(); // Говорим Qt, что событие обработано, дальше идти нельзя
             return;
         }
 
@@ -450,8 +511,12 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
                 tc.endEditBlock();
                 this->setTextCursor(tc);
             }
-            m_popupWindow->close();
-            m_popupWindow = nullptr;
+            if (m_popupWindow) {
+                m_popupWindow->hide();
+                m_popupWindow->deleteLater();
+                m_popupWindow = nullptr;
+                m_listWidget = nullptr; // Обязательно очищаем дочерний виджет!
+            }
             return;
         }
 
@@ -482,63 +547,62 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
             // Автоматически переводим фокус на первую совпавшую подсказку
             if (firstVisibleRow != -1) {
                 m_listWidget->setCurrentRow(firstVisibleRow);
-            } else {
-                m_popupWindow->close();
+            } else
+                if (m_popupWindow) {
+                m_popupWindow->hide();
+                m_popupWindow->deleteLater();
                 m_popupWindow = nullptr;
+                m_listWidget = nullptr; // Очищаем, чтобы верхний if больше не срабатывал
             }
-            return;
         }
+        return;
     }
 
     // =========================================================================
     // СЛУЧАЙ 2: ОКНО ЗАКРЫТО — ОТДАЕМ КЛАВИШИ СИСТЕМЕ И ЛОВИМ ВВОД СИМВОЛА ТОЧКИ
     // =========================================================================
-    QPlainTextEdit::keyPressEvent(e);
+    QPlainTextEdit::keyPressEvent(e); // Сначала печатаем точку на экране
 
     if (e->text() == ".")
     {
-        Neuro_programm *mainWin = Neuro_programm::self;
-        if (!mainWin) return;
-
-        QString filePath = mainWin->getCurrentOpenFilePath();
-        if (filePath.isEmpty()) return;
-
-        // Фиксируем стартовую позицию сразу ПОСЛЕ точки
-        m_startPosition = this->textCursor().position();
-
-        // 1. Синхронизируем текст через didChange
-        mainWin->globalLspDocVersion++;
+        // 1. МГНОВЕННО отправляемdidChange для точки, не дожидаясь таймера дебаунса в 300мс!
+        // Это критично, чтобы Jedi узнал о существовании точки ДО того, как мы попросим подсказки.
         QJsonObject changeParams;
-        QJsonObject textDocumentObj;
-        textDocumentObj["uri"] = QUrl::fromLocalFile(filePath).toString();
-        textDocumentObj["version"] = mainWin->globalLspDocVersion;
-        changeParams["textDocument"] = textDocumentObj;
-
-        QString currentFullText = this->toPlainText();
-        currentFullText.remove('\r');
-        if (!currentFullText.endsWith('\n')) currentFullText += "\n";
+        QJsonObject textDocument;
+        textDocument["uri"] = "file://" + this->currentFilePath;
+        textDocument["version"] = ++this->lspDocumentVersion;
+        changeParams["textDocument"] = textDocument;
 
         QJsonArray contentChanges;
-        QJsonObject changeNode;
-        changeNode["text"] = currentFullText;
-        contentChanges.append(changeNode);
+        QJsonObject changeObj;
+        changeObj["text"] = this->toPlainText(); // Отдаем актуальный текст с точкой
+        contentChanges.append(changeObj);
         changeParams["contentChanges"] = contentChanges;
 
-        mainWin->sendLspRequest("textDocument/didChange", changeParams);
+        if (Neuro_programm::self) {
+            Neuro_programm::self->sendLspRequest("textDocument/didChange", changeParams);
+        }
 
-        // 2. Запрашиваем подсказки у Jedi (textDocument/completion)
-        QTextCursor cursor = this->textCursor();
+        // 2. СРАЗУ ЖЕ отправляем запрос на получение подсказок автодополнения (Completion)
         QJsonObject compParams;
-        QJsonObject docIdentifier;
-        docIdentifier["uri"] = QUrl::fromLocalFile(filePath).toString();
-        compParams["textDocument"] = docIdentifier;
+        QJsonObject compDoc;
+        compDoc["uri"] = "file://" + this->currentFilePath;
+        compParams["textDocument"] = compDoc;
 
-        QJsonObject positionNode;
-        positionNode["line"] = cursor.blockNumber();
-        positionNode["character"] = cursor.columnNumber();
-        compParams["position"] = positionNode;
+        QTextCursor cursor = this->textCursor();
+        QJsonObject position;
+        position["line"] = cursor.blockNumber();      // Текущая строка (с 0)
+        position["character"] = cursor.columnNumber(); // Позиция СРАЗУ ПОСЛЕ точки
+        compParams["position"] = position;
 
-        mainWin->sendLspRequest("textDocument/completion", compParams);
+        if (Neuro_programm::self) {
+            // =====================================================================
+            // КРИТИЧЕСКИЙ ФИКС: Передаем число 100 в качестве третьего аргумента!
+            // Это заставит sendLspRequest добавить обязательное поле "id": 100 в JSON,
+            // и Python-валидатор cattrs больше не упадет с ошибкой KeyError: 'id'!
+            // =====================================================================
+            Neuro_programm::self->sendLspRequest("textDocument/completion", compParams, 100);
+        }
     }
 }
 
@@ -869,132 +933,89 @@ void CodeEditor::mouseDoubleClickEvent(QMouseEvent *e)
 
 void CodeEditor::onLspReadyRead()
 {
-    if (!lspProcess) return;
+    // 1. Дописываем ВСЕ новые сырые данные из процесса в конец нашего буфера
+    m_lspBuffer.append(lspProcess->readAllStandardOutput());
 
-    // Накапливаем сырые данные от процесса LSP сервера в статический буфер
-    static QByteArray buffer;
-    buffer.append(lspProcess->readAllStandardOutput());
+    // 2. Крутим цикл, пока в буфере есть целые пакеты
+    while (true)
+    {
+        // Ищем начало заголовка размера пакета
+        int contentLengthIndex = m_lspBuffer.indexOf("Content-Length:");
+        if (contentLengthIndex == -1) break; // Заголовка еще нет, ждем данные
 
-    // Ищем разделитель заголовков и тела JSON-RPC пакета
-    int separatorIndex = buffer.indexOf("\r\n\r\n");
+        // Ищем маркер конца заголовков (двойной перенос строки)
+        int jsonStartIndex = m_lspBuffer.indexOf("\r\n\r\n", contentLengthIndex);
+        if (jsonStartIndex == -1) break; // Заголовок пришел не полностью, ждем данные
+        jsonStartIndex += 4; // Смещаем указатель на фактическое начало JSON текста
 
-    while (separatorIndex != -1) {
-        QByteArray headers = buffer.left(separatorIndex);
+        // Вытаскиваем число размера пакета из строки "Content-Length: 123"
+        int headerLengthOffset = contentLengthIndex + 15;
+        QByteArray lengthString = m_lspBuffer.mid(headerLengthOffset, (jsonStartIndex - 4) - headerLengthOffset).trimmed();
+        int expectedJsonLength = lengthString.toInt();
 
-        // Парсим заголовок Content-Length, чтобы знать точный размер JSON
-        int contentLength = 0;
-        QList<QByteArray> headerLines = headers.split('\n');
-    for (const QByteArray &line : std::as_const(headerLines)) {
-            if (line.trimmed().startsWith("Content-Length:")) {
-                contentLength = line.mid(line.indexOf(':') + 1).trimmed().toInt();
-            }
+        // Проверяем: накопилось ли в буфере достаточно байт для целого JSON?
+        if (m_lspBuffer.size() < jsonStartIndex + expectedJsonLength) {
+            break; // Пакет еще «долетает» по сети/пайпу, выходим и ждем следующего вызова
         }
 
-        // Ищем первую открывающую скобку по всему доступному буферу
-        int jsonStart = buffer.indexOf('{');
-        if (jsonStart == -1 || jsonStart < separatorIndex) {
-            jsonStart = buffer.indexOf('{', separatorIndex);
-        }
+        // 3. ПАКЕТ СОБРАН! Вырезаем чистый JSON-текст из общего буфера
+        QByteArray cleanJsonData = m_lspBuffer.mid(jsonStartIndex, expectedJsonLength);
 
-        if (jsonStart == -1) {
-            buffer.remove(0, separatorIndex + 4); // Очищаем поврежденные заголовки
-            break;
-        }
+        // Удаляем обработанный кусок из начала буфера, чтобы освободить место для следующих пакетов
+        m_lspBuffer.remove(0, jsonStartIndex + expectedJsonLength);
 
-        // Если Content-Length не прислали, вычисляем размер до конца JSON-структуры
-        if (contentLength <= 0) {
-            int nextHeaderIndex = buffer.indexOf("Content-Type:", jsonStart);
-            if (nextHeaderIndex != -1) {
-                contentLength = nextHeaderIndex - jsonStart;
-            } else {
-                contentLength = buffer.length() - jsonStart;
-            }
-        }
+        // 4. ПАРСИМ ТОЛЬКО ЧИСТЫЙ И ЦЕЛЫЙ JSON
+        QJsonDocument doc = QJsonDocument::fromJson(cleanJsonData);
+        if (doc.isNull()) continue;
 
-        // Защита от фрагментации данных в потоке Linux
-        if (jsonStart + contentLength > buffer.length()) {
-            break; // Пакет долетел не полностью, выходим ждать продолжения
-        }
+        QJsonObject root = doc.object();
 
-        // Вырезаем чистый изолированный JSON-пакет и удаляем его из буфера
-        QByteArray jsonData = buffer.mid(jsonStart, contentLength).trimmed();
-        buffer.remove(0, jsonStart + contentLength);
+        // Проверяем метод
+        if (root.value("method").toString() == "textDocument/publishDiagnostics")
+        {
+            QJsonObject params = root.value("params").toObject();
+            QJsonArray diagnostics = params.value("diagnostics").toArray();
 
-        // Передаем очищенный массив байт в парсер документов Qt
-        QJsonParseError parseError;
-        QJsonDocument doc = QJsonDocument::fromJson(jsonData, &parseError);
+            QList<QTextEdit::ExtraSelection> newSelections;
 
-        if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
-            QJsonObject root = doc.object();
+            for (int i = 0; i < diagnostics.size(); ++i)
+            {
+                QJsonObject diagObj = diagnostics[i].toObject();
+                QJsonObject range = diagObj.value("range").toObject();
+                QJsonObject start = range.value("start").toObject();
+                QJsonObject end = range.value("end").toObject();
 
-            // ПЕРЕХВАТЫВАЕМ ВХОДЯЩУЮ ДИАГНОСТИКУ ОШИБОК ОТ СЕРВЕРА JEDI
-            if (root.value("method").toString() == "textDocument/publishDiagnostics") {
-                QJsonObject params = root.value("params").toObject();
-                QJsonArray diagnostics = params.value("diagnostics").toArray();
+                int startLine = start.value("line").toInt();
+                int startChar = start.value("character").toInt();
+                int endChar = end.value("character").toInt();
 
-                // Очищаем накопительный графический буфер для этой итерации
-                m_lspSelectionsBuffer.clear();
+                QTextEdit::ExtraSelection selection;
 
-                QTextDocument *docObj = this->document();
-                if (docObj) {
-                    // Обходим массив ошибок, присланных сервером
-                    for (int i = 0; i < diagnostics.size(); ++i) {
-                        QJsonObject diagObj = diagnostics[i].toObject();
-                        int severity = diagObj.value("severity").toInt(); // 1 - ошибка, 2 - варнинг
+                // Настройка внешнего вида линии (красная волнистая)
+                selection.format.setUnderlineColor(Qt::red);
+                selection.format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
 
-                        QJsonObject range = diagObj.value("range").toObject();
-                        QJsonObject start = range.value("start").toObject();
-                        QJsonObject end = range.value("end").toObject();
+                QTextCursor cursor(this->document());
+                QTextBlock block = this->document()->findBlockByLineNumber(startLine);
 
-                        int startLine = start.value("line").toInt();
-                        int startChar = start.value("character").toInt();
-                        int endLine = end.value("line").toInt();
-                        int endChar = end.value("character").toInt();
+                if (block.isValid()) {
+                    int startPos = block.position() + startChar;
+                    int endPos = block.position() + (endChar <= startChar ? startChar + 1 : endChar);
 
-                        // Извлекаем текстовые блоки строк напрямую из документа Qt
-                        QTextBlock startBlock = docObj->findBlockByLineNumber(startLine);
-                        QTextBlock endBlock = docObj->findBlockByLineNumber(endLine);
+                    cursor.setPosition(startPos);
+                    cursor.setPosition(endPos, QTextCursor::KeepAnchor);
+                    selection.cursor = cursor;
 
-                        if (startBlock.isValid() && endBlock.isValid()) {
-                            // Вычисляем абсолютные позиции символов в памяти текстового поля
-                            int absoluteStartPos = startBlock.position() + startChar;
-                            int absoluteEndPos = endBlock.position() + endChar;
-
-                            // ФИКС ДЛЯ КОНЦА СТРОКИ: Если ошибка указывает на пустой конец строки,
-                            // принудительно сдвигаем выделение на 1 символ назад, чтобы линия легла под буквы
-                            if (absoluteStartPos >= absoluteEndPos || startChar >= startBlock.length() - 1) {
-                                if (absoluteStartPos > startBlock.position()) {
-                                    absoluteStartPos--;
-                                } else {
-                                    absoluteEndPos++;
-                                }
-                            }
-
-                            // Формируем структуру дополнительного графического выделения Qt
-                            QTextEdit::ExtraSelection selection;
-                            selection.format.setUnderlineStyle(QTextCharFormat::WaveUnderline); // Волнистая линия
-                            selection.format.setUnderlineColor(severity == 1 ? Qt::red : QColor(255, 165, 0)); // Красный / Оранжевый
-
-                            // Привязываем формат к абсолютным координатам через QTextCursor
-                            selection.cursor = QTextCursor(docObj);
-                            selection.cursor.setPosition(absoluteStartPos);
-                            selection.cursor.setPosition(absoluteEndPos, QTextCursor::KeepAnchor);
-
-                            // Складываем готовую линию в буфер отрисовки
-                            m_lspSelectionsBuffer.append(selection);
-                        }
-                    }
+                    newSelections.append(selection);
                 }
-
-                // ПОТОКОБЕЗОПАСНЫЙ ВЫЗОВ ОТРИСОВКИ:
-                // Отправляем сформированный буфер линий напрямую в очередь графического потока GUI.
-                // Это полностью исключает любые блокировки и мерцания со стороны Qt!
-                QMetaObject::invokeMethod(this, "applySelectionsFromLsp", Qt::QueuedConnection);
             }
-        }
 
-        // Ищем разделитель для следующего пакета в оставшемся буфере (для цикла while)
-        separatorIndex = buffer.indexOf("\r\n\r\n");
+            // Передаем готовый список выделений в UI поток
+            // Используем Qt::QueuedConnection для безопасности потоков
+            QMetaObject::invokeMethod(this, "applySelectionsFromLsp",
+                                      Qt::QueuedConnection,
+                                      Q_ARG(QList<QTextEdit::ExtraSelection>, newSelections));
+        }
     }
 }
 
@@ -1050,84 +1071,220 @@ void CodeEditor::highlightError(int startLine, int startChar, int endLine, int e
     this->blockSignals(false);
 }
 
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
-#include "neuro_programm.h" // ОБЯЗАТЕЛЬНО проверьте этот инклуд!
+// void CodeEditor::sendLspDidChange()
+// {
+//     // Проверяем, что путь к файлу передан и не пуст
+//     if (this->currentFilePath.isEmpty()) return;
+
+//     // Инкрементируем версию документа (+1), чтобы Jedi обновлял кэш в ОЗУ
+//     this->lspDocumentVersion++;
+
+//     // СБОРКА ПАРАМЕТРОВ ПО СТАНДАРТУ ПОЛНОЙ СИНХРОНИЗАЦИИ (FULL SYNC)
+//     QJsonObject params;
+
+//     QJsonObject textDocument;
+//     textDocument["uri"] = "file://" + this->currentFilePath;
+//     textDocument["version"] = this->lspDocumentVersion; // Передаем растущую версию!
+//     params["textDocument"] = textDocument;
+
+//     // Маскировка под Full Sync: убираем range и rangeLength, чтобы Jedi обновил весь текст в памяти
+//     QJsonArray contentChanges;
+//     QJsonObject changeObj;
+//     changeObj["text"] = this->toPlainText(); // Актуальный текст из редактора
+//     contentChanges.append(changeObj);
+//     params["contentChanges"] = contentChanges;
+
+//     // ВЫЗЫВАЕМ ЕДИНЫЙ РАБОЧИЙ ТРАНСПОРТ ГЛАВНОГО ОКНА!
+//     // Мы не пишем в lspProcess->write напрямую из вкладки.
+//     // Мы отдаем параметры в центральную функцию, которая уже успешно умеет общаться с Jedi.
+//     if (Neuro_programm::self) {
+//         Neuro_programm::self->sendLspRequest("textDocument/didChange", params);
+
+//         qDebug() << "[LSP CLIENT] Пакет изменения текста отправлен через глобальный транспорт. Версия:"
+//                  << this->lspDocumentVersion;
+//     }
+
+// }
+
+#include <QTimer>
 
 void CodeEditor::sendLspDidChange()
 {
     // Проверяем, что путь к файлу передан и не пуст
     if (this->currentFilePath.isEmpty()) return;
 
-    // Инкрементируем версию документа (+1), чтобы Jedi обновлял кэш в ОЗУ
-    this->lspDocumentVersion++;
+    // ОПТИМИЗАЦИЯ: Дебаунсинг (Задержка ввода)
+    // Чтобы не спамить Jedi при каждой зажатой клавише, используем встроенный таймер.
+    // Если таймер уже запущен, мы его перезапускаем (сбрасываем задержку).
+    // Для этого добавьте QTimer* m_lspDelayTimer в private секцию вашего codeeditor.h
+    // и инициализируйте его в конструкторе: m_lspDelayTimer = new QTimer(this); m_lspDelayTimer->setSingleShot(true);
 
-    // СБОРКА ПАРАМЕТРОВ ПО СТАНДАРТУ ПОЛНОЙ СИНХРОНИЗАЦИИ (FULL SYNC)
-    QJsonObject params;
+    // Если вы еще не создали таймер в .h файле, можно использовать статический (быстрое решение):
+    static QTimer* delayTimer = nullptr;
+    if (!delayTimer) {
+        delayTimer = new QTimer(this);
+        delayTimer->setSingleShot(true);
+    }
 
-    QJsonObject textDocument;
-    textDocument["uri"] = "file://" + this->currentFilePath;
-    textDocument["version"] = this->lspDocumentVersion; // Передаем растущую версию!
-    params["textDocument"] = textDocument;
+    // Переподключаем сигнал таймера, чтобы он сработал один раз после паузы в наборе текста
+    disconnect(delayTimer, &QTimer::timeout, nullptr, nullptr);
+    connect(delayTimer, &QTimer::timeout, this, [this]() {
 
-    // Маскировка под Full Sync: убираем range и rangeLength, чтобы Jedi обновил весь текст в памяти
-    QJsonArray contentChanges;
-    QJsonObject changeObj;
-    changeObj["text"] = this->toPlainText(); // Актуальный текст из редактора
-    contentChanges.append(changeObj);
-    params["contentChanges"] = contentChanges;
+        if (!Neuro_programm::self) return;
 
-    // ВЫЗЫВАЕМ ЕДИНЫЙ РАБОЧИЙ ТРАНСПОРТ ГЛАВНОГО ОКНА!
-    // Мы не пишем в lspProcess->write напрямую из вкладки.
-    // Мы отдаем параметры в центральную функцию, которая уже успешно умеет общаться с Jedi.
-    if (Neuro_programm::self) {
+        // Инкрементируем версию документа (+1), чтобы Jedi обновлял кэш в ОЗУ
+        this->lspDocumentVersion++;
+
+        // СБОРКА ПАРАМЕТРОВ ПО СТАНДАРТУ ПОЛНОЙ СИНХРОНИЗАЦИИ (FULL SYNC)
+        QJsonObject params;
+
+        QJsonObject textDocument;
+        // КРИТИЧНО ДЛЯ LINUX: убедитесь, что путь абсолютный, чтобы получилось file:/// (три слэша)
+        textDocument["uri"] = "file://" + this->currentFilePath;
+        textDocument["version"] = this->lspDocumentVersion;
+        params["textDocument"] = textDocument;
+
+        // Передаем весь текст из памяти на лету
+        QJsonArray contentChanges;
+        QJsonObject changeObj;
+        changeObj["text"] = this->toPlainText();
+        contentChanges.append(changeObj);
+        params["contentChanges"] = contentChanges;
+
+        // ВЫЗЫВАЕМ ЕДИНЫЙ РАБОЧИЙ ТРАНСПОРТ ГЛАВНОГО ОКНА
         Neuro_programm::self->sendLspRequest("textDocument/didChange", params);
 
-        qDebug() << "[LSP CLIENT] Пакет изменения текста отправлен через глобальный транспорт. Версия:"
+        // КРИТИЧНО ДЛЯ ВЫПЛЕСКА ДАННЫХ ИЗ БУФЕРА LINUX:
+        // Так как lspProcess лежит внутри главного окна Neuro_programm,
+        // мы принудительно заставляем его очистить пайпы отправки.
+        // (Убедитесь, что у вас есть доступ к lspProcess из Neuro_programm)
+        if (Neuro_programm::self->lspProcess) {
+            Neuro_programm::self->lspProcess->waitForBytesWritten(10);
+        }
+
+        qDebug() << "[LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия:"
                  << this->lspDocumentVersion;
-    }
+    });
+
+    // Запускаем задержку в 350 миллисекунд.
+    // Пакет уйдет в Jedi только тогда, когда пользователь остановит печать на треть секунды.
+    delayTimer->start(350);
 }
 
-void CodeEditor::applySelectionsFromLsp()
-{
-    // Этот метод выполняется строго внутри главного GUI-потока.
-    // Передаем накопленный буфер выделений напрямую в движок отображения Qt!
-    this->setExtraSelections(m_lspSelectionsBuffer);
 
-    if (this->viewport()) {
-        this->viewport()->update();
+#include <QStatusBar>
+
+void CodeEditor::applySelectionsFromLsp(const QList<QTextEdit::ExtraSelection> &selections)
+{
+    // Блокируем сигналы, чтобы избежать петли обновлений
+    this->blockSignals(true);
+
+    // СОХРАНЯЕМ ОШИБКИ В КЛАСС: m_currentLspSelections объявлен в codeeditor.h
+    m_currentLspSelections = selections;
+
+    // Вызываем централизованный метод отрисовки, который мы исправим на Шаге 2
+    this->highlightCurrentLine();
+
+    this->blockSignals(false);
+
+    // --- ГАРАНТИРОВАННЫЙ ВЫВОД В КОНСОЛЬ LINUX ---
+    // Этот код сработает 100%, даже если qDebug() полностью вырезан компилятором
+    fprintf(stderr, "\n>>> [LSP КЛИЕНТ] УСПЕШНО ПОЛУЧЕНЫ ОШИБКИ! Количество: %d <<<\n", selections.size());
+    fflush(stderr); // Мгновенно выталкиваем короткую строчку на экран
+
+    if (Neuro_programm::self && Neuro_programm::self->statusBar()) {
+        if (selections.size() > 0) {
+            Neuro_programm::self->statusBar()->showMessage(
+                QString("Критическая ошибка синтаксиса! Найдено: %1").arg(selections.size())
+                );
+            Neuro_programm::self->statusBar()->setStyleSheet("QStatusBar { color: #ff3333; font-weight: bold; }");
+        } else {
+            Neuro_programm::self->statusBar()->showMessage("Код успешно проверен Jedi. Ошибок нет.", 3000);
+            Neuro_programm::self->statusBar()->setStyleSheet("QStatusBar { color: #00ff00; }");
+        }
     }
 }
 
 void CodeEditor::sendLspDidOpen()
 {
-    if (!lspProcess || lspProcess->state() != QProcess::Running || currentFilePath.isEmpty()) return;
+    if (this->currentFilePath.isEmpty()) return;
+    if (!Neuro_programm::self) return;
 
-    QJsonObject root;
-    root["jsonrpc"] = "2.0";
-    root["method"] = "textDocument/didOpen";
+    this->lspDocumentVersion = 1; // Стартовая версия файла
 
     QJsonObject params;
     QJsonObject textDocument;
-    textDocument["uri"] = "file://" + currentFilePath;
-    textDocument["languageId"] = "python"; // Указываем серверу язык разметки
-    textDocument["version"] = 1;           // Начальная версия документа всегда 1
-    textDocument["text"] = this->toPlainText(); // Передаем стартовый текст
 
+    // КРИТИЧНО: Ровно три слэша для абсолютных путей в Linux (file:///)
+    textDocument["uri"] = "file://" + this->currentFilePath;
+    textDocument["languageId"] = "python";
+    textDocument["version"] = this->lspDocumentVersion;
+    textDocument["text"] = this->toPlainText(); // Передаем стартовый текст из памяти редактора
     params["textDocument"] = textDocument;
-    root["params"] = params;
 
-    QJsonDocument doc(root);
-    QByteArray rawJson = doc.toJson(QJsonDocument::Compact);
-    QByteArray lspPacket;
-    lspPacket.append(QString("Content-Length: %1\r\n\r\n").arg(rawJson.length()).toUtf8());
-    lspPacket.append(rawJson);
+    // Отправляем пакет активации документа через наш обновленный sendLspRequest
+    Neuro_programm::self->sendLspRequest("textDocument/didOpen", params);
 
-    lspProcess->write(lspPacket);
-    lspProcess->waitForBytesWritten(50);
+    qDebug() << "[LSP] Документ официально зарегистрирован в памяти Jedi!";
+}
 
-    // Сбрасываем локальный счетчик версий для didChange, чтобы он рос с двойки: 2, 3, 4...
-    this->lspDocumentVersion = 1;
-    qDebug() << "[LSP] Сессия для файла успешно открыта через didOpen! URI:" << textDocument["uri"];
+#include <QMenu>
+#include <QTextBlock>
+
+void CodeEditor::showQuickFixMenu(const QList<QuickFixAction>& fixes)
+{
+    if (fixes.isEmpty()) {
+        if (Neuro_programm::self && Neuro_programm::self->statusBar()) {
+            Neuro_programm::self->statusBar()->showMessage("Jedi: Вариантов исправления не найдено", 2000);
+        }
+        return;
+    }
+
+    // Создаем меню быстрых исправлений с родителем-редактором (для безопасности памяти)
+    QMenu* menu = new QMenu(this);
+    menu->setStyleSheet(
+        "QMenu { background-color: #232323; color: #ffffff; border: 1px solid #555; padding: 4px; }"
+        "QMenu::item { padding: 4px 20px; }"
+        "QMenu::item:selected { background-color: #3a3a3a; color: #ff2a2a; }"
+        );
+
+    // Наполняем меню действиями
+    for (const auto& fix : fixes) {
+        QAction* action = menu->addAction(fix.title);
+
+        // Упаковываем C++ структуру фикса прямо в QAction
+        QVariant data;
+        data.setValue(fix);
+        action->setData(data);
+    }
+
+    // Показываем меню ровно под курсором ввода текста на экране
+    QPoint globalCursorPos = this->mapToGlobal(this->cursorRect().bottomLeft());
+    QAction* selectedAction = menu->exec(globalCursorPos);
+
+    // Пользователь кликнул на исправление — применяем его в памяти на лету!
+    if (selectedAction) {
+        QuickFixAction fix = selectedAction->data().value<QuickFixAction>();
+
+        QTextDocument* doc = this->document();
+        QTextCursor editCursor(doc);
+
+        // Перемещаем курсор к началу ошибочного блока
+        QTextBlock startBlock = doc->findBlockByLineNumber(fix.startLine);
+        int startPos = startBlock.position() + fix.startChar;
+        editCursor.setPosition(startPos);
+
+        // Выделяем текст до конца ошибочного блока
+        QTextBlock endBlock = doc->findBlockByLineNumber(fix.endLine);
+        int endPos = endBlock.position() + fix.endChar;
+        editCursor.setPosition(endPos, QTextCursor::KeepAnchor);
+
+        // Начинаем транзакцию редактирования, чтобы работал Ctrl+Z (Undo/Redo)
+        editCursor.beginEditBlock();
+        editCursor.insertText(fix.newText); // Заменяем старый текст на исправленный!
+        editCursor.endEditBlock();
+    }
+
+    // Безопасное отложенное удаление меню силами очереди событий Qt
+    menu->deleteLater();
 }

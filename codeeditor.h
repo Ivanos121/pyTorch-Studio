@@ -16,23 +16,37 @@
 #include <QTextCharFormat>
 #include <QProcess>
 #include <QTimer>
+#include <QPointer>
+#include <QMetaType>
+#include <QList>
 
 class CodeEditor;
 class Neuro_program;
 class FoldingArea;
 
+// =========================================================================
+// ШАГ 1: СТРУКТУРА БЫСТРЫХ ИСПРАВЛЕНИЙ ПЕРЕНЕСЕНА НАВЕРХ (ДО КЛАССА EDITOR)
+// =========================================================================
+struct QuickFixAction {
+    QString title;       // Что увидит пользователь, например: "Import os"
+    QString newText;     // Какой текст вставить
+    int startLine = 0;   // Координаты замены текста
+    int startChar = 0;
+    int endLine = 0;
+    int endChar = 0;
+};
+
 class FolderBlockData : public QTextBlockUserData
 {
 public:
-    int indentLevel = 0;        // Уровень отступа строки
-    bool isFoldStart = false;   // Начало блока (def/class)
-    bool isFolded = false;      // Свернут ли блок
+    int indentLevel = 0;     // Уровень отступа строки
+    bool isFoldStart = false; // Начало блока (def/class)
+    bool isFolded = false;    // Свернут ли блок
 };
 
 class PythonHighlighter : public QSyntaxHighlighter
 {
     Q_OBJECT
-
 public:
     PythonHighlighter(QTextDocument *parent = nullptr);
     void loadThemeSettings();
@@ -44,30 +58,27 @@ public:
     QTextCharFormat stringFormat;
     QTextCharFormat commentFormat;
     QTextCharFormat multiLineCommentFormat;
-
 protected:
-    // Главный метод, который Qt автоматически вызывает для каждой видимой строки
     void highlightBlock(const QString &text) override;
-
 private:
-    // Структура для хранения правила: регулярное выражение + формат цвета
     QHash<QRegularExpression, QTextCharFormat*> highlightingRulesMap;
     QRegularExpression tripleSingleQuote;
     QRegularExpression tripleDoubleQuote;
 };
 
-// Класс для отрисовки вертикальной линейки номеров
 class LineNumberArea : public QWidget {
 public:
     LineNumberArea(CodeEditor *editor);
-    QSize sizeHint() const override { return QSize(0, 0); } // Заглушка, реальный размер берется из CodeEditor
+    QSize sizeHint() const override { return QSize(0, 0); }
 protected:
     void paintEvent(QPaintEvent *event) override;
 private:
     CodeEditor *codeEditor;
 };
 
-// Основной класс продвинутого текстового редактора с номерами строк
+// =========================================================================
+// ШАГ 2: ОСНОВНОЙ КЛАСС КОРРЕКТНО ВИДИТ ТИП ДАННЫХ QUICKFIXACTION
+// =========================================================================
 class CodeEditor : public QPlainTextEdit {
     Q_OBJECT
     friend class Neuro_programm;
@@ -82,6 +93,7 @@ public:
     QString textUnderCursor() const;
     QStringList temporaryOpenFilesBackup;
     void updateFoldingData();
+
     struct LspErrorData {
         int line;
         int startChar;
@@ -93,13 +105,18 @@ public:
 
 signals:
     void logMessage(const QString &message);
+    void errorsCountChanged(int count);
+
+public slots:
+    // Теперь этот слот скомпилируется без ошибок соответствия типов!
+    void showQuickFixMenu(const QList<QuickFixAction>& fixes);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *e) override;
     void foldingAreaPaintEvent(QPaintEvent *event);
     void foldingAreaMousePressEvent(QMouseEvent *event);
-    void paintEvent(QPaintEvent *e) override;
+    void paintEvent(QPaintEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *e) override;
 
 private slots:
@@ -108,13 +125,13 @@ private slots:
     void updateLineNumberArea(const QRect &rect, int dy);
     void onLspReadyRead();
     void sendLspDidChange();
-    void applySelectionsFromLsp();
+    void applySelectionsFromLsp(const QList<QTextEdit::ExtraSelection> &selections);
 
 private:
     QWidget *lineNumberArea;
     QCompleter *c = nullptr;
     bool isLspFreeze = false;
-    QWidget *m_popupWindow = nullptr;
+    QPointer<QWidget> m_popupWindow;
     QListWidget *m_listWidget = nullptr;
     int m_startPosition = 0;
     FoldingArea *m_foldingArea = nullptr;
@@ -123,11 +140,14 @@ private:
     int foldingAreaWidth() { return 16; }
     void clearErrorHighlights();
     void highlightError(int startLine, int startChar, int endLine, int endChar, bool isError);
+
     QList<QTextEdit::ExtraSelection> lspExtraSelections;
     PythonHighlighter *m_highlighter = nullptr;
     int lspDocumentVersion = 1;
     QList<QTextEdit::ExtraSelection> m_lspSelectionsBuffer;
+    QList<QTextEdit::ExtraSelection> m_currentLspSelections; // Наш постоянный буфер ошибок вкладки
     void sendLspDidOpen();
+    QByteArray m_lspBuffer;
 };
 
 class FoldingArea : public QWidget
@@ -141,5 +161,10 @@ protected:
 private:
     CodeEditor *m_editor;
 };
+
+// =========================================================================
+// ШАГ 3: РЕГИСТРАЦИЯ МЕТАТИПА ОСТАЕТСЯ В САМОМ НИЗУ ВНЕ КЛАССОВ
+// =========================================================================
+Q_DECLARE_METATYPE(QuickFixAction)
 
 #endif // CODEEDITOR_H

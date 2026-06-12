@@ -1,0 +1,16 @@
+2026-06-12 20:28:02.837 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:133)
+2026-06-12 20:28:02.869 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-12 20:28:02.885 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-12 20:28:02.889 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-12 20:28:02.938 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1187)
+2026-06-12 20:28:02.938 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-12 20:28:09.702 [DEBUG] [LSP SUCCESS] Процесс запущен. PID: 57048 (../codeeditor.cpp:169)
+2026-06-12 20:28:11.707 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1228)
+2026-06-12 20:28:12.522 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-12 20:28:13.064 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Элементов: 0 (../neuro_programm.cpp:3508)
+2026-06-12 20:28:13.140 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1165)
+2026-06-12 20:28:18.782 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 3 (../codeeditor.cpp:1165)
+2026-06-12 20:28:23.434 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 4 (../codeeditor.cpp:1165)
+2026-06-12 20:28:24.533 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 6 (../codeeditor.cpp:1165)
+2026-06-12 20:28:24.768 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Элементов: 383 (../neuro_programm.cpp:3508)
+2026-06-12 20:28:27.733 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 7 (../codeeditor.cpp:1165)
