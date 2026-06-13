@@ -1,0 +1,14 @@
+2026-06-13 01:10:19.532 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:133)
+2026-06-13 01:10:19.563 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 01:10:19.579 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 01:10:19.583 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 01:10:19.634 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1187)
+2026-06-13 01:10:19.634 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 01:10:28.318 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1272)
+2026-06-13 01:10:28.821 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 01:10:29.479 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1209)
+2026-06-13 01:10:34.560 [DEBUG] >>> [ЖЕЛЕЗНЫЙ ТЕСТ] Нажат Alt! Клавиша: 16777251 (../codeeditor.cpp:410)
+2026-06-13 01:10:34.885 [DEBUG] >>> [ЖЕЛЕЗНЫЙ ТЕСТ] Нажат Alt! Клавиша: 16777220 (../codeeditor.cpp:410)
+2026-06-13 01:10:34.885 [DEBUG] >>> [LSP] ALT+ENTER НАЖАТ УСПЕШНО! Собираю пакет запроса... (../codeeditor.cpp:418)
+2026-06-13 01:10:35.569 [DEBUG] >>> [ЖЕЛЕЗНЫЙ ТЕСТ] Нажат Alt! Клавиша: 16777220 (../codeeditor.cpp:410)
+2026-06-13 01:10:35.569 [DEBUG] >>> [LSP] ALT+ENTER НАЖАТ УСПЕШНО! Собираю пакет запроса... (../codeeditor.cpp:418)

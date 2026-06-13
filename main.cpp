@@ -79,6 +79,8 @@ int main(int argc, char *argv[])
     qputenv("XDG_CURRENT_DESKTOP", "KDE");
     QApplication a(argc, argv);
 
+    qRegisterMetaType<QList<QuickFixAction>>("QList<QuickFixAction>");
+
     // =========================================================================
     // АВТОМАТИЧЕСКИЙ ДИНАМИЧЕСКИЙ ПОИСК КОРНЯ ПРОЕКТА (БЕЗ МАКРОСОВ И СТРОК)
     // =========================================================================

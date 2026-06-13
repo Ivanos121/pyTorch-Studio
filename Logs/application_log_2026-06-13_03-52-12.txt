@@ -1,0 +1,17 @@
+2026-06-13 03:52:12.255 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 03:52:12.305 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 03:52:12.333 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 03:52:12.340 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 03:52:12.402 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1187)
+2026-06-13 03:52:12.402 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 03:52:19.848 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1279)
+2026-06-13 03:52:20.560 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 03:52:21.233 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1216)
+2026-06-13 03:52:22.561 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI: 0 (../neuro_programm.cpp:3667)
+2026-06-13 03:52:30.636 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 3 (../codeeditor.cpp:1216)
+2026-06-13 03:52:31.233 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 4 (../codeeditor.cpp:1216)
+2026-06-13 03:52:32.731 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 5 (../codeeditor.cpp:1216)
+2026-06-13 03:52:33.939 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 6 (../codeeditor.cpp:1216)
+2026-06-13 03:52:35.483 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 8 (../codeeditor.cpp:1216)
+2026-06-13 03:52:36.050 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI: 383 (../neuro_programm.cpp:3667)
+2026-06-13 03:52:54.333 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 9 (../codeeditor.cpp:1216)

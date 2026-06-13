@@ -51,6 +51,8 @@ public:
         int startChar;
         int endChar;
         bool isError;
+        QString message;
+        QString code;
     };
     static QList<LspErrorData> globalLspErrors;
     QProcess *lspProcess = nullptr;

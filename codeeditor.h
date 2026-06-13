@@ -19,6 +19,9 @@
 #include <QPointer>
 #include <QMetaType>
 #include <QList>
+#include <QHelpEvent>
+#include <QToolTip>
+#include <QTextBlock>
 
 class CodeEditor;
 class Neuro_program;
@@ -93,6 +96,8 @@ public:
     QString textUnderCursor() const;
     QStringList temporaryOpenFilesBackup;
     void updateFoldingData();
+    void registerCompletionWidgets(QWidget* popup, QListWidget* list);
+
 
     struct LspErrorData {
         int line;
@@ -118,6 +123,7 @@ protected:
     void foldingAreaMousePressEvent(QMouseEvent *event);
     void paintEvent(QPaintEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *e) override;
+    bool event(QEvent *event) override;
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);

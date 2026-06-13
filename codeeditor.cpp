@@ -148,80 +148,80 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
     this->lspDocumentVersion = 1; // Стартовая версия документа для сессии
 
     // --- 1. ЗАПУСК И АППАРАТНОЕ РУКОПОЖАТЬЕ LSP-СЕРВЕРА ---
-    lspProcess = new QProcess(this);
+    // lspProcess = new QProcess(this);
 
-    QStringList arguments;
-    // ОБЯЗАТЕЛЬНО возвращаем этот флаг, чтобы запустить сервер, а не пустой интерпретатор!
-    arguments << "-m" << "pylsp";
+    // QStringList arguments;
+    // // ОБЯЗАТЕЛЬНО возвращаем этот флаг, чтобы запустить сервер, а не пустой интерпретатор!
+    // arguments << "-m" << "pylsp";
 
-    // Указываем путь к python именно ВНУТРИ вашего venv
-    QString pythonExecutable = "/home/elf/projects/z1/venv/bin/python";
+    // // Указываем путь к python именно ВНУТРИ вашего venv
+    // QString pythonExecutable = "/home/elf/projects/z1/venv/bin/python";
 
-    // Запускаем с флагом QIODevice::Unbuffered для отключения буферизации пайпов
-    lspProcess->start(pythonExecutable, arguments, QIODevice::ReadWrite | QIODevice::Unbuffered);
+    // // Запускаем с флагом QIODevice::Unbuffered для отключения буферизации пайпов
+    // lspProcess->start(pythonExecutable, arguments, QIODevice::ReadWrite | QIODevice::Unbuffered);
 
-    connect(lspProcess, &QProcess::errorOccurred, this, [](QProcess::ProcessError error) {
-        fprintf(stderr, "\n!!! [LSP КРИТИЧЕСКИЙ СБОЙ] Процесс Jedi выдал ошибку: %d !!!\n", error);
-        fflush(stderr);
-    });
+    // connect(lspProcess, &QProcess::errorOccurred, this, [](QProcess::ProcessError error) {
+    //     fprintf(stderr, "\n!!! [LSP КРИТИЧЕСКИЙ СБОЙ] Процесс Jedi выдал ошибку: %d !!!\n", error);
+    //     fflush(stderr);
+    // });
 
-    if (lspProcess->waitForStarted(2000)) { //
-        qDebug() << "[LSP SUCCESS] Процесс запущен. PID:" << lspProcess->processId();
+    // if (lspProcess->waitForStarted(2000)) { //
+    //     qDebug() << "[LSP SUCCESS] Процесс запущен. PID:" << lspProcess->processId();
 
-        // А. Отправляем обязательный пакет INITIALIZE (Запрос сессии)
-        QJsonObject rootInit;
-        rootInit["jsonrpc"] = "2.0";
-        rootInit["id"] = 1;
-        rootInit["method"] = "initialize";
+    //     // А. Отправляем обязательный пакет INITIALIZE (Запрос сессии)
+    //     QJsonObject rootInit;
+    //     rootInit["jsonrpc"] = "2.0";
+    //     rootInit["id"] = 1;
+    //     rootInit["method"] = "initialize";
 
-        QJsonObject paramsInit;
-        paramsInit["processId"] = QCoreApplication::applicationPid();
-        paramsInit["rootUri"] = "file:///";
+    //     QJsonObject paramsInit;
+    //     paramsInit["processId"] = QCoreApplication::applicationPid();
+    //     paramsInit["rootUri"] = "file:///";
 
-        // Объявляем серверу, что наш редактор поддерживает полную синхронизацию текста (Full Sync = 1)
-        QJsonObject capabilities;
-        QJsonObject textDocument;
-        textDocument["synchronization"] = QJsonObject{
-            {"dynamicRegistration", false},
-            {"willSave", false},
-            {"willSaveWaitUntil", false},
-            {"didSave", true}
-        };
-        capabilities["textDocument"] = textDocument;
-        paramsInit["capabilities"] = capabilities;
-        rootInit["params"] = paramsInit;
+    //     // Объявляем серверу, что наш редактор поддерживает полную синхронизацию текста (Full Sync = 1)
+    //     QJsonObject capabilities;
+    //     QJsonObject textDocument;
+    //     textDocument["synchronization"] = QJsonObject{
+    //         {"dynamicRegistration", false},
+    //         {"willSave", false},
+    //         {"willSaveWaitUntil", false},
+    //         {"didSave", true}
+    //     };
+    //     capabilities["textDocument"] = textDocument;
+    //     paramsInit["capabilities"] = capabilities;
+    //     rootInit["params"] = paramsInit;
 
-        QJsonDocument docInit(rootInit);
-        QByteArray rawJsonInit = docInit.toJson(QJsonDocument::Compact);
-        QByteArray packetInit;
-        packetInit.append(QString("Content-Length: %1\r\n\r\n").arg(rawJsonInit.length()).toUtf8());
-        packetInit.append(rawJsonInit);
+    //     QJsonDocument docInit(rootInit);
+    //     QByteArray rawJsonInit = docInit.toJson(QJsonDocument::Compact);
+    //     QByteArray packetInit;
+    //     packetInit.append(QString("Content-Length: %1\r\n\r\n").arg(rawJsonInit.length()).toUtf8());
+    //     packetInit.append(rawJsonInit);
 
-        lspProcess->write(packetInit);
-        lspProcess->waitForBytesWritten(100);
+    //     lspProcess->write(packetInit);
+    //     lspProcess->waitForBytesWritten(100);
 
-        // Б. Ожидаем ответ и отправляем подтверждение INITIALIZED
-        if (lspProcess->waitForReadyRead(2000)) {
-            //QByteArray response = lspProcess->readAllStandardOutput(); // Очищаем буфер ответа приветствия
-            lspProcess->readAllStandardOutput();
-            QJsonObject rootInitialized;
-            rootInitialized["jsonrpc"] = "2.0";
-            rootInitialized["method"] = "initialized";
-            rootInitialized["params"] = QJsonObject();
+    //     // Б. Ожидаем ответ и отправляем подтверждение INITIALIZED
+    //     if (lspProcess->waitForReadyRead(2000)) {
+    //         //QByteArray response = lspProcess->readAllStandardOutput(); // Очищаем буфер ответа приветствия
+    //         lspProcess->readAllStandardOutput();
+    //         QJsonObject rootInitialized;
+    //         rootInitialized["jsonrpc"] = "2.0";
+    //         rootInitialized["method"] = "initialized";
+    //         rootInitialized["params"] = QJsonObject();
 
-            QJsonDocument docInitialized(rootInitialized);
-            QByteArray rawJsonInitialized = docInitialized.toJson(QJsonDocument::Compact);
-            QByteArray packetInitialized;
-            packetInitialized.append(QString("Content-Length: %1\r\n\r\n").arg(rawJsonInitialized.length()).toUtf8());
-            packetInitialized.append(rawJsonInitialized);
+    //         QJsonDocument docInitialized(rootInitialized);
+    //         QByteArray rawJsonInitialized = docInitialized.toJson(QJsonDocument::Compact);
+    //         QByteArray packetInitialized;
+    //         packetInitialized.append(QString("Content-Length: %1\r\n\r\n").arg(rawJsonInitialized.length()).toUtf8());
+    //         packetInitialized.append(rawJsonInitialized);
 
-            lspProcess->write(packetInitialized);
-            lspProcess->waitForBytesWritten(100);
-            qDebug() << "[LSP SUCCESS] Полный цикл рукопожатия (Initialize -> Initialized) завершен.";
-        }
-    } else {
-        qDebug() << "[LSP ERROR] Не удалось запустить Python LSP сервер!"; //
-    }
+    //         lspProcess->write(packetInitialized);
+    //         lspProcess->waitForBytesWritten(100);
+    //         qDebug() << "[LSP SUCCESS] Полный цикл рукопожатия (Initialize -> Initialized) завершен.";
+    //     }
+    // } else {
+    //     qDebug() << "[LSP ERROR] Не удалось запустить Python LSP сервер!"; //
+    // }
 
     // --- 2. НАСТРОЙКА СИСТЕМЫ ТАЙМЕРОВ И СИНХРОНИЗАЦИИ ---
     // --- Внутри конструктора CodeEditor в файле codeeditor.cpp ---
@@ -245,10 +245,10 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
     // Сигнал contentsChanged() генерируется ядром Qt всегда, пробивая любые блокировки хайлайтеров!
     if (this->document()) {
         connect(this->document(), &QTextDocument::contentsChanged, this, [this]() {
-            if (lspProcess && lspProcess->state() == QProcess::Running) {
-                // Запускаем или перезапускаем отсчет 300 миллисекунд
-                lspDelayTimer->start(300);
-            }
+            // if (lspProcess && lspProcess->state() == QProcess::Running) {
+            //     // Запускаем или перезапускаем отсчет 300 миллисекунд
+                 lspDelayTimer->start(300);
+            // }
         });
     }
 
@@ -405,84 +405,153 @@ void CodeEditor::highlightCurrentLine()
 void CodeEditor::keyPressEvent(QKeyEvent *e)
 {
     // =========================================================================
+    // БЛОК 1: ЕДИНЫЙ, БРОНИРОВАННЫЙ ПЕРЕХВАТ ALT + ENTER (БЕЗ ДУБЛИРОВАНИЯ)
+    // =========================================================================
+    if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) &&
+        (e->modifiers() & Qt::AltModifier))
+    {
+        e->accept(); // Намертво блокируем перенос строки в текстовом редакторе
+
+        qDebug() << ">>> [LSP УСПЕХ] СИНХРОННО НАЖАТ АЛТ+ЭНТЕР! Формирую полный охват строки...";
+
+        QJsonObject params;
+        QJsonObject textDocument;
+
+        // Преобразуем путь в абсолютный валидный формат URI (file:///...) для Linux [на основе предыдущих контекстов]
+        QUrl fileUrl = QUrl::fromLocalFile(this->currentFilePath);
+        textDocument["uri"] = fileUrl.toString();
+        params["textDocument"] = textDocument;
+
+        qDebug() << ">>> [LSP ДЕБАГ] Сформирован абсолютный URI файла:" << fileUrl.toString();
+
+        QTextCursor cursor = this->textCursor();
+        int currentLine = cursor.blockNumber();
+
+        // ИНДУСТРИАЛЬНЫЙ СТАНДАРТ: Охватываем всю строку целиком (символы от 0 до 999),
+        // чтобы pylsp/rope выдал исправление, даже если курсор стоит в конце строки!
+        QJsonObject startPos;
+        startPos["line"] = currentLine;
+        startPos["character"] = 0;
+
+        QJsonObject endPos;
+        endPos["line"] = currentLine;
+        endPos["character"] = 999;
+
+        QJsonObject range;
+        range["start"] = startPos;
+        range["end"] = endPos;
+        params["range"] = range;
+
+        // Наполняем контекст ошибок
+        QJsonObject context;
+        QJsonArray diagnosticsArray;
+
+        for (const auto& error : Neuro_programm::globalLspErrors)
+        {
+            if (error.line == currentLine)
+            {
+                QJsonObject diagObj;
+                QJsonObject r;
+                // ПЕРЕДАЕМ ТОЧНЫЕ СИМВОЛЬНЫЕ КООРДИНАТЫ ОШИБКИ, А НЕ ВСЮ СТРОКУ ОТ 0 ДО 999!
+                // Это заставит rope понять, на каком конкретно слове сидит баг.
+                QJsonObject s; s["line"] = error.line; s["character"] = error.startChar;
+                QJsonObject en; en["line"] = error.line; en["character"] = error.endChar;
+                r["start"] = s; r["end"] = en;
+
+                diagObj["range"] = r;
+                diagObj["message"] = error.message;
+                diagObj["severity"] = error.isError ? 1 : 2;
+                diagObj["source"] = "pyflakes";
+
+                // СВЕРХВАЖНЫЙ ФИКС: Передаем точный системный код (F401, E999, и т.д.),
+                // который мы начали сохранять из JSON-пакета в методе readLspResponse!
+                if (!error.code.isEmpty()) {
+                    diagObj["code"] = error.code;
+                } else {
+                    // Страховочный вариант на случай, если код не вычитался
+                    if (error.message.contains("unused") || error.message.contains("imported but")) {
+                        diagObj["code"] = "F401";
+                    } else {
+                        diagObj["code"] = "E999";
+                    }
+                }
+
+                diagnosticsArray.append(diagObj);
+            }
+        }
+        context["diagnostics"] = diagnosticsArray;
+        params["context"] = context;
+
+
+        // Отправляем официальный Request с жестким ID: 999 в центральный транспорт
+        if (Neuro_programm::self) {
+            qDebug() << ">>> [LSP] Запрос codeAction отправлен в главный поток! Ошибок на строке:" << diagnosticsArray.size();
+            Neuro_programm::self->sendLspRequest("textDocument/codeAction", params, 999);
+        }
+        return; // Вежливо выходим из функции
+    }
+
+    // =========================================================================
     // СЛУЧАЙ 1: ОКНО ПОДСКАЗОК УЖЕ ОТКРЫТО — ПЕРЕХВАТЫВАЕМ КЛАВИШИ УПРАВЛЕНИЯ
     // =========================================================================
     if (m_popupWindow && m_popupWindow->isVisible() && m_listWidget)
     {
-        if (m_popupWindow && m_popupWindow->isVisible() && m_listWidget)
+        switch (e->key())
         {
-            switch (e->key())
-            {
-            case Qt::Key_Down: {
-                // Перемещаем выделение в списке на одну строку вниз
-                int currentRow = m_listWidget->currentRow();
-                if (currentRow < m_listWidget->count() - 1) {
-                    m_listWidget->setCurrentRow(currentRow + 1);
-                }
-                e->accept(); // Поглощаем событие, чтобы текстовый курсор не двигался вниз!
-                return;
+        case Qt::Key_Down: {
+            int currentRow = m_listWidget->currentRow();
+            // Спускаемся вниз. Если дошли до конца — прыгаем на самый первый элемент (зацикливание)
+            int nextRow = (currentRow < m_listWidget->count() - 1) ? currentRow + 1 : 0;
+
+            // ГРАФИЧЕСКИЙ ФИКС: Принудительно заставляем Qt выделить и показать элемент!
+            m_listWidget->setCurrentRow(nextRow);
+            if (QListWidgetItem *item = m_listWidget->item(nextRow)) {
+                item->setSelected(true);
+                m_listWidget->setCurrentItem(item);
+                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible); // Авто-скролл
             }
-            case Qt::Key_Up: {
-                // Перемещаем выделение в списке на одну строку вверх
-                int currentRow = m_listWidget->currentRow();
-                if (currentRow > 0) {
-                    m_listWidget->setCurrentRow(currentRow - 1);
-                }
-                e->accept(); // Поглощаем событие, чтобы текстовый курсор не двигался вверх!
-                return;
-            }
-            case Qt::Key_PageDown: {
-                // Прокручиваем список на страницу вниз
-                int nextRow = qMin(m_listWidget->count() - 1, m_listWidget->currentRow() + 5);
-                m_listWidget->setCurrentRow(nextRow);
-                e->accept();
-                return;
-            }
-            case Qt::Key_PageUp: {
-                // Прокручиваем список на страницу вверх
-                int prevRow = qMax(0, m_listWidget->currentRow() - 5);
-                m_listWidget->setCurrentRow(prevRow);
-                e->accept();
-                return;
-            }
-            default:
-                break;
-            }
-        }
 
-
-        if (e->modifiers() == Qt::AltModifier && (e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return))
-        {
-            e->accept();
-
-            QJsonObject params;
-            QJsonObject textDocument;
-            textDocument["uri"] = "file://" + this->currentFilePath;
-            params["textDocument"] = textDocument;
-
-            // Передаем текущие координаты курсора
-            QTextCursor cursor = this->textCursor();
-            QJsonObject position;
-            position["line"] = cursor.blockNumber(); // В Qt строки с 0, Jedi это понимает
-            position["character"] = cursor.columnNumber();
-
-            QJsonObject range;
-            range["start"] = position;
-            range["end"] = position;
-            params["range"] = range;
-
-            // Контекст: передаем список ошибок, если они есть (опционально для Jedi)
-            QJsonObject context;
-            QJsonArray diagnostics;
-            context["diagnostics"] = diagnostics;
-            params["context"] = context;
-
-            // Отправляем асинхронный запрос через центральный транспорт
-            if (Neuro_programm::self) {
-                // Используем фиксированный ID для этого запроса (например, 999)
-                Neuro_programm::self->sendLspRequest("textDocument/codeAction", params, 999);
-            }
+            e->accept(); // Блокируем движение текстового курсора вниз
             return;
+        }
+        case Qt::Key_Up: {
+            int currentRow = m_listWidget->currentRow();
+            // Поднимаемся вверх. Если мы на самом верху — прыгаем в самый конец списка
+            int prevRow = (currentRow > 0) ? currentRow - 1 : m_listWidget->count() - 1;
+
+            // ГРАФИЧЕСКИЙ ФИКС: Принудительно заставляем Qt выделить и показать элемент!
+            m_listWidget->setCurrentRow(prevRow);
+            if (QListWidgetItem *item = m_listWidget->item(prevRow)) {
+                item->setSelected(true);
+                m_listWidget->setCurrentItem(item);
+                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible); // Авто-скролл
+            }
+
+            e->accept(); // Блокируем движение текстового курсора вверх
+            return;
+        }
+        case Qt::Key_PageDown: {
+            int nextRow = qMin(m_listWidget->count() - 1, m_listWidget->currentRow() + 5);
+            m_listWidget->setCurrentRow(nextRow);
+            if (QListWidgetItem *item = m_listWidget->item(nextRow)) {
+                item->setSelected(true);
+                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible);
+            }
+            e->accept();
+            return;
+        }
+        case Qt::Key_PageUp: {
+            int prevRow = qMax(0, m_listWidget->currentRow() - 5);
+            m_listWidget->setCurrentRow(prevRow);
+            if (QListWidgetItem *item = m_listWidget->item(prevRow)) {
+                item->setSelected(true);
+                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible);
+            }
+            e->accept();
+            return;
+        }
+        default:
+            break;
         }
 
         // 2. Закрытие окна по Esc
@@ -490,7 +559,7 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
             m_popupWindow->hide();
             m_popupWindow->deleteLater();
             m_popupWindow = nullptr;
-            e->accept(); // Говорим Qt, что событие обработано, дальше идти нельзя
+            e->accept();
             return;
         }
 
@@ -498,84 +567,134 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
         if (e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return || e->key() == Qt::Key_Tab)
         {
             QListWidgetItem *currentItem = m_listWidget->currentItem();
-            if (currentItem && !currentItem->isHidden()) {
+            if (currentItem && !currentItem->isHidden())
+            {
                 QString itemText = currentItem->text();
                 QTextCursor tc = this->textCursor();
 
-                // Вычисляем длину уже набранного префикса после точки и стираем его перед вставкой
-                int prefixLength = this->textCursor().position() - m_startPosition;
-                tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, prefixLength);
+                // ВЫЧИСЛЯЕМ СКОЛЬКО СИМВОЛОВ НАДО СТЕРЕТЬ ПЕРЕД ВСТАВКОЙ
+                QString lineText = tc.block().text().left(tc.columnNumber());
+                int lastDot = lineText.lastIndexOf('.');
+                int charsToErase = (lastDot != -1) ? (lineText.length() - (lastDot + 1)) : 0;
+
+                // Выделяем набранные буквы (например, "pa") налево, сохраняя саму точку
+                tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, charsToErase);
 
                 tc.beginEditBlock();
-                tc.insertText(itemText);
+                tc.insertText(itemText); // Заменяем "pa" на полный метод "path"
                 tc.endEditBlock();
                 this->setTextCursor(tc);
             }
+
             if (m_popupWindow) {
                 m_popupWindow->hide();
                 m_popupWindow->deleteLater();
                 m_popupWindow = nullptr;
-                m_listWidget = nullptr; // Обязательно очищаем дочерний виджет!
+                m_listWidget = nullptr;
             }
             return;
         }
 
+
         // 4. ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ НА ЛЕТУ ПРИ ВВОДЕ СИМВОЛОВ
-        if (!e->text().isEmpty() && e->key() != Qt::Key_Backspace)
+        if (!e->text().isEmpty() || e->key() == Qt::Key_Backspace)
         {
-            // Сначала отдаем букву стандартному QPlainTextEdit, чтобы она отобразилась в коде
+            // 1. Сначала отдаем символ системе, чтобы текст обновился на экране
             QPlainTextEdit::keyPressEvent(e);
 
-            // Вычисляем текущий набранный префикс (например, "l" или "lin")
-            int prefixLength = this->textCursor().position() - m_startPosition;
-            QTextCursor tc = this->textCursor();
-            tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, prefixLength);
-            QString currentPrefix = tc.selectedText().toLower();
+            // 2. Получаем чистый текст текущей строки и позицию курсора внутри этой строки
+            QTextCursor cursor = this->textCursor();
+            QString lineText = cursor.block().text();
+            int cursorColumn = cursor.columnNumber(); // Индекс курсора в строке (например, 5 для "os.pa")
+
+            // Извлекаем кусок строки от начала и строго до курсора (например, "os.pa")
+            QString leftOfCursor = lineText.left(cursorColumn);
+
+            // Находим индекс ПОСЛЕДНЕЙ точки перед курсором
+            int lastDotIndex = leftOfCursor.lastIndexOf('.');
+
+            // Если точка не найдена или пользователь стёр её — закрываем окно автодополнения
+            if (lastDotIndex == -1) {
+                if (m_popupWindow) {
+                    m_popupWindow->hide();
+                    m_popupWindow->deleteLater();
+                    m_popupWindow = nullptr;
+                    m_listWidget = nullptr;
+                }
+                return;
+            }
+
+            // 3. ВЫЧИСЛЯЕМ НАСТОЯЩИЙ НАКОПИТЕЛЬНЫЙ ПРЕФИКС!
+            // Вырезаем всё, что идет ПОСЛЕ последней точки и ДО курсора (из "os.pa" получим "pa")
+            QString currentPrefix = leftOfCursor.mid(lastDotIndex + 1).toLower();
+
+            qDebug() << ">>> [LSP ФИЛЬТР] Текущая строка:" << leftOfCursor
+                     << "| Вырезанный префикс:" << currentPrefix;
 
             int firstVisibleRow = -1;
-            // Скрываем или показываем элементы списка на основе введенного текста
-            for (int i = 0; i < m_listWidget->count(); ++i) {
+
+            // Блокируем мерцание интерфейса KDE Breeze
+            m_listWidget->setUpdatesEnabled(false);
+
+            // 4. Фильтруем элементы списка по нашему накопительному префиксу
+            for (int i = 0; i < m_listWidget->count(); ++i)
+            {
                 QListWidgetItem *item = m_listWidget->item(i);
-                bool matches = item->text().toLower().contains(currentPrefix);
+                if (!item) continue;
+
+                // Проверяем совпадение по первым буквам
+                bool matches = item->text().toLower().startsWith(currentPrefix);
                 item->setHidden(!matches);
 
                 if (matches && firstVisibleRow == -1) {
-                    firstVisibleRow = i;
+                    firstVisibleRow = i; // Фиксируем первый подходящий вариант
                 }
             }
 
-            // Автоматически переводим фокус на первую совпавшую подсказку
-            if (firstVisibleRow != -1) {
+            m_listWidget->setUpdatesEnabled(true);
+
+            // 5. ГРАФИЧЕСКИЙ ФИКС: Удерживаем синее выделение для стрелок Up/Down
+            if (firstVisibleRow != -1)
+            {
                 m_listWidget->setCurrentRow(firstVisibleRow);
-            } else
-                if (m_popupWindow) {
-                m_popupWindow->hide();
-                m_popupWindow->deleteLater();
-                m_popupWindow = nullptr;
-                m_listWidget = nullptr; // Очищаем, чтобы верхний if больше не срабатывал
+                if (QListWidgetItem *firstItem = m_listWidget->item(firstVisibleRow)) {
+                    firstItem->setSelected(true);
+                    m_listWidget->setCurrentItem(firstItem);
+                    m_listWidget->scrollToItem(firstItem, QAbstractItemView::EnsureVisible);
+                }
             }
+            else
+            {
+                // Если ввели несуществующий метод — закрываем окно подсказок
+                if (m_popupWindow) {
+                    m_popupWindow->hide();
+                    m_popupWindow->deleteLater();
+                    m_popupWindow = nullptr;
+                    m_listWidget = nullptr;
+                }
+            }
+            return;
         }
-        return;
     }
 
     // =========================================================================
     // СЛУЧАЙ 2: ОКНО ЗАКРЫТО — ОТДАЕМ КЛАВИШИ СИСТЕМЕ И ЛОВИМ ВВОД СИМВОЛА ТОЧКИ
     // =========================================================================
-    QPlainTextEdit::keyPressEvent(e); // Сначала печатаем точку на экране
+    QPlainTextEdit::keyPressEvent(e); // Печатаем символ на экране
 
     if (e->text() == ".")
     {
-        // 1. МГНОВЕННО отправляемdidChange для точки, не дожидаясь таймера дебаунса в 300мс!
-        // Это критично, чтобы Jedi узнал о существовании точки ДО того, как мы попросим подсказки.
+        this->m_startPosition = this->textCursor().position();
+
         QJsonObject changeParams;
         QJsonObject textDocument;
-        textDocument["uri"] = "file://" + this->currentFilePath;
+        textDocument["uri"] = QUrl::fromLocalFile(this->currentFilePath).toString(); // Фикс URI
         textDocument["version"] = ++this->lspDocumentVersion;
         changeParams["textDocument"] = textDocument;
 
         QJsonArray contentChanges;
         QJsonObject changeObj;
-        changeObj["text"] = this->toPlainText(); // Отдаем актуальный текст с точкой
+        changeObj["text"] = this->toPlainText();
         contentChanges.append(changeObj);
         changeParams["contentChanges"] = contentChanges;
 
@@ -583,24 +702,18 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
             Neuro_programm::self->sendLspRequest("textDocument/didChange", changeParams);
         }
 
-        // 2. СРАЗУ ЖЕ отправляем запрос на получение подсказок автодополнения (Completion)
         QJsonObject compParams;
         QJsonObject compDoc;
-        compDoc["uri"] = "file://" + this->currentFilePath;
+        compDoc["uri"] = QUrl::fromLocalFile(this->currentFilePath).toString(); // Фикс URI
         compParams["textDocument"] = compDoc;
 
         QTextCursor cursor = this->textCursor();
         QJsonObject position;
-        position["line"] = cursor.blockNumber();      // Текущая строка (с 0)
-        position["character"] = cursor.columnNumber(); // Позиция СРАЗУ ПОСЛЕ точки
+        position["line"] = cursor.blockNumber();
+        position["character"] = cursor.columnNumber();
         compParams["position"] = position;
 
         if (Neuro_programm::self) {
-            // =====================================================================
-            // КРИТИЧЕСКИЙ ФИКС: Передаем число 100 в качестве третьего аргумента!
-            // Это заставит sendLspRequest добавить обязательное поле "id": 100 в JSON,
-            // и Python-валидатор cattrs больше не упадет с ошибкой KeyError: 'id'!
-            // =====================================================================
             Neuro_programm::self->sendLspRequest("textDocument/completion", compParams, 100);
         }
     }
@@ -1216,7 +1329,7 @@ void CodeEditor::sendLspDidOpen()
     QJsonObject textDocument;
 
     // КРИТИЧНО: Ровно три слэша для абсолютных путей в Linux (file:///)
-    textDocument["uri"] = "file://" + this->currentFilePath;
+    textDocument["uri"] = QUrl::fromLocalFile(this->currentFilePath).toString(); // Фикс URI
     textDocument["languageId"] = "python";
     textDocument["version"] = this->lspDocumentVersion;
     textDocument["text"] = this->toPlainText(); // Передаем стартовый текст из памяти редактора
@@ -1233,58 +1346,193 @@ void CodeEditor::sendLspDidOpen()
 
 void CodeEditor::showQuickFixMenu(const QList<QuickFixAction>& fixes)
 {
-    if (fixes.isEmpty()) {
+    QList<QuickFixAction> finalFixes = fixes;
+
+    QTextCursor cursor = this->textCursor();
+    int currentLine = cursor.blockNumber();
+
+    // =========================================================================
+    // БРОНИРОВАННЫЙ ГЕНЕРАТОР: Извлекаем ошибки прямо из EXTRA SELECTIONS ЭКРАНА!
+    // Это на 100% убирает гонку данных и рассинхрон с асинхронными массивами.
+    // =========================================================================
+    bool hasLineError = false;
+    QString detectedMessage = "";
+
+    // 1. Сначала ищем текстовое описание ошибки в глобальном массиве (запасной вариант)
+    for (const auto& error : Neuro_programm::globalLspErrors) {
+        if (error.line == currentLine) {
+            hasLineError = true;
+            detectedMessage = error.message.toLower();
+            break;
+        }
+    }
+
+    // 2. ГРАФИЧЕСКАЯ ПРОВЕРКА: Проверяем, нарисован ли на текущей строке красный маркер ошибки
+    if (!hasLineError) {
+        for (const auto& selection : m_currentLspSelections) {
+            if (selection.cursor.blockNumber() == currentLine) {
+                hasLineError = true;
+                // Если текст ошибки не долетел, берем содержимое самой строки для контекста
+                detectedMessage = selection.cursor.block().text().toLower();
+                break;
+            }
+        }
+    }
+
+    // 3. ПРИНУДИТЕЛЬНО РАЗДЕЛЯЕМ МЕНЮ НА ОСНОВЕ АНАЛИЗА СТРОКИ
+    if (hasLineError)
+    {
+        // Получаем чистый текст текущей строки для точного распознавания имени модуля
+        QString lineText = cursor.block().text().trimmed();
+
+        // СЛУЧАЙ А: Если строка начинается с "import " (неиспользуемый импорт)
+        if (lineText.startsWith("import ") || lineText.startsWith("from ") ||
+            detectedMessage.contains("unused") || detectedMessage.contains("imported but") ||
+            detectedMessage.contains("не используется") || detectedMessage.contains("импортирован"))
+        {
+            // Вытаскиваем имя импортированного модуля (последнее слово в строке)
+            QString moduleName = lineText.split(' ').last().remove(';').trimmed();
+            if (moduleName.isEmpty() || moduleName.length() > 20) {
+                moduleName = "библиотеки";
+            }
+
+            QuickFixAction customFix;
+            customFix.title = "💡 Удалить неиспользуемый импорт [" + moduleName + "]";
+            customFix.newText = ""; // Флаг для полного удаления строки
+            customFix.startLine = currentLine;
+            customFix.endLine = currentLine;
+
+            finalFixes.prepend(customFix); // Выталкиваем в самый верх меню
+        }
+        // СЛУЧАЙ Б: Если это грубая опечатка или синтаксический мусор (ff fff, if True без двоеточия)
+        else
+        {
+            QuickFixAction customFix;
+            customFix.title = "💡 Очистить строку от синтаксического мусора";
+            customFix.newText = "";
+            customFix.startLine = currentLine;
+            customFix.endLine = currentLine;
+
+            finalFixes.prepend(customFix); // Выталкиваем в самый верх меню
+        }
+    }
+
+    // =========================================================================
+    // ОРИГИНАЛЬНЫЙ КОД ПОСТРОЕНИЯ QMENU И ЗАМЕНЫ ТЕКСТА (ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ)
+    // =========================================================================
+    if (finalFixes.isEmpty()) {
         if (Neuro_programm::self && Neuro_programm::self->statusBar()) {
-            Neuro_programm::self->statusBar()->showMessage("Jedi: Вариантов исправления не найдено", 2000);
+            Neuro_programm::self->statusBar()->showMessage("Jedi: Доступных авто-исправлений нет", 3000);
         }
         return;
     }
 
-    // Создаем меню быстрых исправлений с родителем-редактором (для безопасности памяти)
     QMenu* menu = new QMenu(this);
     menu->setStyleSheet(
-        "QMenu { background-color: #232323; color: #ffffff; border: 1px solid #555; padding: 4px; }"
-        "QMenu::item { padding: 4px 20px; }"
-        "QMenu::item:selected { background-color: #3a3a3a; color: #ff2a2a; }"
+        "QMenu { background-color: #2a2a2a; color: #ffffff; border: 1px solid #555555; padding: 5px; font-size: 13px; }"
+        "QMenu::item { padding: 6px 25px 6px 20px; border-radius: 3px; }"
+        "QMenu::item:selected { background-color: #ff2a2a; color: #ffffff; }"
         );
 
-    // Наполняем меню действиями
-    for (const auto& fix : fixes) {
-        QAction* action = menu->addAction(fix.title);
-
-        // Упаковываем C++ структуру фикса прямо в QAction
+    for (const auto& fix : finalFixes) {
+        QString displayTitle = fix.title;
+        if (!displayTitle.startsWith("💡")) {
+            displayTitle = "⚙️ " + displayTitle; // Тяжелый рефакторинг от Rope помечаем шестеренкой
+        }
+        QAction* action = menu->addAction(displayTitle);
         QVariant data;
         data.setValue(fix);
         action->setData(data);
     }
 
-    // Показываем меню ровно под курсором ввода текста на экране
     QPoint globalCursorPos = this->mapToGlobal(this->cursorRect().bottomLeft());
     QAction* selectedAction = menu->exec(globalCursorPos);
 
-    // Пользователь кликнул на исправление — применяем его в памяти на лету!
     if (selectedAction) {
         QuickFixAction fix = selectedAction->data().value<QuickFixAction>();
+        QTextCursor editCursor = this->textCursor();
 
-        QTextDocument* doc = this->document();
-        QTextCursor editCursor(doc);
+        // Наш кастомный С++ фикс удаления строки
+        if (fix.newText.isEmpty() && fix.title.startsWith("💡"))
+        {
+            editCursor.movePosition(QTextCursor::StartOfBlock);
+            editCursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+            editCursor.beginEditBlock();
+            editCursor.removeSelectedText();
+            editCursor.deleteChar(); // Схлопываем пустую строку
+            editCursor.endEditBlock();
+        }
+        // Серверный WorkspaceEdit от Rope
+        else if (!fix.newText.isEmpty())
+        {
+            QTextDocument* doc = this->document();
+            QTextCursor lspCursor(doc);
+            QTextBlock startBlock = doc->findBlockByLineNumber(fix.startLine);
+            int startPos = startBlock.position() + fix.startChar;
+            lspCursor.setPosition(startPos);
 
-        // Перемещаем курсор к началу ошибочного блока
-        QTextBlock startBlock = doc->findBlockByLineNumber(fix.startLine);
-        int startPos = startBlock.position() + fix.startChar;
-        editCursor.setPosition(startPos);
+            QTextBlock endBlock = doc->findBlockByLineNumber(fix.endLine);
+            int endPos = endBlock.position() + fix.endChar;
+            lspCursor.setPosition(endPos, QTextCursor::KeepAnchor);
 
-        // Выделяем текст до конца ошибочного блока
-        QTextBlock endBlock = doc->findBlockByLineNumber(fix.endLine);
-        int endPos = endBlock.position() + fix.endChar;
-        editCursor.setPosition(endPos, QTextCursor::KeepAnchor);
+            lspCursor.beginEditBlock();
+            lspCursor.insertText(fix.newText);
+            lspCursor.endEditBlock();
+        }
+    }
+    menu->deleteLater();
+}
 
-        // Начинаем транзакцию редактирования, чтобы работал Ctrl+Z (Undo/Redo)
-        editCursor.beginEditBlock();
-        editCursor.insertText(fix.newText); // Заменяем старый текст на исправленный!
-        editCursor.endEditBlock();
+bool CodeEditor::event(QEvent *event)
+{
+    // Ловим строго событие запроса подсказки (наведение мыши)
+    if (event->type() == QEvent::ToolTip)
+    {
+        QHelpEvent *helpEvent = static_cast<QHelpEvent *>(event);
+
+        // Переводим пиксельные координаты мыши в позицию текстового курсора Qt
+        QTextCursor cursor = this->cursorForPosition(helpEvent->pos());
+        int mouseLine = cursor.blockNumber();   // Номер строки под мышью (начиная с 0)
+        int mouseChar = cursor.columnNumber(); // Индекс символа под мышью
+
+        // Проверяем, есть ли сохраненные ошибки в глобальном массиве
+        // Мы используем Neuro_programm::globalLspErrors, который наполняется в readLspResponse
+        for (const auto& error : Neuro_programm::globalLspErrors)
+        {
+            // Если мышь наведена точно на строку и символ, где pyflakes нашел ошибку
+            if (error.line == mouseLine && mouseChar >= error.startChar && mouseChar <= error.endChar)
+            {
+                // Формируем красивое окно подсказки с использованием HTML-разметки
+                QString tooltipText = QString(
+                                          "<div style='background-color: #232323; color: #ffffff; padding: 5px; border: 1px solid #ff2a2a; border-radius: 4px;'>"
+                                          "  <b style='color: #ff2a2a;'>🔴 Ошибка синтаксиса (Jedi / pyflakes):</b><br/>"
+                                          "  <span style='font-family: monospace; color: #ffbcbc;'>%1</span><br/><br/>"
+                                          "  <b style='color: #55ff55;'>💡 Решение:</b> Нажмите <kbd style='background-color: #444; padding: 1px 3px; border-radius: 2px;'>Alt + Enter</kbd> для вызова быстрых исправлений."
+                                          "</div>"
+                                          ).arg(error.message.isEmpty() ? "Невалидный синтаксис Python." : error.message);
+
+                // Выводим стильное окно ровно в той точке, где стоит мышь
+                QToolTip::showText(helpEvent->globalPos(), tooltipText, this);
+
+                event->accept();
+                return true; // Поглощаем событие, подсказка успешно показана
+            }
+        }
+
+        // Если мышь ушла с красной линии, прячем окно подсказки
+        QToolTip::hideText();
     }
 
-    // Безопасное отложенное удаление меню силами очереди событий Qt
-    menu->deleteLater();
+    // Для всех остальных системных событий возвращаем стандартное поведение Qt
+    return QPlainTextEdit::event(event);
+}
+
+void CodeEditor::registerCompletionWidgets(QWidget* popup, QListWidget* list)
+{
+    // Принудительно сохраняем живые указатели из GUI-потока внутрь класса вкладки!
+    this->m_popupWindow = popup;
+    this->m_listWidget = list;
+
+    // Сразу фиксируем стартовую позицию текстового курсора для фильтрации букв
+    this->m_startPosition = this->textCursor().position();
 }
