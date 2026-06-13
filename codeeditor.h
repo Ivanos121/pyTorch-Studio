@@ -124,6 +124,7 @@ protected:
     void paintEvent(QPaintEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *e) override;
     bool event(QEvent *event) override;
+    void wheelEvent(QWheelEvent *e) override;
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
@@ -132,6 +133,7 @@ private slots:
     void onLspReadyRead();
     void sendLspDidChange();
     void applySelectionsFromLsp(const QList<QTextEdit::ExtraSelection> &selections);
+    void matchBrackets();
 
 private:
     QWidget *lineNumberArea;
@@ -146,6 +148,7 @@ private:
     int foldingAreaWidth() { return 16; }
     void clearErrorHighlights();
     void highlightError(int startLine, int startChar, int endLine, int endChar, bool isError);
+    int findMatchingBracket(int pos, QChar openBracket, QChar closeBracket, bool directionRight);
 
     QList<QTextEdit::ExtraSelection> lspExtraSelections;
     PythonHighlighter *m_highlighter = nullptr;

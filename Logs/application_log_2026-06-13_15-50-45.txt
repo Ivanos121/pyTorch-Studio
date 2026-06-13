@@ -1,0 +1,17 @@
+2026-06-13 15:50:45.344 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 15:50:45.395 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 15:50:45.411 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 15:50:45.415 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 15:50:45.464 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1187)
+2026-06-13 15:50:45.464 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 15:50:55.074 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1242)
+2026-06-13 15:50:55.958 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 15:50:56.625 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1179)
+2026-06-13 15:50:59.942 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI: 0 (../neuro_programm.cpp:3667)
+2026-06-13 15:51:09.926 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 3 (../codeeditor.cpp:1179)
+2026-06-13 15:51:10.430 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 4 (../codeeditor.cpp:1179)
+2026-06-13 15:51:12.826 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 5 (../codeeditor.cpp:1179)
+2026-06-13 15:51:14.033 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 6 (../codeeditor.cpp:1179)
+2026-06-13 15:51:14.473 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 7 (../codeeditor.cpp:1179)
+2026-06-13 15:51:15.825 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 9 (../codeeditor.cpp:1179)
+2026-06-13 15:51:19.199 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI: 383 (../neuro_programm.cpp:3667)

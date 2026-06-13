@@ -1,0 +1,8 @@
+2026-06-13 05:13:16.007 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 05:13:16.037 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 05:13:16.052 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 05:13:16.056 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 05:13:16.102 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1187)
+2026-06-13 05:13:16.103 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 05:13:31.927 [DEBUG] Успешно загружено тем в комбобокс: 3 (../settings.cpp:339)
+2026-06-13 05:13:31.929 [DEBUG] [ПРЕВЬЮ] Загрузка темы: "/home/elf/pyTorch-Studio/build/themes/dark_darcula.ini" Фон: "#2b2b2b" (../settings.cpp:226)

@@ -11,6 +11,8 @@ Settings::Settings(QWidget *parent)
 {
     ui->setupUi(this);
 
+    ui->fontComboBoxEditor->setFontFilters(QFontComboBox::AllFonts);
+
     // =========================================================================
     // 1. СИНХРОНИЗАЦИЯ КАТЕГОРИЙ И СТРАНИЦ STACKEDWIDGET
     // =========================================================================

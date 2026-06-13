@@ -1,0 +1,17 @@
+2026-06-13 16:07:11.234 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 16:07:11.277 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 16:07:11.294 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 16:07:11.298 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 16:07:11.349 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1187)
+2026-06-13 16:07:11.349 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 16:07:16.935 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-13 16:07:19.211 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1242)
+2026-06-13 16:07:21.573 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 16:07:26.686 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1179)
+2026-06-13 16:07:31.534 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI: 0 (../neuro_programm.cpp:3670)
+2026-06-13 16:07:31.629 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 3 (../codeeditor.cpp:1179)
+2026-06-13 16:07:32.478 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 4 (../codeeditor.cpp:1179)
+2026-06-13 16:07:40.725 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 6 (../codeeditor.cpp:1179)
+2026-06-13 16:07:41.034 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI: 383 (../neuro_programm.cpp:3670)
+2026-06-13 16:08:03.871 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 7 (../codeeditor.cpp:1179)
+2026-06-13 16:08:08.025 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 8 (../codeeditor.cpp:1179)

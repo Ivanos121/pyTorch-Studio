@@ -1,0 +1,18 @@
+2026-06-13 15:43:04.420 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 15:43:04.475 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 15:43:04.508 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 15:43:04.514 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 15:43:04.575 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1187)
+2026-06-13 15:43:04.575 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 15:43:16.598 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1232)
+2026-06-13 15:43:17.161 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 15:43:17.858 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1169)
+2026-06-13 15:43:23.165 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 3 (../codeeditor.cpp:1169)
+2026-06-13 15:43:24.866 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 4 (../codeeditor.cpp:1169)
+2026-06-13 15:43:25.965 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 5 (../codeeditor.cpp:1169)
+2026-06-13 15:43:27.365 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 6 (../codeeditor.cpp:1169)
+2026-06-13 15:43:27.718 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI: 0 (../neuro_programm.cpp:3667)
+2026-06-13 15:43:29.467 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 8 (../codeeditor.cpp:1169)
+2026-06-13 15:43:31.782 [INFO]  [ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI: 383 (../neuro_programm.cpp:3667)
+2026-06-13 15:43:59.622 [DEBUG] >>> [LSP УСПЕХ] Пакет ответа 999 физически долетел в Neuro_programm! Разбираю массив... (../neuro_programm.cpp:3585)
+2026-06-13 15:43:59.622 [INFO]  >>> [LSP УСПЕХ] Графические варианты Quick Fix успешно выделены: 6 (../neuro_programm.cpp:3630)

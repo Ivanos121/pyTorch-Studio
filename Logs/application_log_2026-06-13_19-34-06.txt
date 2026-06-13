@@ -1,0 +1,13 @@
+2026-06-13 19:34:06.161 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 19:34:06.196 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 19:34:06.214 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 19:34:06.219 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 19:34:06.276 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1187)
+2026-06-13 19:34:06.276 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 19:34:13.425 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1392)
+2026-06-13 19:34:14.467 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 19:34:15.125 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1329)
+2026-06-13 19:34:16.975 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../codeeditor.cpp:1613)
+2026-06-13 19:34:17.324 [DEBUG] >>> [LSP УСПЕХ] Пакет Hover 888 пробил блокировку! Парсю contents... (../neuro_programm.cpp:3601)
+2026-06-13 19:34:20.985 [DEBUG] Успешно загружено тем в комбобокс: 3 (../settings.cpp:343)
+2026-06-13 19:34:20.987 [DEBUG] [ПРЕВЬЮ] Загрузка темы: "/home/elf/pyTorch-Studio/build/themes/dark_darcula.ini" Фон: "#2b2b2b" (../settings.cpp:230)

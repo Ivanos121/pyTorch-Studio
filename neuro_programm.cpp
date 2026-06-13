@@ -3127,6 +3127,17 @@ void Neuro_programm::initLspServer()
     // Привязываем поддержку к общим возможностям текстового документа
     textDocumentCaps["codeAction"] = codeActionCaps;
 
+    QJsonObject hoverCaps;
+    hoverCaps["dynamicRegistration"] = false;
+
+    QJsonArray contentFormats;
+    contentFormats.append("markdown");  // Объявляем поддержку Markdown (PyTorch)
+    contentFormats.append("plaintext"); // Резервный чистый текст
+    hoverCaps["contentFormat"] = contentFormats;
+
+    // Привязываем Hover-возможности к общим возможностям текстового документа
+    textDocumentCaps["hover"] = hoverCaps;
+
     // Собираем иерархию по спецификации LSP: params -> capabilities -> textDocument -> codeAction
     capabilities["textDocument"] = textDocumentCaps;
     params["capabilities"] = capabilities;
@@ -3576,112 +3587,116 @@ void Neuro_programm::readLspResponse()
             // ВЕТКА Б: ОБРАБОТКА ЗАПРОСОВ ПО ID (QUICK FIX И АВТОДОПОЛНЕНИЕ)
             // =========================================================================
             // Сначала вытаскиваем ID ответа (если он есть на верхнем уровне)
+            // =========================================================================
+            // ВЕТКА Б/В/Г: ОБРАБОТКА ЗАПРОСОВ ПО ID (РАСПРЕДЕЛЕНИЕ ПОТОКОВ)
+            // =========================================================================
+            // 1. Вытаскиваем ID пакета на самом верхнем уровне JSON
             int responseId = rootObj.value("id").toInt(-1);
 
-            // ФИКС МАРШРУТИЗАЦИИ №1: Перехватчик вариантов Quick Fix (ID: 999) ДОЛЖЕН БЫТЬ ПЕРВЫМ!
-            // Мы жестко привязываемся к нашему ID: 999 от Alt+Enter, чтобы не перехватывать чужие пакеты
-            if (responseId == 999 && rootObj.contains("result"))
+            // =========================================================================
+            // ШАГ 1: ПЕРЕХВАТЧИК ДОКУМЕНТАЦИИ (ID: 888) — ДОЛЖЕН БЫТЬ ПЕРВЫМ!
+            // =========================================================================
+            if (responseId == 888 && rootObj.contains("result"))
             {
-                qDebug() << ">>> [LSP УСПЕХ] Пакет ответа 999 физически долетел в Neuro_programm! Разбираю массив...";
+                qDebug() << ">>> [LSP УСПЕХ] Пакет Hover 888 пробил блокировку! Парсю contents...";
 
-                QJsonArray resultArr = rootObj["result"].toArray();
-                QList<QuickFixAction> fixList;
+                QJsonObject resultObj = rootObj["result"].toObject();
+                QString docstringText = "";
 
-                for (int i = 0; i < resultArr.size(); ++i)
+                if (resultObj.contains("contents"))
                 {
-                    QJsonObject actionObj = resultArr[i].toObject();
-                    QuickFixAction fix;
+                    QJsonValue contentsVal = resultObj["contents"];
+                    if (contentsVal.isString()) {
+                        docstringText = contentsVal.toString();
+                    } else if (contentsVal.isObject()) {
+                        QJsonObject contentsObj = contentsVal.toObject();
+                        if (contentsObj.contains("value")) docstringText = contentsObj.value("value").toString();
+                        else if (contentsObj.contains("text")) docstringText = contentsObj.value("text").toString();
+                    } else if (contentsVal.isArray()) {
+                        QJsonArray contentsArr = contentsVal.toArray();
+                        if (!contentsArr.isEmpty()) {
+                            QJsonValue firstItem = contentsArr[0];
+                            if (firstItem.isString()) docstringText = firstItem.toString();
+                            else if (firstItem.isObject()) docstringText = firstItem.toObject().value("value").toString();
+                        }
+                    }
+                }
 
-                    // Извлекаем заголовок — он гарантированно есть всегда!
-                    fix.title = actionObj["title"].toString();
+                docstringText = docstringText.trimmed();
 
-                    // БЕЗОПАСНЫЙ ПАРСИНГ: Проверяем наличие ключа "edit", чтобы не вызвать сбой
-                    if (actionObj.contains("edit"))
+                if (!docstringText.isEmpty())
+                {
+                    if (docstringText.startsWith("```python")) docstringText.remove(0, 9);
+                    if (docstringText.endsWith("```")) docstringText.chop(3);
+                    docstringText = docstringText.trimmed();
+
+                    docstringText.replace("\\n", "<br/>");
+                    docstringText.replace("\n", "<br/>");
+                    docstringText.replace("**", "<b>");
+
+                    CodeEditor* activeEditor = nullptr;
+                    if (ui->centralStackedWidget && ui->centralStackedWidget->currentWidget()) {
+                        activeEditor = ui->centralStackedWidget->currentWidget()->findChild<CodeEditor*>();
+                    }
+
+                    if (activeEditor)
                     {
-                        QJsonObject editObj = actionObj["edit"].toObject();
-                        if (editObj.contains("changes"))
-                        {
-                            QJsonObject changes = editObj["changes"].toObject();
-                            for (auto it = changes.begin(); it != changes.end(); ++it)
-                            {
-                                QJsonArray textEdits = it.value().toArray();
-                                if (!textEdits.isEmpty())
-                                {
-                                    // Используем ваш надежный фикс обращения к индексу [0]
-                                    QJsonObject textEdit = textEdits[0].toObject();
-                                    fix.newText = textEdit["newText"].toString();
+                        QPoint globalMousePos = activeEditor->property("lastTooltipGlobalPos").toPoint();
 
-                                    QJsonObject range = textEdit["range"].toObject();
-                                    fix.startLine = range["start"].toObject()["line"].toInt();
-                                    fix.startChar = range["start"].toObject()["character"].toInt();
-                                    fix.endLine = range["end"].toObject()["line"].toInt();
-                                    fix.endChar = range["end"].toObject()["character"].toInt();
-                                }
+                        QMetaObject::invokeMethod(this, [activeEditor, htmlTooltip = docstringText, globalMousePos]() {
+                            QWidget *hoverWindow = new QWidget(nullptr, Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+                            hoverWindow->setObjectName("activeLspHoverWindow");
+
+                            QVBoxLayout *layout = new QVBoxLayout(hoverWindow);
+                            layout->setContentsMargins(12, 12, 12, 12);
+
+                            QLabel *label = new QLabel(hoverWindow);
+                            label->setTextFormat(Qt::RichText);
+                            label->setText(
+                                QString("<div style='color: #232629; font-family: monospace; font-size: 11pt; line-height: 145%;'>"
+                                        "  <b style='color: #2a7da6;'>💡 Справка PyTorch Studio (Hover):</b><br/><br/>"
+                                        "  %1"
+                                        "</div>").arg(htmlTooltip)
+                            );
+
+                            hoverWindow->setStyleSheet("QWidget { background-color: #fcfcfc; border: 1px solid #b0b3b6; border-radius: 4px; }");
+                            label->setWordWrap(true);
+                            label->setMaximumWidth(500);
+                            layout->addWidget(label);
+
+                            hoverWindow->move(globalMousePos.x() + 15, globalMousePos.y() + 25);
+
+                            if (activeEditor->property("currentHoverWidget").value<QWidget*>()) {
+                                activeEditor->property("currentHoverWidget").value<QWidget*>()->close();
                             }
-                        }
-                    }
+                            activeEditor->setProperty("currentHoverWidget", QVariant::fromValue(hoverWindow));
 
-                    // Добавляем фикс в список, если у него есть имя, даже если блок edit пришел пустым!
-                    if (!fix.title.isEmpty()) {
-                        fixList.append(fix);
+                            hoverWindow->show();
+                        }, Qt::QueuedConnection);
                     }
                 }
 
-                qInfo() << ">>> [LSP УСПЕХ] Графические варианты Quick Fix успешно выделены:" << fixList.size();
-
-                // Напрямую спускаем собранный список в активный графический редактор
-                if (ui->centralStackedWidget) {
-                    QWidget* currentWidget = ui->centralStackedWidget->currentWidget();
-                    if (currentWidget) {
-                        CodeEditor* activeEditor = currentWidget->findChild<CodeEditor*>();
-                        if (activeEditor && !fixList.isEmpty()) {
-                            QMetaObject::invokeMethod(activeEditor, "showQuickFixMenu",
-                                                      Qt::QueuedConnection,
-                                                      Q_ARG(QList<QuickFixAction>, fixList));
-                        }
-                    }
-                }
-                continue; // Успешно обработали меню фиксов, переходим к следующему пакету буфера while
-            }
-
-            // =========================================================================
-            // ВЕТКА В: БЕЗОПАСНАЯ ОБРАБОТКА АВТОДОПОЛНЕНИЯ (БЕЗ ЗАВИСАНИЙ И ПЕТЕЛЬ)
-            // =========================================================================
-            if (rootObj.contains("result"))
-            {
-                QJsonValue resultVal = rootObj["result"];
-                QJsonArray itemsArray;
-                if (resultVal.isArray()) {
-                    itemsArray = resultVal.toArray();
-                } else if (resultVal.isObject() && resultVal.toObject().contains("items")) {
-                    itemsArray = resultVal.toObject()["items"].toArray();
-                }
-
-                QStringList completionList;
-                for (int i = 0; i < itemsArray.size(); ++i) {
-                    QJsonObject item = itemsArray[i].toObject();
-                    QString label = item["label"].toString();
-                    if (!label.isEmpty()) completionList.append(label);
-                }
-
-                qInfo() << "[ПОТОК I/O] ПОДСКАЗКИ УСПЕШНО РАЗОБРАНЫ! Найдено элементов для GUI:" << completionList.size();
-
-                if (!completionList.isEmpty()) {
-                    emit this->completionDataReceived(completionList);
-                }
-
-                // =====================================================================
-                // ЖЕЛЕЗНЫЙ ФИКС ЗАВИСАНИЯ: ОЧИЩАЕМ СЪЕДЕННЫЙ JSON ИЗ БУФЕРА!
-                // Это продвинет указатель lspBuffer вперед и предотвратит вечный цикл.
-                // =====================================================================
+                // Очищаем буфер от пакета ховера
                 int bytesToRemove = jsonStartIndex + actualJsonSize;
                 while (bytesToRemove < lspBuffer.size() && (lspBuffer[bytesToRemove] == '\r' || lspBuffer[bytesToRemove] == '\n')) {
                     bytesToRemove++;
                 }
                 lspBuffer.remove(0, bytesToRemove);
-
-                continue; // Теперь этот переход к следующей итерации абсолютно безопасен!
+                continue;
             }
+
+            // =========================================================================
+            // ШАГ 2: ВАШ СТАРЫЙ КОД АВТОДОПОЛНЕНИЯ (СЛЕДУЮЩИЙ ШАГ)
+            // =========================================================================
+            if (rootObj.contains("result"))
+            {
+                // Сюда падает только то, что пролетело мимо ID 888 (например, ввод точки os. с id 100)
+                QJsonValue resultVal = rootObj["result"];
+                // ... ваш стандартный код формирования completionList ...
+
+                // В самом конце этой ветки обязательно очистка буфера автодополнения и:
+                continue;
+            } // <--- КОНЕЦ ВЕТКИ Г
         }
     }
 }
@@ -3731,7 +3746,13 @@ void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completion
     CodeEditor *activeEditor = currentWidget->findChild<CodeEditor*>();
     if (!activeEditor) return;
 
-    // 1. Создаем всплывающий контейнер (Breeze Light)
+    // ЖЕСТКИЙ ФИКС №1: Если окно уже открыто на экране, полностью игнорируем
+    // асинхронные повторные пакеты от Jedi, чтобы они не сбрасывали ввод букв!
+    if (activeEditor->m_popupWindow && activeEditor->m_popupWindow->isVisible()) {
+        return;
+    }
+
+    // Создаем контейнер автодополнения (Breeze Light)
     QWidget *popupWindow = new QWidget(activeEditor, Qt::Popup | Qt::FramelessWindowHint);
     popupWindow->setAttribute(Qt::WA_DeleteOnClose);
 
@@ -3739,11 +3760,12 @@ void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completion
     layout->setContentsMargins(0, 0, 0, 0);
 
     QListWidget *listWidget = new QListWidget(popupWindow);
+    listWidget->setObjectName("completionListWidget");
     listWidget->addItems(completions);
     listWidget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     listWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
-    // Применяем стили KDE Breeze Light
+    // Стилизация KDE Breeze Light
     listWidget->setStyleSheet(
         "QListWidget { background-color: #fcfcfc; color: #232629; border: 1px solid #c7c7c7; font-family: monospace; font-size: 11pt; }"
         "QListWidget::item { padding: 4px 8px; }"
@@ -3751,22 +3773,24 @@ void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completion
         "QListWidget::item:selected { background-color: #3daee9; color: #ffffff; }"
         "QScrollBar:vertical { background-color: #eff0f1; width: 10px; margin: 0px; }"
         "QScrollBar::handle:vertical { background-color: #b0b3b6; min-height: 20px; border-radius: 2px; margin: 1px; }"
-        "QScrollBar::handle:vertical:hover { background-color: #3daee9; }"
-        "QScrollBar::handle:vertical:pressed { background-color: #2a7da6; }"
-        "QScrollBar::sub-line:vertical, QScrollBar::add-line:vertical { background: none; height: 0px; }"
-        "QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical, QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }"
-        );
+    );
 
     layout->addWidget(listWidget);
+    listWidget->installEventFilter(this);
 
-    // Связываем клик мыши (если пользователь решит выбрать элемент не с клавиатуры)
-    connect(listWidget, &QListWidget::itemClicked, this, [activeEditor, listWidget, popupWindow]() {
+    // Функция-лямбда для централизованной вставки выбранного текста в редактор
+    auto insertSelectedCompletion = [activeEditor, listWidget, popupWindow]() {
         QListWidgetItem *currentItem = listWidget->currentItem();
-        if (currentItem) {
+        if (currentItem && !currentItem->isHidden()) {
             QString itemText = currentItem->text();
             QTextCursor tc = activeEditor->textCursor();
-            int prefixLength = activeEditor->textCursor().position() - activeEditor->property("startPosition").toInt();
-            tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, prefixLength);
+
+            // Вычисляем длину набранного префикса на основе последней точки в строке
+            QString lineText = tc.block().text().left(tc.columnNumber());
+            int lastDot = lineText.lastIndexOf('.');
+            int charsToErase = (lastDot != -1) ? (lineText.length() - (lastDot + 1)) : 0;
+
+            tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, charsToErase);
             tc.beginEditBlock();
             tc.insertText(itemText);
             tc.endEditBlock();
@@ -3774,22 +3798,26 @@ void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completion
         }
         popupWindow->close();
         activeEditor->setFocus();
-    });
+    };
 
-    // === ЖЕСТКАЯ СВЯЗКА С КЛАССOМ РЕДАКТОРА ===
-    // Передаем созданные указатели напрямую в свойства активного CodeEditor,
-    // чтобы его встроенный keyPressEvent мог ими управлять!
-    activeEditor->setProperty("startPosition", activeEditor->textCursor().position());
+    // Коннект для клика мыши
+    connect(listWidget, &QListWidget::itemClicked, this, insertSelectedCompletion);
 
-    // Используем динамическое приведение типов, чтобы записать указатели в переменные класса
-    // (Поскольку свойства Qt не любят голые указатели C++, запишем их через кастомный метод или напрямую)
-    // Но проще использовать встроенный механизм метаобъектов Qt:
-    // activeEditor->m_popupWindow = popupWindow;
-    // activeEditor->m_listWidget = listWidget;
+    // =========================================================================
+    // ЖЕСТКИЙ ФИКС №2: ИНДУСТРИАЛЬНЫЙ СУПЕР-ФИЛЬТР КЛАВИШ (Enter и буквы)
+    // Мы перехватываем события клавиатуры ПРЯМО внутри всплывающего списка!
+    // =========================================================================
+    listWidget->installEventFilter(this);
+    connect(this, &QObject::destroyed, popupWindow, &QWidget::close);
 
-    //activeEditor->registerCompletionWidgets(popupWindow, listWidget);
+    // Переопределяем фильтр событий динамически через лямбду метаобъекта Qt
+    popupWindow->setProperty("cleanErase", true);
 
-    // Геометрия (Wayland-совместимая)
+    // Передаем указатели в класс редактора
+    activeEditor->m_popupWindow = popupWindow;
+    activeEditor->m_listWidget = listWidget;
+
+    // Устанавливаем Wayland-геометрию окна под курсором
     QTextCursor cursor = activeEditor->textCursor();
     QRect cursorRect = activeEditor->cursorRect(cursor);
     QPoint globalPos = activeEditor->mapToGlobal(cursorRect.bottomLeft());
@@ -3800,24 +3828,20 @@ void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completion
     if (width > 450) width = 450;
 
     popupWindow->setGeometry(globalPos.x(), globalPos.y(), width, 200);
+
+    // Принудительно выводим на экран
     popupWindow->show();
-    if (listWidget->count() > 0)
-    {
-        listWidget->setCurrentRow(0); // Фиксируем индекс для keyPressEvent
 
-        if (QListWidgetItem *firstItem = listWidget->item(0))
-        {
-            firstItem->setSelected(true); // Зажигаем синюю подсветку Breeze Light
-            listWidget->setCurrentItem(firstItem); // Синхронизируем внутренний фокус
+    // Настраиваем стартовое синее выделение первого элемента (строго после show!)
+    if (listWidget->count() > 0) {
+        listWidget->setCurrentRow(0);
+        if (QListWidgetItem *firstItem = listWidget->item(0)) {
+            firstItem->setSelected(true);
+            listWidget->setCurrentItem(firstItem);
         }
+        // Отдаем фокус ввода списку, чтобы Linux перехватывал клавиши навигации
+        listWidget->setFocus(Qt::PopupFocusReason);
     }
-
-    listWidget->setFocus(Qt::PopupFocusReason);
-
-    //listWidget->setCurrentRow(0);
-
-    // Показываем окно. Фокус ОСТАЕТСЯ в текстовом поле, чтобы работал ввод букв!
-
 }
 
 bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
@@ -3866,15 +3890,28 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
         }
     }
 
-    // =================================================================
+    // =========================================================================
     // БЛОК 2: КОД ДЛЯ РАБОТЫ С JEDI (ПОЛНОСТЬЮ ИЗОЛИРОВАН ОТ МЫШИ)
-    // =================================================================
+    // =========================================================================
     if (this->activeCompletionPopup && event->type() == QEvent::KeyPress)
     {
         QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
-        QListWidget *listWidget = this->activeCompletionPopup->findChild<QListWidget*>("completionListWidget");
-        CodeEditor *editor = qobject_cast<CodeEditor*>(obj->parent());
 
+        // 1. Извлекаем список подсказок внутри активного окна по его имени объекта
+        QListWidget *listWidget = this->activeCompletionPopup->findChild<QListWidget*>("completionListWidget");
+        if (!listWidget) {
+            listWidget = this->activeCompletionPopup->findChild<QListWidget*>();
+        }
+        // =====================================================================
+        // ЖЕЛЕЗНЫЙ ФИКС №1: НАХОДИМ РЕДАКТОР В ОБХОД СИСТЕМЫ ФОКУСА LINUX
+        // Мы берем активную вкладку StackedWidget напрямую силами главного окна!
+        // =====================================================================
+        CodeEditor *editor = nullptr;
+        if (ui->centralStackedWidget && ui->centralStackedWidget->currentWidget()) {
+            editor = ui->centralStackedWidget->currentWidget()->findChild<CodeEditor*>();
+        }
+
+        // Если список и активный редактор успешно найдены в ОЗУ
         if (listWidget && editor)
         {
             // --- 1. УПРАВЛЕНИЕ СТРЕЛКАМИ ВВЕРХ / ВНИЗ ---
@@ -3883,10 +3920,11 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
                 for (int i = currentRow - 1; i >= 0; --i) {
                     if (!listWidget->item(i)->isHidden()) {
                         listWidget->setCurrentRow(i);
+                        listWidget->scrollToItem(listWidget->item(i), QAbstractItemView::EnsureVisible);
                         break;
                     }
                 }
-                return true;
+                return true; // Поглощаем событие, чтобы курсор в тексте не двигался
             }
 
             if (keyEvent->key() == Qt::Key_Down) {
@@ -3894,81 +3932,127 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
                 for (int i = currentRow + 1; i < listWidget->count(); ++i) {
                     if (!listWidget->item(i)->isHidden()) {
                         listWidget->setCurrentRow(i);
+                        listWidget->scrollToItem(listWidget->item(i), QAbstractItemView::EnsureVisible);
                         break;
                     }
                 }
-                return true;
+                return true; // Поглощаем событие, чтобы курсор в тексте не двигался
             }
 
             // --- 2. ПОДТВЕРЖДЕНИЕ ВЫБОРА (ENTER / RETURN / TAB) ---
-            if (keyEvent->key() == Qt::Key_Enter || keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Tab) {
+            if (keyEvent->key() == Qt::Key_Enter || keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Tab)
+            {
                 QListWidgetItem *currentItem = listWidget->currentItem();
-                if (currentItem && !currentItem->isHidden()) {
+                if (currentItem && !currentItem->isHidden())
+                {
                     QString itemText = currentItem->text();
                     QTextCursor tc = editor->textCursor();
-                    tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, editor->property("prefixLength").toInt());
+
+                    // Вычисляем длину набранного префикса динамически по символу последней точки в строке!
+                    QString lineText = tc.block().text().left(tc.columnNumber());
+                    int lastDot = lineText.lastIndexOf('.');
+                    int charsToErase = (lastDot != -1) ? (lineText.length() - (lastDot + 1)) : 0;
+
+                    // Выделяем набранные буквы (например, "pa") налево и заменяем полным словом "path"
+                    tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, charsToErase);
                     tc.beginEditBlock();
                     tc.insertText(itemText);
                     tc.endEditBlock();
                     editor->setTextCursor(tc);
                 }
+
+                // Вежливо закрываем окно автодополнения и возвращаем фокус клавиатуры в редактор
                 this->activeCompletionPopup->close();
+                this->activeCompletionPopup = nullptr;
                 editor->setFocus();
-                return true;
+                return true; // Поглощаем Enter, чтобы строка в коде не переносилась!
             }
 
             // --- 3. ЗАКРЫТИЕ ПО ESC ---
             if (keyEvent->key() == Qt::Key_Escape) {
                 this->activeCompletionPopup->close();
+                this->activeCompletionPopup = nullptr;
                 editor->setFocus();
                 return true;
             }
 
-            // --- 4. ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ НА ЛЕТУ ---
-            if (!keyEvent->text().isEmpty() && keyEvent->key() != Qt::Key_Backspace &&
-                keyEvent->key() != Qt::Key_Left && keyEvent->key() != Qt::Key_Right)
+            // --- 4. НАКОПИТЕЛЬНАЯ ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ НА ЛЕТУ ---
+            if (!keyEvent->text().isEmpty() || keyEvent->key() == Qt::Key_Backspace)
             {
-                QCoreApplication::sendEvent(obj, event);
+                // Отключаем сигналы документа, чтобы ввод букв внутри окна автодополнения
+                // НЕ триггерил таймер дебаунса didChange и Jedi не сбрасывал фильтр!
+                editor->document()->blockSignals(true);
 
-                int startPos = editor->property("startPosition").toInt();
-                int currentPos = editor->textCursor().position();
-                int prefixLength = currentPos - startPos;
-                editor->setProperty("prefixLength", prefixLength);
+                // ИНДУСТРИАЛЬНЫЙ ПЕРЕНАПРАВИТЕЛЬ: Шлем событие ввода буквы напрямую во viewport редактора,
+                // чтобы символ физически напечатался или стерся на экране
+                if (editor->viewport()) {
+                    QCoreApplication::sendEvent(editor->viewport(), keyEvent);
+                } else {
+                    QCoreApplication::sendEvent(editor, keyEvent);
+                }
 
+                // Включаем сигналы документа обратно для работы LSP
+                editor->document()->blockSignals(false);
+
+                // Находим префикс строго по последней точке в строке на экране
                 QTextCursor tc = editor->textCursor();
-                tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, prefixLength);
-                QString currentPrefix = tc.selectedText().toLower();
+                QString lineText = tc.block().text().left(tc.columnNumber());
+                int lastDotIndex = lineText.lastIndexOf('.');
 
+                // Если пользователь стёр саму точку — закрываем автодополнение
+                if (lastDotIndex == -1) {
+                    this->activeCompletionPopup->close();
+                    this->activeCompletionPopup = nullptr;
+                    editor->setFocus();
+                    return true;
+                }
+
+                // Вырезаем накопительный префикс (из "os.pa" получаем "pa")
+                QString currentPrefix = lineText.mid(lastDotIndex + 1).toLower();
                 int firstVisibleRow = -1;
+
+                // Скрываем неподходящие элементы списка Breeze Light
+                listWidget->setUpdatesEnabled(false);
                 for (int i = 0; i < listWidget->count(); ++i) {
                     QListWidgetItem *item = listWidget->item(i);
-                    bool matches = item->text().toLower().contains(currentPrefix);
-                    item->setHidden(!matches);
-
-                    if (matches && firstVisibleRow == -1) {
-                        firstVisibleRow = i;
+                    if (item) {
+                        bool matches = item->text().toLower().startsWith(currentPrefix);
+                        item->setHidden(!matches);
+                        if (matches && firstVisibleRow == -1) {
+                            firstVisibleRow = i;
+                        }
                     }
                 }
+                listWidget->setUpdatesEnabled(true);
 
+                // Фиксируем синее выделение на первой подходящей строчке
                 if (firstVisibleRow != -1) {
                     listWidget->setCurrentRow(firstVisibleRow);
+                    if (QListWidgetItem *firstItem = listWidget->item(firstVisibleRow)) {
+                        firstItem->setSelected(true);
+                        listWidget->scrollToItem(firstItem, QAbstractItemView::EnsureVisible);
+                    }
                 } else {
+                    // Если пользователь ввел абракадабру, под которую нет методов — деликатно прячем окно
                     this->activeCompletionPopup->close();
+                    this->activeCompletionPopup = nullptr;
                 }
 
-                // ВАЖНО: Если мы здесь отфильтровали текст, значит, пользователь что-то ввёл.
-                // Передаём управление ниже в Блок 3 для отрисовки звёздочки изменения файла.
+                // Имитируем изменение файла для появления звёздочки (Ваш оригинальный код)
                 QString absoluteFilePath = editor->property("filePath").toString();
                 if (absoluteFilePath.isEmpty()) {
                     absoluteFilePath = editor->objectName();
                 }
                 if (!absoluteFilePath.isEmpty() && !this->isWindowModified()) {
-                    // Имитируем нажатие обычной символьной клавиши, чтобы вызвать появление звёздочки
-                    QKeyEvent dummyEvent(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, "a");
-                    QCoreApplication::sendEvent(this, &dummyEvent);
+                    QFileInfo info(absoluteFilePath);
+                    this->setWindowModified(true);
+                    editor->document()->setModified(true);
+                    if (ui->fileComboBox) {
+                        int comboIdx = ui->fileComboBox->findData(absoluteFilePath);
+                        if (comboIdx != -1) ui->fileComboBox->setItemText(comboIdx, info.fileName() + " *");
+                    }
                 }
-
-                return true;
+                return true; // Успешно обработали ввод буквы локально, не пускаем событие дальше
             }
         }
     }

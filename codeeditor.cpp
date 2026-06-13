@@ -14,6 +14,8 @@
 #include <QPaintEvent>
 #include <QTextBlock>
 #include <QSettings>
+#include <QWheelEvent>
+
 
 QList<CodeEditor::LspErrorData> CodeEditor::currentLspErrors;
 
@@ -262,6 +264,8 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
     connect(this, &CodeEditor::blockCountChanged, this, &CodeEditor::updateLineNumberAreaWidth); //
     connect(this, &CodeEditor::updateRequest, this, &CodeEditor::updateLineNumberArea); //
     connect(this, &CodeEditor::cursorPositionChanged, this, &CodeEditor::highlightCurrentLine); //
+    connect(this, &CodeEditor::cursorPositionChanged, this, &CodeEditor::matchBrackets);
+
 
     // Потокобезопасный асинхронный коннект чтения готовой диагностики от сервера
    // connect(lspProcess, &QProcess::readyReadStandardOutput, this, &CodeEditor::onLspReadyRead); //
@@ -405,150 +409,237 @@ void CodeEditor::highlightCurrentLine()
 void CodeEditor::keyPressEvent(QKeyEvent *e)
 {
     // =========================================================================
-    // БЛОК 1: ЕДИНЫЙ, БРОНИРОВАННЫЙ ПЕРЕХВАТ ALT + ENTER (БЕЗ ДУБЛИРОВАНИЯ)
+    // БЛОК: УМНОЕ КОММЕНТИРОВАНИЕ СТРОК ПО НАЖАТИЮ CTRL + / (ДЛЯ PYTHON И PYTORCH)
+    // =========================================================================
+    if (e->modifiers() == Qt::ControlModifier && e->key() == Qt::Key_Slash)
+    {
+        e->accept(); // Поглощаем событие клавиатуры Linux
+
+        QTextCursor cursor = this->textCursor();
+
+        // Фиксируем границы выделения (строки, которые выбрал пользователь)
+        int startPos = cursor.selectionStart();
+        int endPos = cursor.selectionEnd();
+
+        // Переводим позиции курсора в абсолютные номера строк документа (с нуля)
+        QTextBlock startBlock = this->document()->findBlock(startPos);
+        QTextBlock endBlock = this->document()->findBlock(endPos);
+
+        int startLine = startBlock.blockNumber();
+        int endLine = endBlock.blockNumber();
+
+        // Если пользователь выделил документ снизу вверх — меняем границы местами
+        if (startLine > endLine) {
+            std::swap(startLine, endLine);
+        }
+
+        // Страховка: если курсор стоит в самом начале следующей строки без выделения символов,
+        // мы не должны комментировать её. Уменьшаем границу.
+        if (startLine < endLine && cursor.position() == endBlock.position() && cursor.anchor() != cursor.position()) {
+            endLine--;
+        }
+
+        // ШАГ 1: Сканируем блок выделения. Проверяем, нужно ли комментировать или раскомментировать.
+        bool shouldComment = false;
+        QTextBlock currentBlock = this->document()->findBlockByLineNumber(startLine);
+
+        for (int i = startLine; i <= endLine; ++i)
+        {
+            if (currentBlock.isValid()) {
+                QString lineText = currentBlock.text().trimmed();
+                // Если строка НЕ пустая И НЕ начинается со знака '#' — значит, нужно комментировать весь блок!
+                if (!lineText.isEmpty() && !lineText.startsWith("#")) {
+                    shouldComment = true;
+                    break;
+                }
+                currentBlock = currentBlock.next();
+            }
+        }
+
+        // Запускаем монолитную макро-транзакцию редактирования.
+        // Благодаря этому нажатие Ctrl + Z (Undo) отменит комментирование ВСЕХ строк сразу за один раз!
+        cursor.beginEditBlock();
+
+        currentBlock = this->document()->findBlockByLineNumber(startLine);
+        QTextCursor writeCursor(this->document());
+
+        // ШАГ 2: Применяем изменения построчно
+        for (int i = startLine; i <= endLine; ++i)
+        {
+            if (currentBlock.isValid())
+            {
+                QString rawText = currentBlock.text();
+                writeCursor.setPosition(currentBlock.position());
+
+                if (shouldComment)
+                {
+                    // Вариант А: Добавляем символ решетки в самое начало строки
+                    writeCursor.insertText("# ");
+                }
+                else
+                {
+                    // Вариант Б: Раскомментируем. Ищем решетку и пробел после неё.
+                    if (rawText.startsWith("# ")) {
+                        writeCursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 2);
+                        writeCursor.removeSelectedText();
+                    } else if (rawText.startsWith("#")) {
+                        writeCursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+                        writeCursor.removeSelectedText();
+                    } else if (rawText.trimmed().startsWith("#")) {
+                        // Если решетка стоит с отступом (табуляцией)
+                        int hashIndex = rawText.indexOf('#');
+                        writeCursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, hashIndex);
+                        if (rawText.mid(hashIndex, 2) == "# ") {
+                            writeCursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 2);
+                        } else {
+                            writeCursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+                        }
+                        writeCursor.removeSelectedText();
+                    }
+                }
+                currentBlock = currentBlock.next();
+            }
+        }
+
+        cursor.endEditBlock(); // Закрываем транзакцию
+        return; // Мгновенно выходим из функции, блокируя проваливание вниз
+    }
+
+    // =========================================================================
+    // БЛОК: АВТОМАТИЧЕСКОЕ ЗАКРЫТИЕ ПАРНЫХ СИМВОЛОВ (СЛУШАТЕЛЬ ВВОДА)
+    // =========================================================================
+    QTextCursor cursor = this->textCursor();
+    QString textToInsert = "";
+    bool isPairTriggered = false;
+
+    // СЛУЧАЙ 1: Пользователь вводит открывающий символ
+    if (e->text() == "(") { textToInsert = "()"; isPairTriggered = true; }
+    else if (e->text() == "[") { textToInsert = "[]"; isPairTriggered = true; }
+    else if (e->text() == "{") { textToInsert = "{}"; isPairTriggered = true; }
+    else if (e->text() == "\"") { textToInsert = "\"\""; isPairTriggered = true; }
+    else if (e->text() == "'") { textToInsert = "''"; isPairTriggered = true; }
+
+    if (isPairTriggered)
+    {
+        e->accept(); // Поглощаем оригинальное одиночное нажатие
+
+        cursor.beginEditBlock();
+        cursor.insertText(textToInsert); // Вставляем сразу пару символов
+        cursor.movePosition(QTextCursor::Left, QTextCursor::MoveAnchor, 1); // Сдвигаем курсор внутрь
+        cursor.endEditBlock();
+
+        this->setTextCursor(cursor);
+        return; // Мгновенно выходим, чтобы базовый класс не продублировал символ!
+    }
+
+    // =========================================================================
+    // СЛУЧАЙ 2: УМНЫЙ ПЕРЕШАГ СУЩЕСТВУЮЩЕЙ ЗАКРЫВАЮЩЕЙ СКОБКИ
+    // Если закрывающий символ УЖЕ стоит впереди курсора, мы не дублируем его,
+    // а просто сдвигаем курсор на один шаг вправо.
+    // =========================================================================
+    QString nextChar = this->document()->characterAt(cursor.position());
+    bool isSkipTriggered = false;
+
+    if (e->text() == ")" && nextChar == ")") isSkipTriggered = true;
+    else if (e->text() == "]" && nextChar == "]") isSkipTriggered = true;
+    else if (e->text() == "}" && nextChar == "}") isSkipTriggered = true;
+    else if (e->text() == "\"" && nextChar == "\"") isSkipTriggered = true;
+    else if (e->text() == "'" && nextChar == "'") isSkipTriggered = true;
+
+    if (isSkipTriggered)
+    {
+        e->accept(); // Поглощаем нажатие
+        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, 1); // Просто шагаем вперед
+        this->setTextCursor(cursor);
+        return;
+    }
+
+    // =========================================================================
+    // БЛОК 1: БРОНИРОВАННЫЙ СИНХРОННЫЙ ПЕРЕХВАТ ALT + ENTER (QUICK FIX)
     // =========================================================================
     if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) &&
         (e->modifiers() & Qt::AltModifier))
     {
-        e->accept(); // Намертво блокируем перенос строки в текстовом редакторе
-
-        qDebug() << ">>> [LSP УСПЕХ] СИНХРОННО НАЖАТ АЛТ+ЭНТЕР! Формирую полный охват строки...";
+        e->accept(); // Блокируем перенос строки в текстовом редакторе
 
         QJsonObject params;
         QJsonObject textDocument;
-
-        // Преобразуем путь в абсолютный валидный формат URI (file:///...) для Linux [на основе предыдущих контекстов]
         QUrl fileUrl = QUrl::fromLocalFile(this->currentFilePath);
         textDocument["uri"] = fileUrl.toString();
         params["textDocument"] = textDocument;
 
-        qDebug() << ">>> [LSP ДЕБАГ] Сформирован абсолютный URI файла:" << fileUrl.toString();
-
         QTextCursor cursor = this->textCursor();
         int currentLine = cursor.blockNumber();
 
-        // ИНДУСТРИАЛЬНЫЙ СТАНДАРТ: Охватываем всю строку целиком (символы от 0 до 999),
-        // чтобы pylsp/rope выдал исправление, даже если курсор стоит в конце строки!
-        QJsonObject startPos;
-        startPos["line"] = currentLine;
-        startPos["character"] = 0;
+        QJsonObject startPos; startPos["line"] = currentLine; startPos["character"] = 0;
+        QJsonObject endPos; endPos["line"] = currentLine; endPos["character"] = 999;
 
-        QJsonObject endPos;
-        endPos["line"] = currentLine;
-        endPos["character"] = 999;
-
-        QJsonObject range;
-        range["start"] = startPos;
-        range["end"] = endPos;
+        QJsonObject range; range["start"] = startPos; range["end"] = endPos;
         params["range"] = range;
 
-        // Наполняем контекст ошибок
-        QJsonObject context;
-        QJsonArray diagnosticsArray;
-
-        for (const auto& error : Neuro_programm::globalLspErrors)
-        {
-            if (error.line == currentLine)
-            {
-                QJsonObject diagObj;
-                QJsonObject r;
-                // ПЕРЕДАЕМ ТОЧНЫЕ СИМВОЛЬНЫЕ КООРДИНАТЫ ОШИБКИ, А НЕ ВСЮ СТРОКУ ОТ 0 ДО 999!
-                // Это заставит rope понять, на каком конкретно слове сидит баг.
-                QJsonObject s; s["line"] = error.line; s["character"] = error.startChar;
-                QJsonObject en; en["line"] = error.line; en["character"] = error.endChar;
+        QJsonObject context; QJsonArray diagnosticsArray;
+        for (const auto& error : Neuro_programm::globalLspErrors) {
+            if (error.line == currentLine) {
+                QJsonObject diagObj; QJsonObject r; QJsonObject s; QJsonObject en;
+                s["line"] = error.line; s["character"] = error.startChar;
+                en["line"] = error.line; en["character"] = error.endChar;
                 r["start"] = s; r["end"] = en;
-
-                diagObj["range"] = r;
-                diagObj["message"] = error.message;
-                diagObj["severity"] = error.isError ? 1 : 2;
-                diagObj["source"] = "pyflakes";
-
-                // СВЕРХВАЖНЫЙ ФИКС: Передаем точный системный код (F401, E999, и т.д.),
-                // который мы начали сохранять из JSON-пакета в методе readLspResponse!
-                if (!error.code.isEmpty()) {
-                    diagObj["code"] = error.code;
-                } else {
-                    // Страховочный вариант на случай, если код не вычитался
-                    if (error.message.contains("unused") || error.message.contains("imported but")) {
-                        diagObj["code"] = "F401";
-                    } else {
-                        diagObj["code"] = "E999";
-                    }
-                }
-
+                diagObj["range"] = r; diagObj["message"] = error.message;
+                diagObj["severity"] = error.isError ? 1 : 2; diagObj["source"] = "pyflakes";
                 diagnosticsArray.append(diagObj);
             }
         }
-        context["diagnostics"] = diagnosticsArray;
-        params["context"] = context;
+        context["diagnostics"] = diagnosticsArray; params["context"] = context;
 
-
-        // Отправляем официальный Request с жестким ID: 999 в центральный транспорт
         if (Neuro_programm::self) {
-            qDebug() << ">>> [LSP] Запрос codeAction отправлен в главный поток! Ошибок на строке:" << diagnosticsArray.size();
             Neuro_programm::self->sendLspRequest("textDocument/codeAction", params, 999);
         }
-        return; // Вежливо выходим из функции
+        return;
     }
 
     // =========================================================================
-    // СЛУЧАЙ 1: ОКНО ПОДСКАЗОК УЖЕ ОТКРЫТО — ПЕРЕХВАТЫВАЕМ КЛАВИШИ УПРАВЛЕНИЯ
+    // БЛОК 2: ОКНО ПОДСКАЗОК АКТИВНО — НАВИГАЦИЯ И ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ
     // =========================================================================
     if (m_popupWindow && m_popupWindow->isVisible() && m_listWidget)
     {
+        // 1. Обработка клавиш навигации (Up, Down, PageUp, PageDown)
         switch (e->key())
         {
         case Qt::Key_Down: {
             int currentRow = m_listWidget->currentRow();
-            // Спускаемся вниз. Если дошли до конца — прыгаем на самый первый элемент (зацикливание)
             int nextRow = (currentRow < m_listWidget->count() - 1) ? currentRow + 1 : 0;
-
-            // ГРАФИЧЕСКИЙ ФИКС: Принудительно заставляем Qt выделить и показать элемент!
             m_listWidget->setCurrentRow(nextRow);
             if (QListWidgetItem *item = m_listWidget->item(nextRow)) {
-                item->setSelected(true);
-                m_listWidget->setCurrentItem(item);
-                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible); // Авто-скролл
+                item->setSelected(true); m_listWidget->setCurrentItem(item);
+                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible);
             }
-
-            e->accept(); // Блокируем движение текстового курсора вниз
-            return;
+            e->accept(); return;
         }
         case Qt::Key_Up: {
             int currentRow = m_listWidget->currentRow();
-            // Поднимаемся вверх. Если мы на самом верху — прыгаем в самый конец списка
             int prevRow = (currentRow > 0) ? currentRow - 1 : m_listWidget->count() - 1;
-
-            // ГРАФИЧЕСКИЙ ФИКС: Принудительно заставляем Qt выделить и показать элемент!
             m_listWidget->setCurrentRow(prevRow);
             if (QListWidgetItem *item = m_listWidget->item(prevRow)) {
-                item->setSelected(true);
-                m_listWidget->setCurrentItem(item);
-                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible); // Авто-скролл
+                item->setSelected(true); m_listWidget->setCurrentItem(item);
+                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible);
             }
-
-            e->accept(); // Блокируем движение текстового курсора вверх
-            return;
+            e->accept(); return;
         }
         case Qt::Key_PageDown: {
             int nextRow = qMin(m_listWidget->count() - 1, m_listWidget->currentRow() + 5);
             m_listWidget->setCurrentRow(nextRow);
             if (QListWidgetItem *item = m_listWidget->item(nextRow)) {
-                item->setSelected(true);
-                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible);
+                item->setSelected(true); m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible);
             }
-            e->accept();
-            return;
+            e->accept(); return;
         }
         case Qt::Key_PageUp: {
             int prevRow = qMax(0, m_listWidget->currentRow() - 5);
             m_listWidget->setCurrentRow(prevRow);
             if (QListWidgetItem *item = m_listWidget->item(prevRow)) {
-                item->setSelected(true);
-                m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible);
+                item->setSelected(true); m_listWidget->scrollToItem(item, QAbstractItemView::EnsureVisible);
             }
-            e->accept();
-            return;
+            e->accept(); return;
         }
         default:
             break;
@@ -559,6 +650,7 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
             m_popupWindow->hide();
             m_popupWindow->deleteLater();
             m_popupWindow = nullptr;
+            m_listWidget = nullptr; // ОБЯЗАТЕЛЬНО ОБНУЛЯЕМ!
             e->accept();
             return;
         }
@@ -572,145 +664,103 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
                 QString itemText = currentItem->text();
                 QTextCursor tc = this->textCursor();
 
-                // ВЫЧИСЛЯЕМ СКОЛЬКО СИМВОЛОВ НАДО СТЕРЕТЬ ПЕРЕД ВСТАВКОЙ
                 QString lineText = tc.block().text().left(tc.columnNumber());
                 int lastDot = lineText.lastIndexOf('.');
                 int charsToErase = (lastDot != -1) ? (lineText.length() - (lastDot + 1)) : 0;
 
-                // Выделяем набранные буквы (например, "pa") налево, сохраняя саму точку
                 tc.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, charsToErase);
-
-                tc.beginEditBlock();
-                tc.insertText(itemText); // Заменяем "pa" на полный метод "path"
-                tc.endEditBlock();
+                tc.beginEditBlock(); tc.insertText(itemText); tc.endEditBlock();
                 this->setTextCursor(tc);
             }
-
             if (m_popupWindow) {
-                m_popupWindow->hide();
-                m_popupWindow->deleteLater();
-                m_popupWindow = nullptr;
-                m_listWidget = nullptr;
-            }
-            return;
-        }
-
-
-        // 4. ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ НА ЛЕТУ ПРИ ВВОДЕ СИМВОЛОВ
-        if (!e->text().isEmpty() || e->key() == Qt::Key_Backspace)
-        {
-            // 1. Сначала отдаем символ системе, чтобы текст обновился на экране
-            QPlainTextEdit::keyPressEvent(e);
-
-            // 2. Получаем чистый текст текущей строки и позицию курсора внутри этой строки
-            QTextCursor cursor = this->textCursor();
-            QString lineText = cursor.block().text();
-            int cursorColumn = cursor.columnNumber(); // Индекс курсора в строке (например, 5 для "os.pa")
-
-            // Извлекаем кусок строки от начала и строго до курсора (например, "os.pa")
-            QString leftOfCursor = lineText.left(cursorColumn);
-
-            // Находим индекс ПОСЛЕДНЕЙ точки перед курсором
-            int lastDotIndex = leftOfCursor.lastIndexOf('.');
-
-            // Если точка не найдена или пользователь стёр её — закрываем окно автодополнения
-            if (lastDotIndex == -1) {
                 if (m_popupWindow) {
                     m_popupWindow->hide();
                     m_popupWindow->deleteLater();
                     m_popupWindow = nullptr;
-                    m_listWidget = nullptr;
+                    m_listWidget = nullptr; // ОБЯЗАТЕЛЬНО ОБНУЛЯЕМ!
+                }
+                e->accept();
+                return;            }
+            e->accept(); return;
+        }
+
+        // 4. НАКОПИТЕЛЬНАЯ ФИЛЬТРАЦИЯ ПО СИМВОЛУ ПОСЛЕДНЕЙ ТОЧКИ
+        if (!e->text().isEmpty() || e->key() == Qt::Key_Backspace)
+        {
+            // Принудительно печатаем/стираем символ в редакторе СТРОГО ОДИН РАЗ!
+            QPlainTextEdit::keyPressEvent(e);
+
+            QTextCursor cursor = this->textCursor();
+            QString lineText = cursor.block().text();
+            int cursorColumn = cursor.columnNumber();
+
+            QString leftOfCursor = lineText.left(cursorColumn);
+            int lastDotIndex = leftOfCursor.lastIndexOf('.');
+
+            // Если точку стёрли — уничтожаем окно подсказок
+            if (lastDotIndex == -1) {
+                if (m_popupWindow) {
+                    m_popupWindow->hide(); m_popupWindow->deleteLater(); m_popupWindow = nullptr; m_listWidget = nullptr;
                 }
                 return;
             }
 
-            // 3. ВЫЧИСЛЯЕМ НАСТОЯЩИЙ НАКОПИТЕЛЬНЫЙ ПРЕФИКС!
-            // Вырезаем всё, что идет ПОСЛЕ последней точки и ДО курсора (из "os.pa" получим "pa")
+            // Вырезаем кристально точный префикс (например, "pa")
             QString currentPrefix = leftOfCursor.mid(lastDotIndex + 1).toLower();
-
-            qDebug() << ">>> [LSP ФИЛЬТР] Текущая строка:" << leftOfCursor
-                     << "| Вырезанный префикс:" << currentPrefix;
-
             int firstVisibleRow = -1;
 
-            // Блокируем мерцание интерфейса KDE Breeze
             m_listWidget->setUpdatesEnabled(false);
-
-            // 4. Фильтруем элементы списка по нашему накопительному префиксу
-            for (int i = 0; i < m_listWidget->count(); ++i)
-            {
+            for (int i = 0; i < m_listWidget->count(); ++i) {
                 QListWidgetItem *item = m_listWidget->item(i);
                 if (!item) continue;
-
-                // Проверяем совпадение по первым буквам
                 bool matches = item->text().toLower().startsWith(currentPrefix);
                 item->setHidden(!matches);
-
-                if (matches && firstVisibleRow == -1) {
-                    firstVisibleRow = i; // Фиксируем первый подходящий вариант
-                }
+                if (matches && firstVisibleRow == -1) firstVisibleRow = i;
             }
-
             m_listWidget->setUpdatesEnabled(true);
 
-            // 5. ГРАФИЧЕСКИЙ ФИКС: Удерживаем синее выделение для стрелок Up/Down
-            if (firstVisibleRow != -1)
-            {
+            // Фиксируем синее выделение Breeze Light на первой строчке
+            if (firstVisibleRow != -1) {
                 m_listWidget->setCurrentRow(firstVisibleRow);
                 if (QListWidgetItem *firstItem = m_listWidget->item(firstVisibleRow)) {
-                    firstItem->setSelected(true);
-                    m_listWidget->setCurrentItem(firstItem);
+                    firstItem->setSelected(true); m_listWidget->setCurrentItem(firstItem);
                     m_listWidget->scrollToItem(firstItem, QAbstractItemView::EnsureVisible);
                 }
-            }
-            else
-            {
-                // Если ввели несуществующий метод — закрываем окно подсказок
+            } else {
                 if (m_popupWindow) {
-                    m_popupWindow->hide();
-                    m_popupWindow->deleteLater();
-                    m_popupWindow = nullptr;
-                    m_listWidget = nullptr;
+                    m_popupWindow->hide(); m_popupWindow->deleteLater(); m_popupWindow = nullptr; m_listWidget = nullptr;
                 }
             }
-            return;
+            return; // ЖЕСТКИЙ ВЫХОД: Защищает от дублирования ввода букв в конце функции!
         }
     }
 
     // =========================================================================
-    // СЛУЧАЙ 2: ОКНО ЗАКРЫТО — ОТДАЕМ КЛАВИШИ СИСТЕМЕ И ЛОВИМ ВВОД СИМВОЛА ТОЧКИ
+    // СЛУЧАЙ 3: ОКНО ЗАКРЫТО — ОТДАЕМ КЛАВИШИ СИСТЕМЕ И ЛОВИМ ПЕРВЫЙ ВВОД ТОЧКИ
     // =========================================================================
-    QPlainTextEdit::keyPressEvent(e); // Печатаем символ на экране
+    QPlainTextEdit::keyPressEvent(e); // Печатаем обычные буквы, если меню закрыто
 
     if (e->text() == ".")
     {
-        this->m_startPosition = this->textCursor().position();
-
-        QJsonObject changeParams;
-        QJsonObject textDocument;
-        textDocument["uri"] = QUrl::fromLocalFile(this->currentFilePath).toString(); // Фикс URI
+        QJsonObject changeParams; QJsonObject textDocument;
+        textDocument["uri"] = QUrl::fromLocalFile(this->currentFilePath).toString();
         textDocument["version"] = ++this->lspDocumentVersion;
         changeParams["textDocument"] = textDocument;
 
-        QJsonArray contentChanges;
-        QJsonObject changeObj;
+        QJsonArray contentChanges; QJsonObject changeObj;
         changeObj["text"] = this->toPlainText();
-        contentChanges.append(changeObj);
-        changeParams["contentChanges"] = contentChanges;
+        contentChanges.append(changeObj); changeParams["contentChanges"] = contentChanges;
 
         if (Neuro_programm::self) {
             Neuro_programm::self->sendLspRequest("textDocument/didChange", changeParams);
         }
 
-        QJsonObject compParams;
-        QJsonObject compDoc;
-        compDoc["uri"] = QUrl::fromLocalFile(this->currentFilePath).toString(); // Фикс URI
+        QJsonObject compParams; QJsonObject compDoc;
+        compDoc["uri"] = QUrl::fromLocalFile(this->currentFilePath).toString();
         compParams["textDocument"] = compDoc;
 
         QTextCursor cursor = this->textCursor();
-        QJsonObject position;
-        position["line"] = cursor.blockNumber();
-        position["character"] = cursor.columnNumber();
+        QJsonObject position; position["line"] = cursor.blockNumber(); position["character"] = cursor.columnNumber();
         compParams["position"] = position;
 
         if (Neuro_programm::self) {
@@ -718,6 +768,7 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
         }
     }
 }
+
 
 QString CodeEditor::textUnderCursor() const
 {
@@ -1485,6 +1536,20 @@ void CodeEditor::showQuickFixMenu(const QList<QuickFixAction>& fixes)
 
 bool CodeEditor::event(QEvent *event)
 {
+    // =========================================================================
+    // СЛУШАТЕЛЬ ДВИЖЕНИЯ КУРСОРA: Прячем окно справки, если пользователь увёл мышь
+    // =========================================================================
+    if (event->type() == QEvent::Leave || event->type() == QEvent::MouseMove)
+    {
+        // Извлекаем указатель на наше живое окно справки из памяти свойств
+        QWidget* activeHover = this->property("currentHoverWidget").value<QWidget*>();
+        if (activeHover) {
+            activeHover->close(); // Закрываем окно на экране
+            activeHover->deleteLater(); // Полностью выгружаем из ОЗУ
+            this->setProperty("currentHoverWidget", QVariant()); // Сбрасываем свойство в null
+        }
+    }
+
     // Ловим строго событие запроса подсказки (наведение мыши)
     if (event->type() == QEvent::ToolTip)
     {
@@ -1495,14 +1560,11 @@ bool CodeEditor::event(QEvent *event)
         int mouseLine = cursor.blockNumber();   // Номер строки под мышью (начиная с 0)
         int mouseChar = cursor.columnNumber(); // Индекс символа под мышью
 
-        // Проверяем, есть ли сохраненные ошибки в глобальном массиве
-        // Мы используем Neuro_programm::globalLspErrors, который наполняется в readLspResponse
+        // 1. СНАЧАЛА ПРОВЕРЯЕМ ЛОКАЛЬНЫЕ СИНТАКСИЧЕСКИЕ ОШИБКИ (Ваш оригинальный код)
         for (const auto& error : Neuro_programm::globalLspErrors)
         {
-            // Если мышь наведена точно на строку и символ, где pyflakes нашел ошибку
             if (error.line == mouseLine && mouseChar >= error.startChar && mouseChar <= error.endChar)
             {
-                // Формируем красивое окно подсказки с использованием HTML-разметки
                 QString tooltipText = QString(
                                           "<div style='background-color: #232323; color: #ffffff; padding: 5px; border: 1px solid #ff2a2a; border-radius: 4px;'>"
                                           "  <b style='color: #ff2a2a;'>🔴 Ошибка синтаксиса (Jedi / pyflakes):</b><br/>"
@@ -1511,15 +1573,53 @@ bool CodeEditor::event(QEvent *event)
                                           "</div>"
                                           ).arg(error.message.isEmpty() ? "Невалидный синтаксис Python." : error.message);
 
-                // Выводим стильное окно ровно в той точке, где стоит мышь
                 QToolTip::showText(helpEvent->globalPos(), tooltipText, this);
-
                 event->accept();
-                return true; // Поглощаем событие, подсказка успешно показана
+                return true;
             }
         }
 
-        // Если мышь ушла с красной линии, прячем окно подсказки
+        // =========================================================================
+        // 2. ЕСЛИ ОШИБОК НЕТ — ОТПРАВЛЯЕМ АСИНХРОННЫЙ ЗАПРОС ДОКУМЕНТАЦИИ (HOVER)
+        // =========================================================================
+        if (Neuro_programm::self)
+        {
+            // Сохраняем пиксельные координаты экрана для будущего вывода ToolTip
+            this->setProperty("lastTooltipGlobalPos", helpEvent->globalPos());
+
+            QJsonObject params;
+            QJsonObject textDocument;
+
+            // Преобразуем локальный путь в абсолютный URI (file:///...) для Linux
+            textDocument["uri"] = QUrl::fromLocalFile(this->currentFilePath).toString();
+            params["textDocument"] = textDocument;
+
+            // Настройка safe-позиции символа по границам слова под мышью
+            QTextCursor wordCursor = cursor;
+            wordCursor.select(QTextCursor::WordUnderCursor);
+
+            QJsonObject position;
+            position["line"] = mouseLine;
+
+            // Защита от пустых ответов: берем точный индекс НАЧАЛА слова
+            int safeWordChar = wordCursor.selectionStart() - wordCursor.block().position();
+            if (safeWordChar < 0) {
+                safeWordChar = mouseChar; // Резервный случай
+            }
+
+            position["character"] = safeWordChar;
+            params["position"] = position;
+
+            qDebug() << ">>> [GUI HOVER] Запрос отправлен на safe-позицию символа:" << safeWordChar;
+
+            // Отправляем официальный Request с жестким ID: 888
+            Neuro_programm::self->sendLspRequest("textDocument/hover", params, 888);
+
+            event->accept();
+            return true; // Поглощаем событие, запрос улетел в пайп
+        }
+
+        // Если мышь ушла в пустое место — скрываем подсказку
         QToolTip::hideText();
     }
 
@@ -1535,4 +1635,155 @@ void CodeEditor::registerCompletionWidgets(QWidget* popup, QListWidget* list)
 
     // Сразу фиксируем стартовую позицию текстового курсора для фильтрации букв
     this->m_startPosition = this->textCursor().position();
+}
+
+// =========================================================================
+// ВСПУМОГАТЕЛЬНЫЙ МЕТОД: Поиск индекса парной скобки с учетом вложенности
+// =========================================================================
+int CodeEditor::findMatchingBracket(int pos, QChar openBracket, QChar closeBracket, bool directionRight)
+{
+    QTextDocument *doc = this->document();
+    int totalChars = doc->characterCount();
+    int matchCount = 1; // Текущий уровень вложенности
+
+    int step = directionRight ? 1 : -1;
+    int currentPos = directionRight ? pos : pos - 2;
+
+    while (currentPos >= 0 && currentPos < totalChars - 1)
+    {
+        QChar ch = doc->characterAt(currentPos);
+
+        if (ch == openBracket) {
+            directionRight ? matchCount++ : matchCount--;
+        } else if (ch == closeBracket) {
+            directionRight ? matchCount-- : matchCount++;
+        }
+
+        // Если счетчик вложенности обнулился — пара успешно найдена!
+        if (matchCount == 0) {
+            return directionRight ? currentPos : currentPos + 1;
+        }
+
+        currentPos += step;
+    }
+    return -1; // Пара не найдена (сломанный синтаксис)
+}
+
+void CodeEditor::matchBrackets()
+{
+    // Буфер для хранения графических выделений скобок
+    QList<QTextEdit::ExtraSelection> bracketSelections;
+
+    // Важно: мы не должны затирать маркеры ошибок синтаксиса от Jedi!
+    // Поэтому мы берем текущие выделения, отфильтровываем старые скобки и сохраняем ошибки.
+    QList<QTextEdit::ExtraSelection> currentSelections = this->extraSelections();
+    for (const auto& selection : currentSelections) {
+        // Ошибки синтаксиса у нас имеют WaveUnderline или фоновую заливку,
+        // а у скобок формат будет строго точечный (Background/Outline).
+        if (selection.format.underlineStyle() == QTextCharFormat::WaveUnderline ||
+            selection.format.background().color() == QColor(255, 42, 42, 35))
+        {
+            bracketSelections.append(selection); // Сохраняем ошибки Jedi
+        }
+    }
+
+    QTextCursor cursor = this->textCursor();
+    int currentPos = cursor.position();
+    QTextDocument *doc = this->document();
+
+    // Проверяем символы слева и справа от текстовой каретки
+    QChar charRight = (currentPos < doc->characterCount() - 1) ? doc->characterAt(currentPos) : QChar();
+    QChar charLeft = (currentPos > 0) ? doc->characterAt(currentPos - 1) : QChar();
+
+    int startBracketPos = -1;
+    int endBracketPos = -1;
+    QChar openChar, closeChar;
+    bool directionRight = true;
+
+    // Шаг 1: Определяем, стоит ли курсор рядом со скобкой
+    if (charRight == '(' || charRight == '[' || charRight == '{') {
+        startBracketPos = currentPos + 1;
+        openChar = charRight;
+        closeChar = (charRight == '(') ? ')' : (charRight == '[') ? ']' : '}';
+        directionRight = true;
+    } else if (charLeft == ')' || charLeft == ']' || charLeft == '}') {
+        startBracketPos = currentPos;
+        closeChar = charLeft;
+        openChar = (charLeft == ')') ? '(' : (charLeft == ']') ? '[' : '{';
+        directionRight = false;
+    } else if (charLeft == '(' || charLeft == '[' || charLeft == '{') {
+        startBracketPos = currentPos;
+        openChar = charLeft;
+        closeChar = (charLeft == '(') ? ')' : (charLeft == '[') ? ']' : '}';
+        directionRight = true;
+    } else if (charRight == ')' || charRight == ']' || charRight == '}') {
+        startBracketPos = currentPos + 1;
+        closeChar = charRight;
+        openChar = (charRight == ')') ? '(' : (charRight == ']') ? '[' : '{';
+        directionRight = false;
+    }
+
+    // Шаг 2: Если курсор наткнулся на скобку, запускаем сканер поиска пары
+    if (startBracketPos != -1)
+    {
+        endBracketPos = findMatchingBracket(startBracketPos, openChar, closeChar, directionRight);
+
+        if (endBracketPos != -1)
+        {
+            // Настраиваем красивый, контрастный стиль подсветки скобок (KDE Breeze Light стандарт)
+            QTextEdit::ExtraSelection s1, s2;
+
+            // Цвет подсветки: мягкий светло-зеленый фон с темно-зелеными буквами
+            QColor bracketBg("#fff9c4");
+            QColor bracketBorder("#fbc02d");
+
+            s1.format.setBackground(bracketBg);
+            s1.format.setProperty(QTextFormat::OutlinePen, QPen(bracketBorder, 1));
+            s1.cursor = this->textCursor();
+            s1.cursor.setPosition(startBracketPos - 1);
+            s1.cursor.setPosition(startBracketPos, QTextCursor::KeepAnchor);
+
+            s2.format.setBackground(bracketBg);
+            s2.format.setProperty(QTextFormat::OutlinePen, QPen(bracketBorder, 1));
+            s2.cursor = this->textCursor();
+            s2.cursor.setPosition(endBracketPos - 1);
+            s2.cursor.setPosition(endBracketPos, QTextCursor::KeepAnchor);
+
+            bracketSelections.append(s1);
+            bracketSelections.append(s2);
+        }
+    }
+
+    // Принудительно отдаем обновленный массив selection графическому движку Qt
+    this->setExtraSelections(bracketSelections);
+}
+
+void CodeEditor::wheelEvent(QWheelEvent *e)
+{
+    // Проверяем: зажат ли в момент прокрутки модификатор Ctrl
+    if (e->modifiers() == Qt::ControlModifier)
+    {
+        // Извлекаем угол поворота колесика мыши.
+        // Большинство мышей выдают значение 120 (или -120) за один щелчок
+        int delta = e->angleDelta().y();
+
+        if (delta > 0) {
+            // Крутим колесико ВВЕРХ (от себя) — увеличиваем шрифт кода
+            this->zoomIn(1);
+        }
+        else if (delta < 0) {
+            // Крутим колесико ВНИЗ (на себя) — уменьшаем шрифт кода,
+            // но ставим защиту, чтобы размер шрифта не стал меньше 4-5 пунктов
+            if (this->font().pointSize() > 5) {
+                this->zoomOut(1);
+            }
+        }
+
+        e->accept(); // Намертво поглощаем событие, чтобы текстовое поле не скроллилось вверх/вниз
+        return;      // Выходим из метода
+    }
+
+    // Если Ctrl НЕ зажат — передаем событие базовому классу,
+    // чтобы стандартная вертикальная прокрутка длинного кода работала как обычно
+    QPlainTextEdit::wheelEvent(e);
 }
