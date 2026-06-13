@@ -1,0 +1,31 @@
+2026-06-14 01:49:55.309 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-14 01:49:55.389 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 01:49:55.406 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-14 01:49:55.410 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 01:49:55.461 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1190)
+2026-06-14 01:49:55.461 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-14 01:50:05.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:06.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:07.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:08.782 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:09.783 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:10.783 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:11.783 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:12.783 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:13.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:14.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:15.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:16.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:17.780 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:18.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:19.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:20.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:21.780 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:22.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:23.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:24.782 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:25.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:26.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:27.781 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:28.780 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:50:29.782 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.

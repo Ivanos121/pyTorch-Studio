@@ -20,6 +20,7 @@ Panel_other::Panel_other(QWidget *parent)
     // Добавьте этот код строго в конец конструктора Panel_other::Panel_other
     ui->consoleOutput->verticalScrollBar()->setStyle(QStyleFactory::create("Fusion"));
     ui->pipToolBar->setVisible(false);
+    ui->installProgress->setVisible(false);
 
     connect(ui->btnClose, &QPushButton::clicked, this, &Panel_other::on_btnClosePanel_clicked);
 
@@ -411,5 +412,27 @@ void Panel_other::setPipPageActive()
     // ПРИНУДИТЕЛЬНО ВКЛЮЧАЕМ ВЕРХНЮЮ ПАНЕЛЬ ВВОДА ИМЕНИ ПАКЕТА
     if (ui->pipToolBar) {
         ui->pipToolBar->setVisible(true);
+    }
+}
+
+void Panel_other::setInstallProgressVisible(bool visible)
+{
+    // Внутри своего класса доступ к ui->installProgress открыт на 100%!
+    if (ui && ui->installProgress) {
+        ui->installProgress->setVisible(visible);
+    }
+}
+
+void Panel_other::setInstallProgressValue(int value)
+{
+    if (ui && ui->installProgress) {
+        ui->installProgress->setValue(value);
+    }
+}
+
+void Panel_other::setInstallProgressRange(int min, int max)
+{
+    if (ui && ui->installProgress) {
+        ui->installProgress->setRange(min, max);
     }
 }

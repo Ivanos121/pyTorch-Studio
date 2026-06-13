@@ -1702,6 +1702,8 @@ void Neuro_programm::open_project()
         panelOther->setCurrentProjectPath(fullProjectPath);
     }
 
+    this->checkAndCreateVenvAsync(fullProjectPath);
+
     // Обновляем заголовок главного окна ИИ-студии и уведомляем пользователя
     this->setWindowTitle(QString("PyTorch Studio - %1 [%2]").arg(projName,fullProjectPath));
     sendSystemNotification("PyTorch Studio", QString("✔ Проект '%1' успешно загружен").arg(projName));
@@ -5602,7 +5604,13 @@ void Neuro_programm::onOpenProjectMenuTriggered()
             // =====================================================================
             // ИНТЕГРАЦИЯ УМНОГО АВТО-УСТАНОВЩИКА VENV ДЛЯ НОВЫХ ПК:
             // =====================================================================
-            this->checkAndCreateVenvAsync(targetExtractDir);
+            QTimer::singleShot(100, this, [this, targetExtractDir]() {
+                // ... ваш существующий код настройки дерева ui->treeView ...
+
+                // ЗАПУСКАЕМ НАШУ УМНУЮ АВТОМАТИКУ ОЧЕРЕДИ ПАКЕТОВ:
+                this->checkAndCreateVenvAsync(targetExtractDir);
+            });
+            //this->checkAndCreateVenvAsync(targetExtractDir);
             this->sendSystemNotification("Проект", "Все компоненты IDE успешно синхронизированы.");
         });
     }
@@ -5804,91 +5812,340 @@ void Neuro_programm::close_program()
     close();
 }
 
-#include <QProcess>
-#include <QDir>
-#include <QFile>
-#include <QCoreApplication>
-
-void Neuro_programm::checkAndCreateVenvAsync(const QString &projectPath)
+void Neuro_programm::checkAndCreateVenvAsync(const QString &projectPath, bool isFreshExtract)
 {
     if (projectPath.isEmpty()) return;
 
-    QString venvFolderPath = projectPath + "/venv";
-    QString venvPythonPath = venvFolderPath + "/bin/python";
+    // =========================================================================
+    // ЖЕЛЕЗНЫЙ ВИЗУАЛЬНЫЙ ФИКС: МГНОВЕННО РАСКРЫВАЕМ ВСТРОЕННУЮ КОНСОЛЬ НА ЭКРАНЕ
+    // =========================================================================
+    if (panelOther) {
+        panelOther->setVisible(true);
+        panelOther->setTerminalPageActive(); // Переключаем вкладку панели на Терминал [на основе предыдущих контекстов]
+    }
+    if (mainVerticalSplitter) {
+        // Выделяем под нижнюю консоль фиксированные 250 пикселей, чтобы логи были видны сразу! [на основе предыдущих контекстов]
+        mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
+    }
 
-    // Проверяем: если папка venv отсутствует на новом компьютере
-    if (!QFile::exists(venvPythonPath))
+    this->printToConsole("\n======================================================\n");
+    this->printToConsole(">>> [ИИ АВТОМАТИКА] Инициализация структуры проекта...\n");
+    this->printToConsole("======================================================\n");
+
+    // 1. Динамически вычисляем, где в каталоге IDE лежит эталонный requirements.txt [на основе предыдущих контекстов]
+    QDir searchDir(QCoreApplication::applicationDirPath());
+    QString templateReqPath = "";
+    for (int i = 0; i < 7; ++i) {
+        if (searchDir.exists("pyTorch-Studio.pro") || searchDir.dirName() == "pyTorch-Studio") {
+            templateReqPath = searchDir.absolutePath() + "/projects/z1/requirements.txt";
+            break;
+        }
+        searchDir.cdUp();
+    }
+    if (templateReqPath.isEmpty() || !QFile::exists(templateReqPath)) {
+        templateReqPath = "/home/elf/pyTorch-Studio/projects/z1/requirements.txt";
+    }
+
+    QDir cleanDir(projectPath);
+    QString cleanProjectPath = cleanDir.absolutePath();
+
+    this->sendSystemNotification("Проект распакован", "Настройте окружение Python/PyTorch для работы. [на основе предыдущих контекстов]");
+
+    // Создаем диалоговое окно QMessageBox [на основе предыдущих контекстов]
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("Настройка окружения Python - PyTorch Studio");
+    msgBox.setIcon(QMessageBox::Question);
+    msgBox.setText("Вы открыли сохранённый проект.\n\n"
+                   "Пожалуйста, выберите способ настройки окружения Python/PyTorch на этом компьютере: [на основе предыдущих контекстов]");
+
+    QPushButton *connectExistingButton = msgBox.addButton("🔗 Указать путь к существующей venv", QMessageBox::AcceptRole);
+    QPushButton *createNewButton = msgBox.addButton("✨ Создать новую venv с нуля", QMessageBox::AcceptRole);
+    QPushButton *cancelButton = msgBox.addButton("❌ Использовать системный Python", QMessageBox::RejectRole);
+
+    msgBox.setStyleSheet(
+        "QMessageBox { background-color: #fcfcfc; color: #232629; font-size: 13px; }"
+        "QPushButton { padding: 6px 14px; border: 1px solid #c7c7c7; border-radius: 3px; background-color: #eff0f1; }"
+        "QPushButton:hover { background-color: #3daee9; color: white; }"
+    );
+
+    msgBox.exec();
+
+    // ---------------------------------------------------------------------
+    // ВЕТКА 1: УКАЗАТЬ ПУТЬ К ГОТОВОЙ ВНЕШНЕЙ ВЕНВЕ [на основе предыдущих контекстов]
+    // ---------------------------------------------------------------------
+    if (msgBox.clickedButton() == connectExistingButton)
     {
-        // 1. Выводим статус в StatusBar главного окна
-        if (this->statusBar()) {
-            this->statusBar()->showMessage("PyTorch Studio: Разворачиваю новое окружение venv, подождите...", 0);
-            this->statusBar()->setStyleSheet("QStatusBar { color: #3daee9; font-weight: bold; }");
-            this->statusBar()->repaint();
+        QString existingVenvDir = QFileDialog::getExistingDirectory(
+            this, tr("Выберите ПАПКУ существующего venv (где лежит bin/python)"), "/home/elf", QFileDialog::ShowDirsOnly);
+
+        if (!existingVenvDir.isEmpty())
+        {
+            QString chosenPython = existingVenvDir + "/bin/python";
+            if (QFile::exists(chosenPython))
+            {
+                this->venvPythonBinary = chosenPython;
+
+                this->printToConsole(">>> [ИИ УСПЕХ] Подключено внешнее окружение: " + chosenPython + "\n");
+                this->printToConsole(">>> Запускаю фоновую валидацию зависимостей по requirements.txt...\n");
+
+                this->installPackagesFromRequirements(cleanProjectPath, chosenPython, templateReqPath); // [на основе предыдущих контекстов]
+            }
+            else {
+                QMessageBox::critical(this, "Ошибка", "В выбранной папке отсутствует исполняемый файл bin/python!\nПовторите попытку. [на основе предыдущих контекстов]");
+                this->checkAndCreateVenvAsync(cleanProjectPath, isFreshExtract); // [на основе предыдущих контекстов]
+            }
+        }
+        return;
+    }
+    // ---------------------------------------------------------------------
+    // ВЕТКА 2: СГЕНЕРИРОВАТЬ СВЕЖУЮ ВЕНВУ С НУЛЯ [на основе предыдущих контекстов]
+    // ---------------------------------------------------------------------
+    else if (msgBox.clickedButton() == createNewButton)
+    {
+        QString targetVenvFolder = cleanProjectPath + "/venv";
+        QString venvPythonPath = targetVenvFolder + "/bin/python";
+
+        if (QFile::exists(targetVenvFolder)) {
+            QDir oldDir(targetVenvFolder);
+            oldDir.removeRecursively(); // [на основе предыдущих контекстов]
         }
 
-        // 2. Шаг А: Создаем чистую структуру папок venv силами системного Python в Linux
-        QProcess *createVenvProc = new QProcess(this);
-        createVenvProc->setWorkingDirectory(projectPath);
+        this->printToConsole(">>> [ИИ АВТОМАТИКА] Запущена чистая генерация venv в: " + targetVenvFolder + "\n");
+        this->printToConsole(">>> Вызываю системный модуль развертывания Arch Linux...\n");
 
-        QStringList createArgs;
-        createArgs << "-m" << "venv" << "venv";
+        if (this->statusBar()) {
+            this->statusBar()->showMessage("PyTorch Studio: Фоновое развёртывание новой структуры venv... [на основе предыдущих контекстов]", 0);
+            this->statusBar()->setStyleSheet("QStatusBar { color: #3daee9; font-weight: bold; }");
+        }
 
-        connect(createVenvProc, &QProcess::finished, this, [this, projectPath, venvPythonPath, createVenvProc](int exitCode)
-        {
-            createVenvProc->deleteLater();
-            if (exitCode != 0) {
-                if (this->statusBar()) this->statusBar()->showMessage("PyTorch Studio: Ошибка создания venv", 5000);
-                return;
-            }
+        QProcess *createProc = new QProcess(this);
+        createProc->setWorkingDirectory(cleanProjectPath); // [на основе предыдущих контекстов]
 
-            // 3. Шаг Б: Локально вычисляем, где в каталоге программы pyTorch-Studio лежит эталонный requirements.txt
-            QDir searchDir(QCoreApplication::applicationDirPath());
-            QString templateReqPath = "";
-            for (int i = 0; i < 7; ++i) {
-                if (searchDir.exists("pyTorch-Studio.pro") || searchDir.dirName() == "pyTorch-Studio") {
-                    templateReqPath = searchDir.absolutePath() + "/projects/z1/requirements.txt";
-                    break;
-                }
-                searchDir.cdUp();
-            }
-            if (templateReqPath.isEmpty() || !QFile::exists(templateReqPath)) {
-                templateReqPath = "/home/elf/pyTorch-Studio/projects/z1/requirements.txt"; // Жесткий резерв
-            }
+        connect(createProc, &QProcess::readyReadStandardOutput, this, [this, createProc]() {
+            this->printToConsole(QString::fromUtf8(createProc->readAllStandardOutput()));
+        });
+        connect(createProc, &QProcess::readyReadStandardError, this, [this, createProc]() {
+            this->printToConsole(QString::fromUtf8(createProc->readAllStandardError()));
+        });
 
-            // 4. Шаг В: Если эталонный requirements.txt найден, запускаем pip install по нашему паспорту требований
-            if (QFile::exists(templateReqPath) && QFile::exists(venvPythonPath))
-            {
-                QProcess *installProc = new QProcess(this);
-                installProc->setWorkingDirectory(projectPath);
+        connect(createProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                        this, [this, projectPath, venvPythonPath, createProc](int exitCode, QProcess::ExitStatus status) {
 
-                QStringList installArgs;
-                installArgs << "-m" << "pip" << "install" << "-r" << templateReqPath;
-
-                // Установка PyTorch — тяжелая операция, убираем блокировку GUI, выполняя процесс асинхронно
-                installProc->start(venvPythonPath, installArgs);
-
-                connect(installProc, &QProcess::finished, this, [this, venvPythonPath, installProc](int instExitCode) {
-                    installProc->deleteLater();
-                    if (instExitCode == 0) {
-                        this->venvPythonBinary = venvPythonPath; // Фиксируем новый рабочий путь для Jedi
-                        if (this->statusBar()) {
-                            this->statusBar()->showMessage("PyTorch Studio: Окружение ИИ успешно развернуто!", 4000);
-                            this->statusBar()->setStyleSheet("QStatusBar { color: #00ff00; font-weight: normal; }");
-                        }
-
-                        // Перезапускаем или инициализируем заново сервер автодополнения с новым venv
-                        // this->initLspServer();
-                    } else {
-                        if (this->statusBar()) this->statusBar()->showMessage("PyTorch Studio: Ошибка установки pip пакетов", 5000);
+                    createProc->deleteLater();
+                    if (exitCode != 0 || status == QProcess::CrashExit) {
+                        this->printToConsole("❌ [КРИТИЧЕСКИЙ СБОЙ] Не удалось сгенерировать venv.\n");
+                        return;
                     }
+
+                    this->printToConsole("✔ Базовая структура папок venv успешно создана.\n");
+
+                    // --- ШАГ Б: УЛЬТРА-НАДЁЖНЫЙ ПОИСК requirements.txt ---
+                    QDir searchDir(QCoreApplication::applicationDirPath());
+                    QString templateReqPath = "";
+                    for (int i = 0; i < 7; ++i) {
+                        if (searchDir.exists("pyTorch-Studio.pro") || searchDir.dirName() == "pyTorch-Studio") {
+                            templateReqPath = searchDir.absolutePath() + "/projects/z1/requirements.txt";
+                            break;
+                        }
+                        if (!searchDir.cdUp()) break;
+                    }
+
+                    // РЕЗЕРВНЫЙ ХИТРЫЙ ХАРДКОД ДЛЯ ВАШЕЙ СИСТЕМЫ ARCH LINUX:
+                    if (templateReqPath.isEmpty() || !QFile::exists(templateReqPath)) {
+                        templateReqPath = "/home/elf/pyTorch-Studio/projects/z1/requirements.txt";
+                    }
+
+                    // ПРОВЕРКА №1: Если файл требований физически не найден — пишем об этом громко!
+                    if (!QFile::exists(templateReqPath)) {
+                        this->printToConsole("❌ [ОШИБКА АВТОМАТИКИ] Эталонный файл требований отсутствует по пути:\n");
+                        this->printToConsole("   " + templateReqPath + "\n");
+                        this->printToConsole("💡 Положите файл requirements.txt в папку projects/z1 вашего репозитория.\n");
+                        if (this->statusBar()) this->statusBar()->showMessage("Ошибка: Файл requirements.txt не найден", 5000);
+                        return;
+                    }
+
+                    // ПРОВЕРКА №2: Если venv создался криво
+                    if (!QFile::exists(venvPythonPath)) {
+                        this->printToConsole("❌ [ОШИБКА АВТОМАТИКИ] Исполняемый файл venv/bin/python не появился на диске.\n");
+                        return;
+                    }
+
+                    // --- ШАГ В: ЗАПУСК ФОНОВОЙ УСТАНОВКИ ПАКЕТОВ PYTORCH ---
+                    this->printToConsole(">>> [ИИ АВТОМАТИКА] Начинаю фоновую установку ИИ-библиотек по паспорту требований...\n");
+                    this->printToConsole("📂 Файл конфигурации: " + templateReqPath + "\n");
+
+                    this->installPackagesFromRequirements(projectPath, venvPythonPath, templateReqPath);
                 });
+
+        QStringList args;
+        args << "-m" << "venv" << "venv";
+        createProc->start("/usr/bin/python", args); // [на основе предыдущих контекстов]
+        return;
+    }
+    // ---------------------------------------------------------------------
+    // ВЕТКА 3: ИСПОЛЬЗОВАТЬ СИСТЕМНЫЙ PYTHON
+    // ---------------------------------------------------------------------
+    else {
+        this->venvPythonBinary = "/usr/bin/python";
+        this->printToConsole("⚠️ Настройка venv отменена. Переключаю среду разработки на глобальный интерпретатор. [на основе предыдущих контекстов]\n");
+        this->initLspServer(); // [на основе предыдущих контекстов]
+        return;
+    }
+}
+
+#include <QRegularExpression> // Обязательно добавьте этот инклуд в самый верх файла!
+
+#include <QRegularExpression>
+
+#include <QRegularExpression>
+
+void Neuro_programm::installPackagesFromRequirements(const QString &workingDir, const QString &pythonPath, const QString &reqPath)
+{
+    if (!QFile::exists(reqPath) || !QFile::exists(pythonPath)) {
+        this->printToConsole("❌ [ИИ СБОЙ] Файл требований или интерпретатор Python не найден.\n");
+        return;
+    }
+
+    if (this->statusBar()) {
+        this->statusBar()->showMessage("PyTorch Studio: Обновление пакетного менеджера...", 0);
+        this->statusBar()->setStyleSheet("QStatusBar { color: #e67e22; font-weight: bold; }");
+    }
+
+    if (panelOther) {
+        panelOther->setInstallProgressRange(0, 100);
+        panelOther->setInstallProgressValue(5);
+        panelOther->setInstallProgressVisible(true);
+    }
+
+    // =========================================================================
+    // ШАГ 1: ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ ВНУТРЕННЕГО PIP ВНУТРИ ЧИСТОГО VENV
+    // Это на 100% решает проблему мгновенного вылета с Кодом 1!
+    // =========================================================================
+    this->printToConsole(">>> [ИИ АВТОМАТИКА] Шаг 1: Обновляю ядро pip внутри venv до актуальной версии...\n");
+
+    QProcess *pipUpdateProc = new QProcess(this);
+    pipUpdateProc->setWorkingDirectory(workingDir);
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("TMPDIR", "/tmp");
+    env.insert("PIP_CACHE_DIR", "/tmp/pip-cache-elf");
+    env.insert("PYTHONUNBUFFERED", "1");
+    pipUpdateProc->setProcessEnvironment(env);
+
+    // Подключаем чтение логов обновления ядра pip во встроенную консоль
+    connect(pipUpdateProc, &QProcess::readyReadStandardOutput, this, [this, pipUpdateProc]() {
+        this->printToConsole(QString::fromUtf8(pipUpdateProc->readAllStandardOutput()));
+    });
+    connect(pipUpdateProc, &QProcess::readyReadStandardError, this, [this, pipUpdateProc]() {
+        this->printToConsole(QString::fromUtf8(pipUpdateProc->readAllStandardError()));
+    });
+
+    // Как только ядро pip успешно обновилось, запускаем Шаг 2 (тяжелый PyTorch)
+    connect(pipUpdateProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, workingDir, pythonPath, reqPath, env, pipUpdateProc](int updateExitCode, QProcess::ExitStatus status)
+    {
+        pipUpdateProc->deleteLater();
+
+        if (updateExitCode != 0 || status == QProcess::CrashExit) {
+            this->printToConsole("❌ [КРИТИЧЕСКИЙ СБОЙ] Не удалось обновить базовый pip внутри venv. Пропуск основной установки.\n");
+            if (panelOther) panelOther->setInstallProgressVisible(false);
+            return;
+        }
+
+        // =====================================================================
+        // ШАГ 2: ЗАПУСК ОСНОВНОЙ УСТАНОВКИ ИИ-БИБЛИОТЕК ПО REQUIREMENTS.TXT
+        // =====================================================================
+        this->printToConsole("\n>>> [ИИ АВТОМАТИКА] Шаг 2: Ядро pip успешно обновлено. Накатываю PyTorch / LSP зависимости...\n");
+        if (this->statusBar()) this->statusBar()->showMessage("PyTorch Studio: Установка ИИ библиотек...", 0);
+
+        QProcess *pipMainProc = new QProcess(this);
+        pipMainProc->setWorkingDirectory(workingDir);
+        pipMainProc->setProcessEnvironment(env); // Передаем безопасное /tmp окружение
+
+        auto parsePipOutput = [this](const QString &output) {
+            if (!panelOther) return;
+            static QRegularExpression progressRegex(R"(Progress\s+(\d+)\s+of\s+(\d+))");
+            QRegularExpressionMatch match = progressRegex.match(output);
+
+            if (match.hasMatch()) {
+                double downloadedBytes = match.captured(1).toDouble();
+                double totalBytes = match.captured(2).toDouble();
+                if (totalBytes > 0) {
+                    int percent = static_cast<int>((downloadedBytes / totalBytes) * 100.0);
+                    panelOther->setInstallProgressRange(0, 100);
+                    panelOther->setInstallProgressValue(percent);
+                }
+            } else {
+                this->printToConsole(output); // Выводим только чистые текстовые логи
+                QString cleanOut = output.trimmed();
+                if (cleanOut.contains("Installing collected packages") || cleanOut.contains("Running setup.py")) {
+                    panelOther->setInstallProgressRange(0, 100);
+                    panelOther->setInstallProgressValue(90);
+                }
+            }
+        };
+
+        connect(pipMainProc, &QProcess::readyReadStandardOutput, this, [pipMainProc, parsePipOutput]() {
+            parsePipOutput(QString::fromUtf8(pipMainProc->readAllStandardOutput()));
+        });
+        connect(pipMainProc, &QProcess::readyReadStandardError, this, [pipMainProc, parsePipOutput]() {
+            parsePipOutput(QString::fromUtf8(pipMainProc->readAllStandardError()));
+        });
+
+        connect(pipMainProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                this, [this, pythonPath, pipMainProc](int mainExitCode, QProcess::ExitStatus mainStatus)
+        {
+            pipMainProc->deleteLater();
+
+            if (panelOther) {
+                panelOther->setInstallProgressRange(0, 100);
+                panelOther->setInstallProgressValue(100);
+                panelOther->setInstallProgressVisible(false);
+            }
+
+            if (mainExitCode == 0 && mainStatus == QProcess::NormalExit) {
+                this->venvPythonBinary = pythonPath;
+                this->printToConsole("✨ [УСПЕХ] Все зависимости проверены. Окружение PyTorch Studio готово!\n");
+                this->sendSystemNotification("Окружение ИИ", "Синхронизация завершена. Все пакеты в актуальном состоянии.");
+                if (this->statusBar()) {
+                    this->statusBar()->showMessage("PyTorch Studio: Библиотеки синхронизированы", 4000);
+                    this->statusBar()->setStyleSheet("QStatusBar { color: #00ff00; font-weight: normal; }");
+                }
+                this->initLspServer();
+            }
+            else {
+                this->printToConsole("\n❌ [ИИ КАТАСТРОФА] Установка пакетов PyTorch оборвалась. Код ошибки: " + QString::number(mainExitCode) + "\n");
+                if (this->statusBar()) this->statusBar()->showMessage("PyTorch Studio: Ошибка установки зависимостей", 5000);
             }
         });
 
-        createVenvProc->start("/usr/bin/python", createArgs);
+        // Запуск основной установки пакетов
+        QStringList mainArgs;
+        mainArgs << "-m" << "pip" << "install" << "--upgrade" << "--no-cache-dir" << "--progress-bar" << "raw" << "-r" << reqPath;
+        pipMainProc->start(pythonPath, mainArgs);
+    });
+
+    // Запуск Шага 1: Команда безопасного обновления самого pip без использования тяжелых кэш-директорий
+    QStringList updateArgs;
+    updateArgs << "-m" << "pip" << "install" << "--upgrade" << "--no-cache-dir" << "pip";
+    pipUpdateProc->start(pythonPath, updateArgs);
+}
+
+void Neuro_programm::printToConsole(const QString &text)
+{
+    if (!panelOther) return;
+
+    // Автоматически находим текстовое поле внутри Panel_other по его objectName
+    QTextEdit *richConsole = panelOther->findChild<QTextEdit*>("consoleOutput");
+    if (!richConsole) {
+        richConsole = panelOther->findChild<QTextEdit*>(); // Универсальный поиск, если имя не задано
     }
-    else {
-        // Если venv уже существует (проект открывается на старом компьютере) — просто сохраняем путь
-        this->venvPythonBinary = venvPythonPath;
+
+    if (richConsole != nullptr) {
+        richConsole->moveCursor(QTextCursor::End);
+        richConsole->insertPlainText(text);
+        richConsole->moveCursor(QTextCursor::End); // Принудительный авто-скролл вниз
     }
 }
+
+

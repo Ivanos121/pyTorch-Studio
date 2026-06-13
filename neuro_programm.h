@@ -170,6 +170,8 @@ private:
     void saveProjectParameters(const QString &tmpDir);
     void loadProjectParameters(const QString &tmpDir);
     void sendLspDidOpenForFile(const QString &filePath, const QString &fileContent);
-    void checkAndCreateVenvAsync(const QString &projectPath);
+    void checkAndCreateVenvAsync(const QString &projectPath, bool isFreshExtract = false);
+    void installPackagesFromRequirements(const QString &workingDir, const QString &pythonPath, const QString &reqPath);
+    void printToConsole(const QString &text);
 };
 #endif // NEURO_PROGRAMM_H

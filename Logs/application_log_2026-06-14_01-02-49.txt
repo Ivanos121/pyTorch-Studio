@@ -1,0 +1,14 @@
+2026-06-14 01:02:49.987 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-14 01:02:50.104 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 01:02:50.136 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-14 01:02:50.145 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 01:02:50.212 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1190)
+2026-06-14 01:02:50.212 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-14 01:03:15.440 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:03:16.383 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:03:17.333 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:03:18.282 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:03:19.276 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:03:20.276 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:03:21.276 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-14 01:03:22.276 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.

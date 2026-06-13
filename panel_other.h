@@ -23,6 +23,9 @@ public:
     void appendLiveLogText(const QString &text);
     void setTerminalPageActive();
     void setPipPageActive();
+    void setInstallProgressVisible(bool visible);
+    void setInstallProgressValue(int value);
+    void setInstallProgressRange(int min, int max);
 
 
 signals:

@@ -1,0 +1,8 @@
+2026-06-14 01:06:33.089 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-14 01:06:33.209 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 01:06:33.246 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-14 01:06:33.254 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 01:06:33.319 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1190)
+2026-06-14 01:06:33.319 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-14 01:07:00.719 [INFO]  🧹 [IDE] Запущен процесс полной очистки среды разработки и закрытия проекта: "/home/elf/aaa/z1" (../neuro_programm.cpp:2939)
+2026-06-14 01:07:00.720 [INFO]  ✔ [IDE] Проект успешно закрыт. Интерфейс переведен в стерильное стартовое состояние. (../neuro_programm.cpp:3010)
