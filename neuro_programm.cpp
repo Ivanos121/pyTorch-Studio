@@ -62,6 +62,7 @@
 #include <QResizeEvent>
 #include <QStandardPaths>
 #include <QMessageBox>
+#include <QCloseEvent>
 
 Neuro_programm* Neuro_programm::self = nullptr;
 QList<Neuro_programm::LspErrorData> Neuro_programm::globalLspErrors;
@@ -197,6 +198,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     fileMenu->addAction(save_progect_all);
     fileMenu->addAction(actionCloseProject);
     fileMenu->addAction(ui->Exit);
+
+    connect(ui->Exit, &QAction::triggered,this, &Neuro_programm::close_program);
 
     // 1. Создаем подменю "Открыть недавние"
     recentProjectsMenu = new QMenu("Открыть недавние", this);
@@ -1389,12 +1392,15 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
 Neuro_programm::~Neuro_programm()
 {
+    // =========================================================================
+    // ИЗ ДЕСТРУКТОРА ПОЛНОСТЬЮ УДАЛЯЕМ БЛОК ЗАПИСИ pipProcess, ТАК КАК ОН ЗАТИРАЛ ФАЙЛ!
+    // =========================================================================
+
+    // Оставляем строго ваш оригинальный, великолепный цикл вежливого закрытия LSP:
     if (lspProcess && lspProcess->state() == QProcess::Running)
     {
-        // 1. Отключаем асинхронные сигналы чтения, чтобы не спамить в закрывающийся интерфейс
         lspProcess->disconnect(this);
 
-        // 2. Отправляем СИНХРОННЫЙ пакет деинициализации "shutdown"
         QJsonObject jsonObject;
         jsonObject["jsonrpc"] = "2.0";
         jsonObject["id"] = 9999;
@@ -1403,14 +1409,12 @@ Neuro_programm::~Neuro_programm()
 
         QJsonDocument jsonDocument(jsonObject);
         lspProcess->write(jsonDocument.toJson(QJsonDocument::Compact));
-        lspProcess->waitForBytesWritten(300); // Выталкиваем байты в пайп Linux
+        lspProcess->waitForBytesWritten(300);
 
-        // 3. ЖДЕМ ОТВЕТА ОТ СЕРВЕРА (Критично, чтобы Python успел дописать результат в сокет)
         if (lspProcess->waitForReadyRead(300)) {
-            lspProcess->readAllStandardOutput(); // Вычитываем ответ сервера "в пустоту"
+            lspProcess->readAllStandardOutput();
         }
 
-        // 4. Отправляем уведомление "exit" (у него по стандарту LSP нет id)
         jsonObject["method"] = "exit";
         jsonObject.remove("id");
         jsonDocument.setObject(jsonObject);
@@ -1418,19 +1422,20 @@ Neuro_programm::~Neuro_programm()
         lspProcess->write(jsonDocument.toJson(QJsonDocument::Compact));
         lspProcess->waitForBytesWritten(300);
 
-        // 5. БРОНИРОВАННЫЙ ФИКС ДЛЯ КОДА 1:
-        // Мы отвязываем указатель на процесс от дерева Qt, чтобы деструктор
-        // главного окна не уничтожал дескрипторы пайпов насильно!
         lspProcess->setParent(nullptr);
 
-        // Вежливо просим процесс завершиться силами ОС в фоне Linux
         if (lspProcess->state() == QProcess::Running) {
             lspProcess->terminate();
+            if (!lspProcess->waitForFinished(500)) {
+                lspProcess->kill();
+            }
         }
+        lspProcess->deleteLater();
     }
 
     delete ui;
 }
+
 
 void Neuro_programm::new_progect()
 {
@@ -5594,7 +5599,10 @@ void Neuro_programm::onOpenProjectMenuTriggered()
             if (this->monitorTimer && !this->monitorTimer->isActive()) {
                 this->monitorTimer->start(1000);
             }
-
+            // =====================================================================
+            // ИНТЕГРАЦИЯ УМНОГО АВТО-УСТАНОВЩИКА VENV ДЛЯ НОВЫХ ПК:
+            // =====================================================================
+            this->checkAndCreateVenvAsync(targetExtractDir);
             this->sendSystemNotification("Проект", "Все компоненты IDE успешно синхронизированы.");
         });
     }
@@ -5703,4 +5711,184 @@ QString Neuro_programm::getSafeSaveFolderPath()
     QDir().mkpath(savePath);
 
     return savePath;
+}
+
+#include <iostream>
+#include <QFile>
+#include <QDir>
+#include <QProcess>
+
+void Neuro_programm::closeEvent(QCloseEvent *event)
+{
+    std::cout << "\n[ШАГ 1] МЕТОД closeEvent УСПЕШНО ВЫЗВАН КРЕСТИКОМ!" << std::endl;
+    std::cout.flush();
+
+    // =========================================================================
+    // АВТОНОМНЫЙ ДИНАМИЧЕСКИЙ ПОИСК ВНЕШНЕГО ИНТЕРПРЕТАТОРА PYTHON VENV
+    // =========================================================================
+    QString safeVenvPython = "";
+
+    if (!currentOpenProjectPath.isEmpty()) {
+        QString projectVenv = currentOpenProjectPath + "/venv/bin/python";
+        if (QFile::exists(projectVenv)) {
+            safeVenvPython = projectVenv;
+        }
+    }
+
+    if (safeVenvPython.isEmpty()) {
+        QString z1Venv = "/home/elf/projects/z1/venv/bin/python";
+        if (QFile::exists(z1Venv)) {
+            safeVenvPython = z1Venv;
+        }
+    }
+
+    if (safeVenvPython.isEmpty()) {
+        safeVenvPython = "/home/elf/pyTorch-Studio/venv/bin/python";
+    }
+
+    // =========================================================================
+    // СБОРЩИК ПАКЕТОВ: ПИШЕМ СТРОГО В ДИРЕКТОРИЮ ШАБЛОНОВ PROJECTS/Z1
+    // =========================================================================
+    if (QFile::exists(safeVenvPython))
+    {
+        std::cout << "[ШАГ 2] ИНТЕРПРЕТАТОР НАЙДЕН ПО АВТОНОМНОМУ ПУТИ: " << safeVenvPython.toStdString() << std::endl;
+        std::cout.flush();
+
+        // 1. Указываем базовый каталог исходников программы
+        QString programRootPath = "/home/elf/pyTorch-Studio";
+
+        // 2. ИДЕНТИФИЦИРУЕМ ПРАВИЛЬНЫЙ ЦЕЛЕВОЙ КАТАЛОГ (С добавлением подпапки проекта)
+        QString targetFolder = programRootPath + "/projects/z1";
+        QString requirementsPath = targetFolder + "/requirements.txt";
+
+        QProcess pipProcess;
+
+        // Устанавливаем рабочую папку процесса в целевой каталог z1
+        pipProcess.setWorkingDirectory(targetFolder);
+
+        QStringList args;
+        args << "-m" << "pip" << "freeze";
+
+        // Направляем поток вывода pip freeze строго в /pyTorch-Studio/projects/z1/requirements.txt
+        pipProcess.setStandardOutputFile(requirementsPath);
+
+        std::cout << "[ШАГ 3] ЗАПУСКАЮ PIP PROCESS ДЛЯ ЗАПИСИ В ЦЕЛЕВОЙ ШАБЛОН: " << requirementsPath.toStdString() << std::endl;
+        std::cout.flush();
+
+        pipProcess.start(safeVenvPython, args);
+
+        if (pipProcess.waitForFinished(3000)) {
+            std::cout << "[ШАГ 4 SUCCESS] PIP УСПЕШНО ЗАВЕРШИЛСЯ! Код: " << pipProcess.exitCode() << std::endl;
+            std::cout << "[ФИНАЛ] Проверяю размер обновленного файла на диске: " << QFile(requirementsPath).size() << " байт." << std::endl;
+        } else {
+            std::cout << "[ШАГ 4 СБОЙ] ТАЙМАУТ ПРИ ЗАПИСИ ФАЙЛА ПРОЕКТА Z1!" << std::endl;
+        }
+        std::cout.flush();
+    }
+    else {
+        std::cout << "[КРИТИЧЕСКИЙ СБОЙ] Внешний интерпретатор Python venv не обнаружен на диске Linux!" << std::endl;
+        std::cout.flush();
+    }
+
+    // Ваш оригинальный рабочий код вежливого закрытия LSP-сервера Jedi
+    if (lspProcess) {
+        lspProcess->kill();
+        lspProcess->waitForFinished();
+    }
+
+    event->accept();
+}
+
+void Neuro_programm::close_program()
+{
+    close();
+}
+
+#include <QProcess>
+#include <QDir>
+#include <QFile>
+#include <QCoreApplication>
+
+void Neuro_programm::checkAndCreateVenvAsync(const QString &projectPath)
+{
+    if (projectPath.isEmpty()) return;
+
+    QString venvFolderPath = projectPath + "/venv";
+    QString venvPythonPath = venvFolderPath + "/bin/python";
+
+    // Проверяем: если папка venv отсутствует на новом компьютере
+    if (!QFile::exists(venvPythonPath))
+    {
+        // 1. Выводим статус в StatusBar главного окна
+        if (this->statusBar()) {
+            this->statusBar()->showMessage("PyTorch Studio: Разворачиваю новое окружение venv, подождите...", 0);
+            this->statusBar()->setStyleSheet("QStatusBar { color: #3daee9; font-weight: bold; }");
+            this->statusBar()->repaint();
+        }
+
+        // 2. Шаг А: Создаем чистую структуру папок venv силами системного Python в Linux
+        QProcess *createVenvProc = new QProcess(this);
+        createVenvProc->setWorkingDirectory(projectPath);
+
+        QStringList createArgs;
+        createArgs << "-m" << "venv" << "venv";
+
+        connect(createVenvProc, &QProcess::finished, this, [this, projectPath, venvPythonPath, createVenvProc](int exitCode)
+        {
+            createVenvProc->deleteLater();
+            if (exitCode != 0) {
+                if (this->statusBar()) this->statusBar()->showMessage("PyTorch Studio: Ошибка создания venv", 5000);
+                return;
+            }
+
+            // 3. Шаг Б: Локально вычисляем, где в каталоге программы pyTorch-Studio лежит эталонный requirements.txt
+            QDir searchDir(QCoreApplication::applicationDirPath());
+            QString templateReqPath = "";
+            for (int i = 0; i < 7; ++i) {
+                if (searchDir.exists("pyTorch-Studio.pro") || searchDir.dirName() == "pyTorch-Studio") {
+                    templateReqPath = searchDir.absolutePath() + "/projects/z1/requirements.txt";
+                    break;
+                }
+                searchDir.cdUp();
+            }
+            if (templateReqPath.isEmpty() || !QFile::exists(templateReqPath)) {
+                templateReqPath = "/home/elf/pyTorch-Studio/projects/z1/requirements.txt"; // Жесткий резерв
+            }
+
+            // 4. Шаг В: Если эталонный requirements.txt найден, запускаем pip install по нашему паспорту требований
+            if (QFile::exists(templateReqPath) && QFile::exists(venvPythonPath))
+            {
+                QProcess *installProc = new QProcess(this);
+                installProc->setWorkingDirectory(projectPath);
+
+                QStringList installArgs;
+                installArgs << "-m" << "pip" << "install" << "-r" << templateReqPath;
+
+                // Установка PyTorch — тяжелая операция, убираем блокировку GUI, выполняя процесс асинхронно
+                installProc->start(venvPythonPath, installArgs);
+
+                connect(installProc, &QProcess::finished, this, [this, venvPythonPath, installProc](int instExitCode) {
+                    installProc->deleteLater();
+                    if (instExitCode == 0) {
+                        this->venvPythonBinary = venvPythonPath; // Фиксируем новый рабочий путь для Jedi
+                        if (this->statusBar()) {
+                            this->statusBar()->showMessage("PyTorch Studio: Окружение ИИ успешно развернуто!", 4000);
+                            this->statusBar()->setStyleSheet("QStatusBar { color: #00ff00; font-weight: normal; }");
+                        }
+
+                        // Перезапускаем или инициализируем заново сервер автодополнения с новым venv
+                        // this->initLspServer();
+                    } else {
+                        if (this->statusBar()) this->statusBar()->showMessage("PyTorch Studio: Ошибка установки pip пакетов", 5000);
+                    }
+                });
+            }
+        });
+
+        createVenvProc->start("/usr/bin/python", createArgs);
+    }
+    else {
+        // Если venv уже существует (проект открывается на старом компьютере) — просто сохраняем путь
+        this->venvPythonBinary = venvPythonPath;
+    }
 }

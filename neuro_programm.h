@@ -65,7 +65,8 @@ signals:
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
     void showEvent(QShowEvent *event) override;
-    void resizeEvent(QResizeEvent *event) override; // <--- ДОБАВЬТЕ ЭТУ СТРОКУ
+    void resizeEvent(QResizeEvent *event) override;
+    void closeEvent(QCloseEvent *event) override;
 
 protected slots:
     void new_progect();
@@ -76,6 +77,7 @@ protected slots:
     void onSaveProjectMenuTriggered();
     void open_about_program();
 
+    void close_program();
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
@@ -168,5 +170,6 @@ private:
     void saveProjectParameters(const QString &tmpDir);
     void loadProjectParameters(const QString &tmpDir);
     void sendLspDidOpenForFile(const QString &filePath, const QString &fileContent);
+    void checkAndCreateVenvAsync(const QString &projectPath);
 };
 #endif // NEURO_PROGRAMM_H

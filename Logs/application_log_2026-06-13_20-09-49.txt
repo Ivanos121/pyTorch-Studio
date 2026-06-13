@@ -1,0 +1,11 @@
+2026-06-13 20:09:49.851 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 20:09:49.952 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 20:09:49.990 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 20:09:49.995 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 20:09:50.053 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1190)
+2026-06-13 20:09:50.054 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 20:09:58.615 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1392)
+2026-06-13 20:09:59.335 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 20:10:00.017 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1329)
+2026-06-13 20:10:05.999 [INFO]  >>> [АВТО-ЭКСПОРТ] Запускаю запись зависимостей в: "/home/elf/projects/z1/requirements.txt" (../neuro_programm.cpp:5731)
+2026-06-13 20:10:06.636 [INFO]  >>> [АВТО-ЭКСПОРТ SUCCESS] Файл requirements.txt успешно сохранен! Код: 0 (../neuro_programm.cpp:5740)

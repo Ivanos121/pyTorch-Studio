@@ -1,0 +1,15 @@
+2026-06-13 20:25:34.001 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 20:25:34.038 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 20:25:34.079 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 20:25:34.086 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 20:25:34.152 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1190)
+2026-06-13 20:25:34.152 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 20:25:41.240 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-13 20:25:50.320 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1392)
+2026-06-13 20:25:51.150 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 20:25:51.825 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1329)
+2026-06-13 20:25:52.975 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../codeeditor.cpp:1613)
+2026-06-13 20:25:54.626 [DEBUG] >>> [LSP УСПЕХ] Пакет Hover 888 пробил блокировку! Парсю contents... (../neuro_programm.cpp:3606)
+2026-06-13 20:26:02.618 [DEBUG] >>> [ЖЕЛЕЗНЫЙ АВТО-ЭКСПОРТ] Путь venv: "/home/elf/projects/z1/venv/bin/python" (../neuro_programm.cpp:5747)
+2026-06-13 20:26:02.619 [DEBUG] >>> [ЖЕЛЕЗНЫЙ АВТО-ЭКСПОРТ] СОХРАНЯЮ В КОРЕНЬ IDE: "/home/elf/pyTorch-Studio/requirements.txt" (../neuro_programm.cpp:5748)
+2026-06-13 20:26:03.502 [INFO]  >>> [АВТО-ЭКСПОРТ УСПЕХ] Успешно записано в корень IDE байт: 1486 (../neuro_programm.cpp:5760)

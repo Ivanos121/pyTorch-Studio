@@ -1,0 +1,12 @@
+2026-06-13 20:27:04.598 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../main.cpp:135)
+2026-06-13 20:27:04.633 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 20:27:04.649 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-13 20:27:04.653 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-13 20:27:04.711 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../neuro_programm.cpp:1190)
+2026-06-13 20:27:04.711 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-13 20:27:11.435 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../codeeditor.cpp:1392)
+2026-06-13 20:27:12.354 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-13 20:27:13.073 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../codeeditor.cpp:1329)
+2026-06-13 20:27:19.774 [DEBUG] >>> [ЖЕЛЕЗНЫЙ АВТО-ЭКСПОРТ] Путь venv: "/home/elf/projects/z1/venv/bin/python" (../neuro_programm.cpp:5747)
+2026-06-13 20:27:19.774 [DEBUG] >>> [ЖЕЛЕЗНЫЙ АВТО-ЭКСПОРТ] СОХРАНЯЮ В КОРЕНЬ IDE: "/home/elf/pyTorch-Studio/requirements.txt" (../neuro_programm.cpp:5748)
+2026-06-13 20:27:20.275 [INFO]  >>> [АВТО-ЭКСПОРТ УСПЕХ] Успешно записано в корень IDE байт: 1486 (../neuro_programm.cpp:5760)
