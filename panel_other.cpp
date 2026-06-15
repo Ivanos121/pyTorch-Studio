@@ -22,8 +22,7 @@ Panel_other::Panel_other(QWidget *parent)
     ui->pipToolBar->setVisible(false);
     ui->installProgress->setVisible(false);
 
-    connect(ui->btnClose, &QPushButton::clicked, this, &Panel_other::on_btnClosePanel_clicked);
-
+    connect(ui->btnClose, &QPushButton::clicked, this, &Panel_other::btnClosePanel);
 
     // 2. Накатываем пуленепробиваемый плоский StyleSheet
     // Замените финальный блок setStyleSheet для скроллбара в конструкторе Panel_other::Panel_other на этот код:
@@ -130,12 +129,11 @@ void Panel_other::startVenvInstallation(const QString &projectPath, const QStrin
 
     ui->stackedWidget->setCurrentIndex(0);
     ui->consoleOutput->clear();
-    ui->consoleOutput->append("======================================================================");
-    ui->consoleOutput->append(">>> [BASH INTERFACE] Инициализация окружения разработки ИИ...");
-    ui->consoleOutput->append(QString(">>> [BASH INTERFACE] Путь к проекту: %1").arg(projectPath));
-    ui->consoleOutput->append(QString(">>> [BASH INTERFACE] Архитектура PyTorch: %1").arg(archType));
-    ui->consoleOutput->append("======================================================================\n");
-
+    ui->consoleOutput->appendPlainText("======================================================================");
+    ui->consoleOutput->appendPlainText(">>> [BASH INTERFACE] Инициализация окружения разработки ИИ...");
+    ui->consoleOutput->appendPlainText(QString(">>> [BASH INTERFACE] Путь к проекту: %1").arg(projectPath));
+    ui->consoleOutput->appendPlainText(QString(">>> [BASH INTERFACE] Архитектура PyTorch: %1").arg(archType));
+    ui->consoleOutput->appendPlainText("======================================================================");
     // Блокируем ввод кастомных команд, пока идет первичная тяжелая установка PyTorch
     ui->pipToolBar->setEnabled(false);
 
@@ -161,7 +159,7 @@ void Panel_other::startVenvInstallation(const QString &projectPath, const QStrin
                         ui->installProgress->setValue(percent);
                     }
                 } else {
-                    ui->consoleOutput->append(line);
+                    ui->consoleOutput->appendPlainText(line);
                 }
             }
             lineBuffer.clear();
@@ -171,9 +169,9 @@ void Panel_other::startVenvInstallation(const QString &projectPath, const QStrin
     connect(process, &QProcess::finished, this, [this](int exitCode, QProcess::ExitStatus status) {
         if (status == QProcess::NormalExit && exitCode == 0) {
             ui->installProgress->setValue(100);
-            ui->consoleOutput->append("\n>>> [SUCCESS] Базовое окружение venv успешно развернуто!");
+            ui->consoleOutput->appendPlainText("\n>>> [SUCCESS] Базовое окружение venv успешно развернуто!");
         } else {
-            ui->consoleOutput->append("\n>>> [CRITICAL ERROR] Не удалось завершить настройку окружения.");
+            ui->consoleOutput->appendPlainText("\n>>> [CRITICAL ERROR] Не удалось завершить настройку окружения.");
         }
 
         // Базовая тяжелая установка закончена — активируем панель ввода пакетов для пользователя!
@@ -302,12 +300,12 @@ void Panel_other::executeCustomPipCommand(const QString &packageName)
     // 1. БЕЗОПАСНАЯ ПРОВЕРКА СОСТОЯНИЯ:
     // Если процесс уже существует и он физически СЕЙЧАС РАБОТАЕТ — выходим
     if (process != nullptr && process->state() != QProcess::NotRunning) {
-        ui->consoleOutput->append("\n>>> [SYSTEM] Пожалуйста, дождитесь завершения текущей операции pip...");
+        ui->consoleOutput->appendPlainText("\n>>> [SYSTEM] Пожалуйста, дождитесь завершения текущей операции pip...");
         return;
     }
 
     // 2. Печатаем имитацию ввода в наш белый терминал
-    ui->consoleOutput->append(QString("\n$ pip install %1").arg(packageName));
+    ui->consoleOutput->appendPlainText(QString("\n$ pip install %1").arg(packageName));
 
     if (ui->installProgress) {
         ui->installProgress->setValue(0);
@@ -338,11 +336,11 @@ void Panel_other::executeCustomPipCommand(const QString &packageName)
     // Коннект на завершение установки пакета
     connect(process, &QProcess::finished, this, [this, packageName](int exitCode, QProcess::ExitStatus status) {
         if (status == QProcess::NormalExit && exitCode == 0) {
-            ui->consoleOutput->append(QString("\n>>> [SUCCESS] Пакет '%1' успешно добавлен в venv проекта!").arg(packageName));
+            ui->consoleOutput->appendPlainText(QString("\n>>> [SUCCESS] Пакет '%1' успешно добавлен в venv проекта!").arg(packageName));
             if (ui->installProgress) ui->installProgress->setValue(100);
             ui->inputCommand->clear(); // Очищаем строку ввода при успехе
         } else {
-            ui->consoleOutput->append(QString("\n>>> [ERROR] Ошибка установки пакета '%1'. Проверьте интернет или имя пакета.").arg(packageName));
+            ui->consoleOutput->appendPlainText(QString("\n>>> [ERROR] Ошибка установки пакета '%1'. Проверьте интернет или имя пакета.").arg(packageName));
         }
 
         // Возвращаем доступ к панели управления
@@ -387,7 +385,7 @@ void Panel_other::setCurrentProjectPath(const QString &path)
     std::cout.flush();
 }
 
-void Panel_other::on_btnClosePanel_clicked()
+void Panel_other::btnClosePanel()
 {
     this->setVisible(false); // Скрываем саму панель
     emit panelClosed();      // Посылаем сигнал во внешний мир (для Neuro_programm)

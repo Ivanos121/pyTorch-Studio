@@ -1,0 +1,7 @@
+2026-06-16 00:12:40.114 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:140)
+2026-06-16 00:12:40.220 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1280)
+2026-06-16 00:12:40.220 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-16 00:12:56.525 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/pyTorch-Studio/projects/z1/z1.pystudio" (../../neuro_programm.cpp:2790)
+2026-06-16 00:13:29.507 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/pyTorch-Studio/projects/z1/venv/bin/python" (../../neuro_programm.cpp:3115)
+2026-06-16 00:13:46.454 [WARN]  This plugin supports grabbing the mouse only for popup windows
+2026-06-16 00:13:46.568 [WARN]  This plugin supports grabbing the mouse only for popup windows

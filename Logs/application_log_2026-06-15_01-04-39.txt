@@ -1,0 +1,14 @@
+2026-06-15 01:04:39.663 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:135)
+2026-06-15 01:04:39.736 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1191)
+2026-06-15 01:04:39.736 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-15 01:04:43.521 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/pyTorch-Studio/projects/z1/z1.pystudio" (../../neuro_programm.cpp:2699)
+2026-06-15 01:05:08.018 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/pyTorch-Studio/projects/z1/venv/bin/python" (../../neuro_programm.cpp:3024)
+2026-06-15 01:05:11.993 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../../codeeditor.cpp:1392)
+2026-06-15 01:05:12.258 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-15 01:05:12.898 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../../codeeditor.cpp:1329)
+2026-06-15 01:05:31.498 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 3 (../../codeeditor.cpp:1329)
+2026-06-15 01:05:32.353 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../../codeeditor.cpp:1613)
+2026-06-15 01:05:32.492 [DEBUG] >>> [LSP УСПЕХ] Пакет Hover 888 пробил блокировку! Парсю contents... (../../neuro_programm.cpp:3575)
+2026-06-15 01:05:35.090 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 4 (../../codeeditor.cpp:1329)
+2026-06-15 01:05:35.499 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 5 (../../codeeditor.cpp:1329)
+2026-06-15 01:05:36.898 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 7 (../../codeeditor.cpp:1329)

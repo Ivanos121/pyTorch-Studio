@@ -1,0 +1,9 @@
+2026-06-14 04:30:57.826 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:135)
+2026-06-14 04:30:57.853 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 04:30:57.863 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-14 04:30:57.869 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 04:30:57.899 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1184)
+2026-06-14 04:30:57.899 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-14 04:32:56.902 [WARN]  [LSP_INIT] Локальный venv не найден. Временно подменяем системным интерпретатором: "/usr/bin/python" (../../neuro_programm.cpp:3091)
+2026-06-14 04:33:07.126 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../../codeeditor.cpp:1613)
+2026-06-14 04:33:08.267 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../../codeeditor.cpp:1613)

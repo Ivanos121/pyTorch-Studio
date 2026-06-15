@@ -1,0 +1,8 @@
+2026-06-15 00:30:24.484 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:135)
+2026-06-15 00:30:24.512 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-15 00:30:24.522 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-15 00:30:24.529 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-15 00:30:24.558 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1186)
+2026-06-15 00:30:24.558 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-15 00:30:29.092 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/pyTorch-Studio/projects/z1/z1.pystudio" (../../neuro_programm.cpp:2694)
+2026-06-15 00:30:51.386 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/pyTorch-Studio/projects/z1/venv/bin/python" (../../neuro_programm.cpp:3019)

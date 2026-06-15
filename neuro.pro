@@ -16,7 +16,8 @@ SOURCES += \
     panel_other.cpp \
     settings.cpp \
     start_progect.cpp \
-    statusbuttonstyle.cpp
+    statusbuttonstyle.cpp \
+    terminalwidget.cpp
 
 HEADERS += \
     FolderBlockData.h \
@@ -28,7 +29,8 @@ HEADERS += \
     panel_other.h \
     settings.h \
     start_progect.h \
-    statusbuttonstyle.h
+    statusbuttonstyle.h \
+    terminalwidget.h
 
 FORMS += \
     about_program.ui \
@@ -45,3 +47,6 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 RESOURCES += \
     resources.qrc
+
+DISTFILES += \
+    Data/Icons/pTS.svg

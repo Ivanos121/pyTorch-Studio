@@ -741,61 +741,12 @@ QListWidget#quickActionsList::item:selected {
     </item>
    </layout>
   </widget>
-  <widget class="QMenuBar" name="menubar">
-   <property name="geometry">
-    <rect>
-     <x>0</x>
-     <y>0</y>
-     <width>1266</width>
-     <height>30</height>
-    </rect>
-   </property>
-   <widget class="QMenu" name="menu">
-    <property name="title">
-     <string>Файл</string>
-    </property>
-    <addaction name="New_progect"/>
-    <addaction name="new_file"/>
-    <addaction name="open_progect"/>
-    <addaction name="save_files"/>
-    <addaction name="Exit"/>
-   </widget>
-   <widget class="QMenu" name="menu_2">
-    <property name="title">
-     <string>Правка</string>
-    </property>
-    <addaction name="action"/>
-    <addaction name="action_2"/>
-    <addaction name="action_5"/>
-    <addaction name="action_6"/>
-    <addaction name="action_7"/>
-    <addaction name="action_8"/>
-   </widget>
-   <widget class="QMenu" name="menu_3">
-    <property name="title">
-     <string>Инструменты</string>
-    </property>
-    <addaction name="action_settngs"/>
-   </widget>
-   <widget class="QMenu" name="menu_4">
-    <property name="title">
-     <string>Справка</string>
-    </property>
-    <addaction name="separator"/>
-    <addaction name="action_help"/>
-    <addaction name="aboutProgram"/>
-   </widget>
-   <addaction name="menu"/>
-   <addaction name="menu_2"/>
-   <addaction name="menu_3"/>
-   <addaction name="menu_4"/>
-  </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <widget class="QDockWidget" name="leftDockWidget">
    <property name="minimumSize">
     <size>
      <width>300</width>
-     <height>197</height>
+     <height>201</height>
     </size>
    </property>
    <property name="maximumSize">
@@ -863,6 +814,9 @@ QListWidget#quickActionsList::item:selected {
          </property>
          <item row="0" column="0">
           <widget class="QTreeView" name="treeView">
+           <property name="frameShape">
+            <enum>QFrame::Shape::StyledPanel</enum>
+           </property>
            <attribute name="headerVisible">
             <bool>false</bool>
            </attribute>

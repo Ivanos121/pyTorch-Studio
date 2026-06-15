@@ -8,6 +8,8 @@
 #include <iostream>
 #include <QMutex>       // ОБЯЗАТЕЛЬНО: Подключаем мьютекс для защиты потоков!
 #include <QMutexLocker>
+#include <QVBoxLayout>
+#include <QGraphicsDropShadowEffect>
 
 // =========================================================================
 // ШАГ 1.1: СОЗДАЕМ ГЛОБАЛЬНЫЙ ОБЪЕКТ ФАЙЛА ДЛЯ ДОСТУПА ИЗ ХЕНДЛЕРА
@@ -79,6 +81,9 @@ int main(int argc, char *argv[])
     qputenv("XDG_CURRENT_DESKTOP", "KDE");
     QApplication a(argc, argv);
 
+    QCoreApplication::setOrganizationName("PyTorchStudio");
+    QCoreApplication::setApplicationName("IDE");
+
     qRegisterMetaType<QList<QuickFixAction>>("QList<QuickFixAction>");
 
     // =========================================================================
@@ -134,6 +139,34 @@ int main(int argc, char *argv[])
 
     qInfo() << "PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы.";
 
+
+    // // 1. Создаем базовый виджет-конверт
+    // QWidget *windowContainer = new QWidget();
+    // // 2. Делаем его полностью бесшовным и прозрачным
+    // windowContainer->setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
+    // windowContainer->setAttribute(Qt::WA_TranslucentBackground);
+
+    // // 3. Создаем ваше основное окно как дочерний элемент
+    // Neuro_programm *studioMain = new Neuro_programm(windowContainer);
+
+    // // 4. Задаем макет для контейнера и выставляем ТЕ САМЫЕ поля под тень (15 пикселей)
+    // QVBoxLayout *containerLayout = new QVBoxLayout(windowContainer);
+    // containerLayout->setContentsMargins(15, 15, 15, 15); // Пространство для размытия тени
+    // containerLayout->addWidget(studioMain);
+    // windowContainer->setLayout(containerLayout);
+
+    // // 5. Накладываем тень СТРОГО на окно студии внутри прозрачного конверта
+    // QGraphicsDropShadowEffect *windowShadow = new QGraphicsDropShadowEffect(windowContainer);
+    // windowShadow->setBlurRadius(18);
+    // windowShadow->setOffset(0, 2);
+    // windowShadow->setColor(QColor(0, 0, 0, 150));
+    // studioMain->setGraphicsEffect(windowShadow);
+
+    // // Показываем внешнюю оболочку
+    // windowContainer->resize(1280, 720); // Стартовый размер студии
+    // windowContainer->show();
+
+
     Neuro_programm w;
     w.showMaximized();
 
@@ -148,45 +181,3 @@ int main(int argc, char *argv[])
 
     return execResult;
 }
-
-// int main(int argc, char *argv[])
-// {
-//     qputenv("QT_QPA_PLATFORMTHEME", "kde");
-//     qputenv("XDG_CURRENT_DESKTOP", "KDE");
-
-//     QApplication a(argc, argv);
-
-//     // 1. Определяем путь к папке Logs относительно исполняемого файла
-//     QString projectPath = QString(PROJECT_PATH);
-//     QString logDirPath = projectPath + "/Logs";
-
-//     QDir logDir(logDirPath);
-
-//     // 2. Создаем папку, если она не существует
-//     if (!logDir.exists())
-//     {
-//         logDir.mkpath(".");
-//     }
-
-//     // 3. Формируем имя файла внутри этой папки
-//     QString logFileName = QString("%1/application_log_%2.txt")
-//                               .arg(logDirPath)
-//                               .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss"));
-
-//     logFile.setFileName(logFileName);
-
-//     // Сбрасываем файл (удаляем старый, если существует, и создаем новый)
-//     if (logFile.exists()) {
-//         (void)logFile.remove();
-//     }
-
-//     qInstallMessageHandler(linuxConsoleMessageHandler);
-
-//     qInfo() << "PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы.";
-
-//     Neuro_programm w;
-//     //w.setWindowFlags(Qt::Window | Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
-
-//     w.showMaximized();
-//     return QApplication::exec();
-// }

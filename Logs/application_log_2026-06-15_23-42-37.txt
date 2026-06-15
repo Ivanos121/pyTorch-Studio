@@ -1,0 +1,4 @@
+2026-06-15 23:42:37.322 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:140)
+2026-06-15 23:42:37.420 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1239)
+2026-06-15 23:42:37.420 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-15 23:42:40.332 [DEBUG] [MENU_TRG] Нажат пункт меню 'Открыть проект' (../../neuro_programm.cpp:5355)

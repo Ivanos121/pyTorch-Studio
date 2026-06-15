@@ -1,0 +1,4 @@
+2026-06-14 03:29:16.897 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:135)
+2026-06-14 03:29:16.924 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
+2026-06-14 03:29:16.935 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
+2026-06-14 03:29:16.941 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()

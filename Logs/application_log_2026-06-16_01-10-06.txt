@@ -1,0 +1,13 @@
+2026-06-16 01:10:06.399 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:140)
+2026-06-16 01:10:06.498 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1315)
+2026-06-16 01:10:06.498 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-16 01:10:13.374 [DEBUG] Успешно загружено тем в комбобокс: 3 (../../settings.cpp:341)
+2026-06-16 01:10:13.375 [DEBUG] [ПРЕВЬЮ] Загрузка темы: "/home/elf/pyTorch-Studio/build/Desktop-u041eu0442u043bu0430u0434u043au0430/themes/dark_darcula.ini" Фон: "#2b2b2b" (../../settings.cpp:228)
+2026-06-16 01:10:15.043 [DEBUG] [НАСТРОЙКИ] Нажата кнопка Применить. Файл темы: "/home/elf/pytorch-studio/build/desktop-u041eu0442u043bu0430u0434u043au0430/themes/dark_darcula.ini" (../../settings.cpp:361)
+2026-06-16 01:10:26.320 [DEBUG] Успешно загружено тем в комбобокс: 3 (../../settings.cpp:341)
+2026-06-16 01:10:26.322 [DEBUG] [ПРЕВЬЮ] Загрузка темы: "/home/elf/pyTorch-Studio/build/Desktop-u041eu0442u043bu0430u0434u043au0430/themes/dark_darcula.ini" Фон: "#2b2b2b" (../../settings.cpp:228)
+2026-06-16 01:10:28.797 [DEBUG] [ПРЕВЬЮ] Загрузка темы: "/home/elf/pyTorch-Studio/build/Desktop-u041eu0442u043bu0430u0434u043au0430/themes/light_breeze.ini" Фон: "#ffffff" (../../settings.cpp:228)
+2026-06-16 01:10:30.455 [DEBUG] [НАСТРОЙКИ] Нажата кнопка Применить. Файл темы: "/home/elf/pytorch-studio/build/desktop-u041eu0442u043bu0430u0434u043au0430/themes/light_breeze.ini" (../../settings.cpp:361)
+2026-06-16 01:10:30.455 [DEBUG] [НАСТРОЙКИ] Активация светлых HEX-кодов в реестре QSettings (../../settings.cpp:395)
+2026-06-16 01:10:32.011 [DEBUG] [НАСТРОЙКИ] Нажата кнопка Применить. Файл темы: "/home/elf/pytorch-studio/build/desktop-u041eu0442u043bu0430u0434u043au0430/themes/light_breeze.ini" (../../settings.cpp:361)
+2026-06-16 01:10:32.011 [DEBUG] [НАСТРОЙКИ] Активация светлых HEX-кодов в реестре QSettings (../../settings.cpp:395)

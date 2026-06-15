@@ -71,81 +71,6 @@ void Settings::btnClose_clicked()
     close();
 }
 
-// #include "neuro_programm.h" // Обязательно проверьте наличие этого инклуда в самом верху settings.cpp
-
-// void Settings::apply_settings()
-// {
-//     QSettings settings("PyTorchStudio", "EditorSettings");
-
-//     // 1. Забираем параметры шрифтов и имени темы из интерфейса настроек
-//     QString selectedTheme = ui->comboTheme->currentText();
-//     settings.setValue("Theme/Name", selectedTheme);
-//     settings.setValue("Editor/FontFamily", ui->fontComboBoxEditor->currentFont().family());
-//     settings.setValue("Editor/FontSize", ui->spinBoxEditorSize->value());
-
-//     // 2. Записываем HEX-палитры в реестр
-//     if (selectedTheme.contains("Monokai")) {
-//         settings.setValue("Theme/BgColor", "#272822");
-//         settings.setValue("Theme/TextColor", "#f8f8f2");
-//         settings.setValue("Theme/KeywordColor", "#f92672");
-//         settings.setValue("Theme/ConstantColor", "#ae81ff");
-//         settings.setValue("Theme/PytorchColor", "#66d9ef");
-//         settings.setValue("Theme/FunctionColor", "#a6e22e");
-//         settings.setValue("Theme/NumberColor", "#ae81ff");
-//         settings.setValue("Theme/StringColor", "#e6db74");
-//         settings.setValue("Theme/CommentColor", "#75715e");
-//     }
-//     else if (selectedTheme.contains("Тёмная") || selectedTheme.contains("Dark")) {
-//         settings.setValue("Theme/BgColor", "#2b2b2b");
-//         settings.setValue("Theme/TextColor", "#a9b7c6");
-//         settings.setValue("Theme/KeywordColor", "#cc7832");
-//         settings.setValue("Theme/ConstantColor", "#0057ae");
-//         settings.setValue("Theme/PytorchColor", "#a31515");
-//         settings.setValue("Theme/FunctionColor", "#008080");
-//         settings.setValue("Theme/NumberColor", "#6897bb");
-//         settings.setValue("Theme/StringColor", "#6a8759");
-//         settings.setValue("Theme/CommentColor", "#808080");
-//     }
-//     else {
-//         settings.setValue("Theme/BgColor", "#ffffff");
-//         settings.setValue("Theme/TextColor", "#24292e");
-//         settings.setValue("Theme/KeywordColor", "#1b6ac7");
-//         settings.setValue("Theme/ConstantColor", "#0057ae");
-//         settings.setValue("Theme/PytorchColor", "#a31515");
-//         settings.setValue("Theme/FunctionColor", "#008080");
-//         settings.setValue("Theme/NumberColor", "#b56c00");
-//         settings.setValue("Theme/StringColor", "#047a15");
-//         settings.setValue("Theme/CommentColor", "#898f94");
-//     }
-//     settings.sync(); // Жестко сохраняем на диск в эту же миллисекунду
-
-//     // 3. Эмитируем сигнал для штатного механизма Qt
-//     emit settingsChanged();
-
-//     // =========================================================================
-//     // ПРЯМОЙ СТОПРОЦЕНТНЫЙ ПРОБИТИЕ БЛОКИРОВОК (ОБХОД СЛОМАННЫХ СИГНАЛОВ)
-//     // Из-за того, что на вкладках прописан жесткий локальный stylesheet,
-//     // мы берем родительский указатель на главное окно и вызываем метод РУКАМИ.
-//     // =========================================================================
-//     Neuro_programm *mainWin = qobject_cast<Neuro_programm*>(this->parentWidget());
-//     if (!mainWin) {
-//         // На случай, если окно настроек открыто без указания parent, ищем по всему приложению:
-//         for (QWidget *w : QApplication::topLevelWidgets()) {
-//             mainWin = qobject_cast<Neuro_programm*>(w);
-//             if (mainWin) break;
-//         }
-//     }
-
-//     if (mainWin) {
-//         qDebug() << "[ИИ АВТОМАТИЗАЦИЯ] Прямой принудительный запуск applyGlobalFonts()";
-//         mainWin->applyGlobalFonts(); // Вызываем аппаратное обновление на лету!
-//     } else {
-//         qDebug() << "[ИИ ОШИБКА] Не удалось найти главное окно приложения в памяти!";
-//     }
-
-//     close(); // Закрываем окно параметров
-// }
-
 void Settings::onCategoryChanged(QListWidgetItem *current, QListWidgetItem *previous) {
     Q_UNUSED(previous);
     if (!current) return;
@@ -411,15 +336,56 @@ void Settings::btnApply_clicked()
 
     // Прямой принудительный запуск обновления главного окна
     Neuro_programm *mainWin = nullptr;
-    for (QWidget *w : QApplication::topLevelWidgets()) {
+    const auto &widgetsList = QApplication::topLevelWidgets();
+    for (QWidget *w : std::as_const(widgetsList)) {
         mainWin = qobject_cast<Neuro_programm*>(w);
         if (mainWin) break;
     }
+
     if (mainWin) {
         mainWin->applyGlobalFonts();
-    }
+        if (themeFilePath.contains("dark") || themeFilePath.contains("monokai"))
+        {
+            // =========================================================================
+            // ТОТАЛЬНЫЙ ФИКС ВЕРХНЕЙ ПОЛОСЫ ДЛЯ ТЁМНОЙ ТЕМЫ
+            // =========================================================================
+            // Окрашиваем сам QToolBar и его внутреннюю обертку в глубокий тёмный цвет меню (#232629)
+            // И намертво сносим встроенную рамку (border: none), которая давала светлую полосу!
+            mainWin->setStyleSheet(
+                "QMainWindow {"
+                "   background-color: #232629;"
+                "   border: 1px solid #4d5455;"
+                "}"
+                "QToolBar#topContainerBar, QToolBar#topContainerBar QWidget {"
+                "   background-color: #232629 !important;" // Цвет один в один как у менюбара!
+                "   border: none !important;"               // Уничтожает разделительную линию Linux
+                "   margin: 0px;"
+                "   padding: 0px;"
+                "   spacing: 0px;"
+                "}"
+                );
+        }
+        else
+        {
+            // Корректный возврат для Светлой темы Breeze
+            mainWin->setStyleSheet(
+                "QMainWindow {"
+                "   background-color: #eff0f1;"
+                "   border: 1px solid #bcbcbc;"
+                "}"
+                "QToolBar#topContainerBar, QToolBar#topContainerBar QWidget {"
+                "   background-color: #eff0f1;"
+                "   border: none;"
+                "   margin: 0px;"
+                "   padding: 0px;"
+                "   spacing: 0px;"
+                "}"
+                );
+        }
 
-    //close(); // Закрываем диалоговое окно параметров
+        // Принудительно заставляем верхний тулбар пересчитать макет и цвет пикселей
+        mainWin->update();
+    }
 }
 
 void Settings::btnOk_clicked()

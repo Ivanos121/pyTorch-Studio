@@ -26,6 +26,7 @@ public:
     void setInstallProgressVisible(bool visible);
     void setInstallProgressValue(int value);
     void setInstallProgressRange(int min, int max);
+    Ui::Panel_other *ui;
 
 
 signals:
@@ -34,12 +35,11 @@ signals:
     void panelClosed();
 
 protected slots:
-    void on_btnClosePanel_clicked();
+    void btnClosePanel();
 private slots:
     void executeCustomPipCommand(const QString &packageName);
 
 private:
-    Ui::Panel_other *ui;
     QProcess *process;
     int progressStartPosition; // Позиция начала блока прогресс-бара
     bool isDownloading;

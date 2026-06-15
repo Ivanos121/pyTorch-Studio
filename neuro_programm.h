@@ -1,13 +1,12 @@
 #ifndef NEURO_PROGRAMM_H
 #define NEURO_PROGRAMM_H
 
-#include <QChart>
+#include <QMainWindow>
 #include <QCompleter>
 #include <QFileSystemModel>
 #include <QLabel>
 #include <QLineSeries>
 #include <QListWidget>
-#include <QMainWindow>
 #include <QNetworkAccessManager>
 #include <QSplitter>
 #include <QStringListModel>
@@ -19,6 +18,8 @@
 
 #include "about_program.h"
 #include <QIODevice>
+#include <QtCharts/QChartView>
+#include <QtCharts/QChart>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -36,7 +37,7 @@ public:
     Ui::Neuro_programm *ui;
 
     void sync();
-    void open_project();
+    void open_project(const QString &path = "");
     void forceOpenConsoleWithError(const QString &errorMessage);
     static Neuro_programm* self;
     QString getCurrentOpenFilePath() const;
@@ -67,17 +68,19 @@ protected:
     void showEvent(QShowEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 protected slots:
     void new_progect();
-
     void openNewFileInEditor(const QString &absoluteFilePath);
     void open_settings();
     void onOpenProjectMenuTriggered();
     void onSaveProjectMenuTriggered();
     void open_about_program();
-
     void close_program();
+    void saveProjectAs();
+
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
@@ -117,7 +120,7 @@ private slots:
     void onCloseProjectClicked();
     void readLspResponse();
     void showCompletionMenuInGuiThread(const QStringList &completions);
-    void on_actionOpenSettings_triggered();
+    //void on_actionOpenSettings_triggered();
     void triggerEditAction();
 
 private:
@@ -172,6 +175,6 @@ private:
     void sendLspDidOpenForFile(const QString &filePath, const QString &fileContent);
     void checkAndCreateVenvAsync(const QString &projectPath, bool isFreshExtract = false);
     void installPackagesFromRequirements(const QString &workingDir, const QString &pythonPath, const QString &reqPath);
-    void printToConsole(const QString &text);
+    void printToConsole(const QByteArray &rawBytes);
 };
 #endif // NEURO_PROGRAMM_H
