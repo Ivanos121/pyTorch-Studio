@@ -1,0 +1,7 @@
+2026-06-17 04:06:27.334 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:143)
+2026-06-17 04:06:27.434 [WARN]  QLayout: Attempting to add QLayout "" to QWidget "customTitleBarPanel", which already has a layout
+2026-06-17 04:06:27.434 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QWidget "customTitleBarPanel", which already has a layout
+2026-06-17 04:06:27.563 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1463)
+2026-06-17 04:06:27.563 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-17 04:06:42.023 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/neuro_programm/neuro/projects/z1/z1.pystudio" (../../../../pyTorch-Studio/neuro_programm.cpp:3019)
+2026-06-17 04:07:14.456 [WARN]  [LSP_INIT] Локальный venv не найден. Временно подменяем системным интерпретатором: "/usr/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3357)

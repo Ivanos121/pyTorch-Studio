@@ -1,5 +1,0 @@
-2026-06-16 00:17:50.597 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:140)
-2026-06-16 00:17:50.705 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1288)
-2026-06-16 00:17:50.705 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
-2026-06-16 00:17:53.859 [WARN]  This plugin supports grabbing the mouse only for popup windows
-2026-06-16 00:17:53.960 [WARN]  This plugin supports grabbing the mouse only for popup windows

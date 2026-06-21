@@ -1,7 +1,0 @@
-2026-06-16 01:14:05.567 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:140)
-2026-06-16 01:14:05.670 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1315)
-2026-06-16 01:14:05.670 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
-2026-06-16 01:14:15.939 [DEBUG] Успешно загружено тем в комбобокс: 3 (../../settings.cpp:341)
-2026-06-16 01:14:15.940 [DEBUG] [ПРЕВЬЮ] Загрузка темы: "/home/elf/pyTorch-Studio/build/Desktop-u041eu0442u043bu0430u0434u043au0430/themes/dark_darcula.ini" Фон: "#2b2b2b" (../../settings.cpp:228)
-2026-06-16 01:14:19.187 [DEBUG] [НАСТРОЙКИ] Нажата кнопка Применить. Файл темы: "/home/elf/pytorch-studio/build/desktop-u041eu0442u043bu0430u0434u043au0430/themes/dark_darcula.ini" (../../settings.cpp:361)
-2026-06-16 01:14:25.624 [DEBUG] [НАСТРОЙКИ] Нажата кнопка Применить. Файл темы: "/home/elf/pytorch-studio/build/desktop-u041eu0442u043bu0430u0434u043au0430/themes/dark_darcula.ini" (../../settings.cpp:361)

@@ -1,3 +1,0 @@
-2026-06-16 00:55:49.070 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:140)
-2026-06-16 00:55:49.171 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1292)
-2026-06-16 00:55:49.171 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining

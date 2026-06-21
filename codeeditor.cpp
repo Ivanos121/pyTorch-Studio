@@ -408,6 +408,28 @@ void CodeEditor::highlightCurrentLine()
 
 void CodeEditor::keyPressEvent(QKeyEvent *e)
 {
+    if ((e->modifiers() & Qt::ShiftModifier) &&
+        (e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return))
+    {
+        QTextCursor cursor = textCursor();
+        QString textToExecute = cursor.selectedText();
+
+        // Если ничего не выделено, берем всю текущую строку, где стоит курсор
+        if (textToExecute.isEmpty()) {
+            cursor.select(QTextCursor::LineUnderCursor);
+            textToExecute = cursor.selectedText();
+        }
+
+        // В Qt метод selectedText() заменяет символ новой строки \n на специальный символ параграфа (U+2029).
+        // Обязательно возвращаем стандартные \n обратно, иначе Python их не поймет!
+        textToExecute.replace(QString::fromUtf8("\xE2\x80\xA9"), "\n");
+
+        emit selectionExecutionRequested(textToExecute);
+
+        e->accept(); // Говорим Qt, что событие обработано и перенос строки в редакторе делать не нужно
+        return;
+    }
+
     // =========================================================================
     // БЛОК: УМНОЕ КОММЕНТИРОВАНИЕ СТРОК ПО НАЖАТИЮ CTRL + / (ДЛЯ PYTHON И PYTORCH)
     // =========================================================================

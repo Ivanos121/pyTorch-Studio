@@ -1,0 +1,10 @@
+2026-06-21 01:26:01.057 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:143)
+2026-06-21 01:26:01.337 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
+2026-06-21 01:26:01.337 [WARN]  No physical devices
+2026-06-21 01:26:01.649 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-21 01:26:01.649 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-21 01:26:01.902 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1459)
+2026-06-21 01:26:01.902 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-21 01:26:05.878 [DEBUG] Все группы в файле: QList("interface", "python") (../../../../pyTorch-Studio/about_program.cpp:148)
+2026-06-21 01:26:05.878 [DEBUG] Считанный путь venv из конфига: "/home/elf/neuro_programm/neuro/projects/z1/venv" (../../../../pyTorch-Studio/about_program.cpp:153)
+2026-06-21 01:26:06.881 [WARN]  QProcess: Destroyed while process ("/home/elf/neuro_programm/neuro/projects/z1/venv/bin/python") is still running.

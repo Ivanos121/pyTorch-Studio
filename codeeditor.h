@@ -111,6 +111,7 @@ public:
 signals:
     void logMessage(const QString &message);
     void errorsCountChanged(int count);
+    void selectionExecutionRequested(const QString &selectedText);
 
 public slots:
     // Теперь этот слот скомпилируется без ошибок соответствия типов!

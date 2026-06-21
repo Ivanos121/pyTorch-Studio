@@ -1,0 +1,26 @@
+2026-06-20 00:59:00.783 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:143)
+2026-06-20 00:59:00.921 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-20 00:59:00.921 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-20 00:59:01.143 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1502)
+2026-06-20 00:59:01.143 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-20 00:59:03.504 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.512 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.518 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.519 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.525 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.528 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.728 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.728 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.735 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:03.735 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4174)
+2026-06-20 00:59:07.527 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/neuro_programm/neuro/projects/z1/z1.pystudio" (../../../../pyTorch-Studio/neuro_programm.cpp:2982)
+2026-06-20 00:59:34.905 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/neuro_programm/neuro/projects/z1/venv/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3307)
+2026-06-20 00:59:38.323 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../../../../pyTorch-Studio/codeeditor.cpp:1414)
+2026-06-20 00:59:38.683 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-20 00:59:39.328 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../../../../pyTorch-Studio/codeeditor.cpp:1351)
+2026-06-20 00:59:40.478 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 17 (../../../../pyTorch-Studio/codeeditor.cpp:1635)
+2026-06-20 00:59:40.888 [DEBUG] >>> [LSP УСПЕХ] Пакет Hover 888 пробил блокировку! Парсю contents... (../../../../pyTorch-Studio/neuro_programm.cpp:3858)
+2026-06-20 00:59:40.914 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../../../../pyTorch-Studio/codeeditor.cpp:1635)
+2026-06-20 00:59:40.916 [DEBUG] >>> [LSP УСПЕХ] Пакет Hover 888 пробил блокировку! Парсю contents... (../../../../pyTorch-Studio/neuro_programm.cpp:3858)
+2026-06-20 00:59:41.678 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../../../../pyTorch-Studio/codeeditor.cpp:1635)
+2026-06-20 00:59:41.680 [DEBUG] >>> [LSP УСПЕХ] Пакет Hover 888 пробил блокировку! Парсю contents... (../../../../pyTorch-Studio/neuro_programm.cpp:3858)

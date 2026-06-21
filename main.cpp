@@ -84,26 +84,37 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("PyTorchStudio");
     QCoreApplication::setApplicationName("IDE");
 
+    // Формируем строковую версию из макросов сборщика: "2026.1-LTS"
+    QString appVersion = QString("%1.%2-%3")
+                             .arg(APP_VERSION_MAJOR)
+                             .arg(APP_VERSION_MINOR)
+                             .arg(APP_VERSION_PATCH);
+
+    QApplication::setApplicationVersion(appVersion);
+
     qRegisterMetaType<QList<QuickFixAction>>("QList<QuickFixAction>");
 
     // =========================================================================
     // АВТОМАТИЧЕСКИЙ ДИНАМИЧЕСКИЙ ПОИСК КОРНЯ ПРОЕКТА (БЕЗ МАКРОСОВ И СТРОК)
     // =========================================================================
     // 1. Берем папку, в которой лежит запущенный бинарник программы
-    QDir currentDir(QCoreApplication::applicationDirPath());
-    QString projectPath = currentDir.absolutePath(); // Запасной вариант по умолчанию
+    QFileInfo mainFileInfo(__FILE__);
+    QDir currentDir = mainFileInfo.absoluteDir();
 
-    // 2. Поднимаемся вверх по каталогам Linux (максимум на 5 уровней, чтобы не зависнуть)
+    QString projectPath = currentDir.absolutePath();
+
+    // На случай, если main.cpp лежит в подпапке (например, src/), поднимемся до корня репозитория
     for (int i = 0; i < 5; ++i)
     {
-        // Если имя текущей папки совпадает с именем корня вашего проекта
-        if (currentDir.dirName() == "pyTorch-Studio") {
-            projectPath = currentDir.absolutePath(); // Нашли! Фиксируем абсолютный путь
+        if (currentDir.exists("pyTorch-Studio.pro") ||
+            currentDir.exists("CMakeLists.txt") ||
+            currentDir.dirName() == "pyTorch-Studio")
+        {
+            projectPath = currentDir.absolutePath(); // Нашли реальный корень репозитория!
             break;
         }
-        // Если не нашли — поднимаемся на один уровень выше (к родителю)
         if (!currentDir.cdUp()) {
-            break; // Если дошли до корня диска "/", останавливаем поиск
+            break;
         }
     }
 
@@ -138,34 +149,6 @@ int main(int argc, char *argv[])
     qInstallMessageHandler(linuxConsoleMessageHandler);
 
     qInfo() << "PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы.";
-
-
-    // // 1. Создаем базовый виджет-конверт
-    // QWidget *windowContainer = new QWidget();
-    // // 2. Делаем его полностью бесшовным и прозрачным
-    // windowContainer->setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
-    // windowContainer->setAttribute(Qt::WA_TranslucentBackground);
-
-    // // 3. Создаем ваше основное окно как дочерний элемент
-    // Neuro_programm *studioMain = new Neuro_programm(windowContainer);
-
-    // // 4. Задаем макет для контейнера и выставляем ТЕ САМЫЕ поля под тень (15 пикселей)
-    // QVBoxLayout *containerLayout = new QVBoxLayout(windowContainer);
-    // containerLayout->setContentsMargins(15, 15, 15, 15); // Пространство для размытия тени
-    // containerLayout->addWidget(studioMain);
-    // windowContainer->setLayout(containerLayout);
-
-    // // 5. Накладываем тень СТРОГО на окно студии внутри прозрачного конверта
-    // QGraphicsDropShadowEffect *windowShadow = new QGraphicsDropShadowEffect(windowContainer);
-    // windowShadow->setBlurRadius(18);
-    // windowShadow->setOffset(0, 2);
-    // windowShadow->setColor(QColor(0, 0, 0, 150));
-    // studioMain->setGraphicsEffect(windowShadow);
-
-    // // Показываем внешнюю оболочку
-    // windowContainer->resize(1280, 720); // Стартовый размер студии
-    // windowContainer->show();
-
 
     Neuro_programm w;
     w.showMaximized();

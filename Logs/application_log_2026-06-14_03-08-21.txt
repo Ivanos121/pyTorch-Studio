@@ -1,6 +1,0 @@
-2026-06-14 03:08:21.873 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../main.cpp:135)
-2026-06-14 03:08:21.902 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
-2026-06-14 03:08:21.912 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_actionOpenSettings_triggered()
-2026-06-14 03:08:21.918 [WARN]  QMetaObject::connectSlotsByName: No matching signal for on_btnClosePanel_clicked()
-2026-06-14 03:08:21.950 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../neuro_programm.cpp:1184)
-2026-06-14 03:08:21.950 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining

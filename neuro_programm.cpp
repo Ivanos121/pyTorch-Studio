@@ -7,6 +7,8 @@
 #include "settings.h"
 #include "breezeflatstyle.h"
 #include "codeeditor.h"
+#include "replwidget.h"
+#include "advancedclosedialog.h"
 
 #include <QFileSystemModel>
 #include <QInputDialog>
@@ -68,6 +70,8 @@
 #include <QBitmap>
 #include <QPainter>
 #include <QMenu>
+#include <QPalette>
+#include <QColor>
 
 Neuro_programm* Neuro_programm::self = nullptr;
 QList<Neuro_programm::LspErrorData> Neuro_programm::globalLspErrors;
@@ -78,8 +82,21 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 {
     ui->setupUi(this);
 
-    // 1. Отключаем нативную рамку ОС
-    setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
+    debuggedScriptProcess = new QProcess(this);
+
+
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+
+    // Принудительно заставляем Qt регистрировать каждое микроперемещение мыши на шапке
+    if (ui->customTitleBarPanel) {
+        ui->customTitleBarPanel->setMouseTracking(true);
+        ui->customTitleBarPanel->installEventFilter(this); // Вешаем фильтр на саму панель
+    }
+
+    // Принудительно отключаем верхнюю зону для док-виджетов
+    if (ui->leftDockWidget) {
+        ui->leftDockWidget->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    }
 
     if (ui->leftDockWidget)
     {
@@ -90,49 +107,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     // Внутри конструктора Neuro_programm:
     this->setAttribute(Qt::WA_TranslucentBackground, false);
-
-    this->setContentsMargins(1, 1, 1, 1);
-
-    this->setStyleSheet(
-                "QMainWindow { background-color: #eff0f1; }" // Только сплошной фон
-
-                        // =========================================================================
-                        // ЖЕЛЕЗНЫЙ ФИКС СЕРОЙ ПОЛОСЫ: Полностью уничтожаем рамки и разделители тулбара!
-                        // =========================================================================
-                        "QToolBar#topContainerBar {"
-                        "   background-color: #eff0f1;"
-                        "   border: none;"                // Убивает серую разделительную линию снизу тулбара!
-                        "   margin: 0px;"                 // Схлопывает внешние зазоры
-                        "   padding: 0px;"                // Схлопывает внутренние зазоры
-                        "   spacing: 0px;"                // Убирает пустоту между шапкой и меню
-                        "}"
-                        "QToolBar#topContainerBar QWidget {"
-                        "   background-color: #eff0f1;"   // Гарантирует единый цвет для обертки
-                        "}"
-                        // =========================================================================
-
-                        /* Кнопка закрытия (крестик) */
-                        "#btnMinimize, #btnMaximize, #btnClose {"
-                        "   background-color: transparent;"
-                        "   border: none;"
-                        "   padding: 4px;"
-                        "}"
-                        "#btnClose:hover {"
-                        "   background-color: #e74c3c;"
-                        "   color: white;"
-                        "   border-top-right-radius: 2px;"
-                        "}"
-                        "#btnMinimize:hover, #btnMaximize:hover {"
-                        "   background-color: #d1d2d3;"
-                        "}"
-    );
-
-
-
-
-
-
-
 
     connect(ui->centralStackedWidget, &QStackedWidget::currentChanged, this, [this](int index) {
         Q_UNUSED(index);
@@ -258,20 +232,26 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     connect(actionSave_as, &QAction::triggered, this, &Neuro_programm::saveProjectAs);
 
     // Действие "Сохранить всё" (Ctrl + Shift + S)
-    QAction *actionSaveAll = new QAction(" Сохранить всё", this);
+    QAction *actionSaveAll = new QAction("Сохранить всё", this);
     actionSaveAll->setShortcut(QKeySequence("Ctrl + Shift + S"));
     actionSaveAll->setIcon(QIcon(":/Data/system_icons/document-save-as.svg"));
     connect(actionSaveAll, &QAction::triggered, this, &Neuro_programm::saveAllProjectChanges);
 
     // Действие "Сохранить проект" (Shift + S)
-    QAction *save_progect_all = new QAction(" Сохранить проект", this);
+    QAction *save_progect_all = new QAction("Сохранить проект", this);
     save_progect_all->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_S));
     //connect(save_progect_all, &QAction::triggered, this, &Neuro_programm::saveAllProjectChanges);
 
     // Действие "Закрыть проект" (Ctrl + W)
-    QAction *actionCloseProject = new QAction(" Закрыть проект", this);
+    QAction *actionCloseProject = new QAction("Закрыть проект", this);
     actionCloseProject->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
     connect(actionCloseProject, &QAction::triggered, this, &Neuro_programm::onCloseProjectClicked);
+
+    // Действие "Выход" (Ctrl + Q)
+    QAction *actionClose = new QAction("Выход", this);
+    actionClose->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
+    actionClose->setIcon(QIcon(":/Data/system_icons/application-exit.svg"));
+    connect(actionClose, &QAction::triggered,this, &Neuro_programm::close_program);
 
 
     // 2. Полностью УДАЛЯЕМ встроенный системный менюбар, который лезет наверх
@@ -281,23 +261,83 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         delete this->menuBar();
         this->setMenuBar(nullptr);
     }
+    this->setMenuBar(nullptr);
+    this->setContentsMargins(0, 0, 0, 0);
+    this->setStyleSheet("QMainWindow { background-color: blue; }");
+
+
 
     // 3. Создаем ОДИН общий тулбар на всю ширину окна, который станет нашей новой супер-шапкой
+    // 1. Создаем НАСТОЯЩИЙ QToolBar, чтобы он аппаратно занимал 100% ширины поверх доков!
     QToolBar *topContainerBar = new QToolBar(this);
-    topContainerBar->setContentsMargins(0, 0, 0, 0);
     topContainerBar->setObjectName("topContainerBar");
+
+    // Блокируем перетаскивание тулбара, чтобы пользователь не сломал интерфейс
     topContainerBar->setMovable(false);
     topContainerBar->setFloatable(false);
     topContainerBar->setAllowedAreas(Qt::TopToolBarArea);
+
+    // 2. ЖЕЛЕЗНЫЙ ФИКС СЕРОЙ ПОЛОСЫ И ОТСТУПОВ НА УРОВНЕ СИСТЕМЫ
+    topContainerBar->setContentsMargins(0, 0, 0, 0);
+    if (topContainerBar->layout()) {
+        topContainerBar->layout()->setContentsMargins(0, 0, 0, 0);
+        topContainerBar->layout()->setSpacing(0);
+    }
+
+    // 3. Заставляем тулбар намертво подчиняться цветам темной/светлой темы
+    topContainerBar->setAttribute(Qt::WA_StyledBackground, true);
+    topContainerBar->setStyleSheet(
+        "QToolBar#topContainerBar {"
+        "   background-color: #eff0f1;" // Светлый фон по дефолту (перекрасится в settings.cpp)
+        "   border: none;"               // ПОЛНОСТЬЮ УДАЛЯЕТ СЕРУЮ ЛИНЕЙКУ СНИЗУ!
+        "   padding: 0px;"
+        "   margin: 0px;"
+        "}"
+    );
+
+    // 4. Помещаем вашу готовую внутреннюю обертку (topWrapper) внутрь тулбара
+    // Убедитесь, что внутри topWrapper->layout() (ваш topLayout) уже уложены:
+    // customTitleBarPanel, customMenuBar и widget_3!
+
+    // 5. Жестко фиксируем итоговую высоту (35 шапка + 35 меню + 30 чипы = 100px)
+    topContainerBar->setFixedHeight(100);
+
+    // 6. НАДЁЖНЫЙ МОНТАЖ В ОКНО: Тулбар встает на самый верхний слой приложения, прижимая доки вниз!
+    this->addToolBar(Qt::TopToolBarArea, topContainerBar);
+
+    // Сдвигаем виджеты сразу после старта, когда Qt отрисует геометрию дока
+    QTimer::singleShot(100, this, &Neuro_programm::updateWidget3Padding);
+
+    // 7. Правильно настраиваем углы для док-виджетов, чтобы они не лезли наверх
+    this->setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
+    this->setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+
 
     // 4. Внутренний вертикальный макет, который жестко зафиксирует порядок элементов
     QWidget *topWrapper = new QWidget(topContainerBar);
     QVBoxLayout *topLayout = new QVBoxLayout(topWrapper);
     topLayout->setContentsMargins(0, 0, 0, 0);
     topLayout->setSpacing(0);
+    topContainerBar->addWidget(topWrapper);
+
+
 
     // 5. Создаем новый ручной QMenuBar, который будет вести себя как послушный виджет
     QMenuBar *customMenuBar = new QMenuBar(topWrapper);
+
+    customMenuBar->setAutoFillBackground(true);
+
+    // 2. Создаем и настраиваем изолированную темную палитру
+    QPalette menuPalette = customMenuBar->palette();
+
+    // Красим подложку менюбара в глубокий темный цвет вашего интерфейса (#202225)
+    menuPalette.setColor(QPalette::ColorRole::Window, QColor(32, 34, 37));
+
+    // Задаем светлый цвет текста для пунктов "Файл", "Правка"...
+    menuPalette.setColor(QPalette::ColorRole::WindowText, QColor(212, 212, 212));
+    menuPalette.setColor(QPalette::ColorRole::Text, QColor(212, 212, 212));
+
+    customMenuBar->setPalette(menuPalette);
 
     // Наполняем его вашими пунктами меню и экшенами из Qt Designer
     QMenu *fileMenu = customMenuBar->addMenu("Файл");
@@ -313,9 +353,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     fileMenu->addSeparator();
     fileMenu->addAction(save_progect_all);
     fileMenu->addAction(actionCloseProject);
-    fileMenu->addAction(ui->Exit);
+    fileMenu->addAction(actionClose);
 
-    connect(ui->Exit, &QAction::triggered,this, &Neuro_programm::close_program);
 
     QMenu *editMenu = customMenuBar->addMenu("Правка");
 
@@ -381,11 +420,41 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     editMenu->addSeparator();
     editMenu->addAction(actionSearch);
 
-
-
-
     QMenu *toolsMenu = customMenuBar->addMenu("Инструменты");
-    toolsMenu->addAction(ui->action_settngs);
+
+    // =========================================================================
+    // НАПОЛНЕНИЕ МЕНЮ "ИНСТРУМЕНТЫ"
+    // =========================================================================
+
+    QAction *actionSettings = new QAction("Настройки", this);
+    actionSettings->setObjectName("actionSettings");
+    actionSettings->setShortcut(QKeySequence("Ctrl + Shift + /"));
+    actionSettings->setIcon(QIcon(":/Data/system_icons/document-save-as.svg"));
+    connect(actionSettings, &QAction::triggered, this, &Neuro_programm::open_settings);
+    toolsMenu->addAction(actionSettings);
+
+
+    //Создаем ПОДМЕНЮ для PIP (вместо QAction используем QMenu)
+    QMenu *pipSubMenu = new QMenu("Менеджер пакетов PIP", this);
+    pipSubMenu->setIcon(QIcon(":/Data/system_icons/document-save-as.svg"));
+
+    QAction *actInstallPip = new QAction("Установить пакет", this);
+    connect(actInstallPip, &QAction::triggered, this, &Neuro_programm::onInstallSinglePackageTriggered);
+    pipSubMenu->addAction(actInstallPip);
+
+    // Действие Б: Установка из файла зависимостей
+    QAction *actInstallReqs = new QAction("Установить из requirements.txt...", this);
+    connect(actInstallReqs, &QAction::triggered, this, &Neuro_programm::install_from_requirements);
+    pipSubMenu->addAction(actInstallReqs);
+
+    // Действие В: Быстрое обновление списка пакетов
+    QAction *actRefreshPip = new QAction("Обновить список пакетов", this);
+   // connect(actRefreshPip, &QAction::triggered, this, &Neuro_programm::refresh_pip_list); // Слот нужно объявить в хедере
+    pipSubMenu->addAction(actRefreshPip);
+
+    // 3. ДОБАВЛЯЕМ ПОДМЕНЮ В ГЛАВНОЕ МЕНЮ
+    toolsMenu->addMenu(pipSubMenu);
+
 
     QMenu *helpMenu = customMenuBar->addMenu("Справка");
     helpMenu->addAction(ui->action_help);
@@ -396,7 +465,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     topLayout->addWidget(customMenuBar);           // 2. Строго под шапкой
     if (ui->widget_3)
     {
-        ui->widget_3->setStyleSheet("");
         topLayout->addWidget(ui->widget_3);       // 3. Строго под меню
     }
 
@@ -406,18 +474,68 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             this->updateWidget3Padding();
         });
 
+        // =========================================================================
+        // ОПТИМИЗАЦИЯ И УМЕНЬШЕНИЕ ВЫСОТЫ ВЕРХНЕГО БАРА
+        // =========================================================================
+        // 1. Делаем кастомную шапку с кнопками управления максимально тонкой (28px вместо 35px)
+        if (ui->customTitleBarPanel) {
+            ui->customTitleBarPanel->setFixedHeight(25);
+        }
+
+        // 2. Ужимаем высоту строки меню Файл, Правка (25px вместо 35px)
+        if (customMenuBar) {
+            customMenuBar->setFixedHeight(35);
+        }
+
+        // 3. Если widget_3 (панель чипов) пустует или временно не нужен,
+        // мы жестко сжимаем его высоту до нуля, либо выставляем компактные 25px!
+        if (ui->widget_3) {
+            ui->widget_3->setFixedHeight(25); // Поставьте 0, чтобы убрать лишнюю серую полосу, или 25 для компактности
+        }
+
+        // 4. ЖЕСТКИЙ ФИНАЛЬНЫЙ РАСЧЕТ И ФИКСАЦИЯ ВЫСОТЫ ВСЕГО ТУЛБАРА
+        // Вместо старых 100 пикселей задаем строго 53 пикселя (28 шапка + 25 меню)!
+        // Если widget_3 равен 25px, то итоговая высота будет 28 + 25 + 25 = 78px.
+        int finalTargetHeight = 85;
+        if (ui->widget_3 && ui->widget_3->height() > 0)
+        {
+            finalTargetHeight += ui->widget_3->height();
+        }
+
+        topContainerBar->setFixedHeight(finalTargetHeight);
+
+
+        if (ui->customTitleBarPanel) {
+            ui->customTitleBarPanel->setMouseTracking(true);
+            ui->customTitleBarPanel->installEventFilter(this);
+        }
+        if (topWrapper) {
+            topWrapper->setMouseTracking(true);
+            topWrapper->installEventFilter(this); // Пробрасываем мышь сквозь макет-обертку
+        }
+        if (topContainerBar) {
+            topContainerBar->setMouseTracking(true);
+            topContainerBar->installEventFilter(this);
+        }
+
+
+        // Просто и чисто укладываем обертку в контейнер через плоский горизонтальный слой
+        QVBoxLayout *containerLayout = new QVBoxLayout(topContainerBar);
+        containerLayout->setContentsMargins(0, 0, 0, 0);
+        containerLayout->setSpacing(0);
+        containerLayout->addWidget(topWrapper); // Теперь шапка сидит строго внутри контейнера
+        topContainerBar->setLayout(containerLayout);
+
         // Сдвигаем виджеты сразу после старта, когда Qt отрисует геометрию дока
         QTimer::singleShot(100, this, &Neuro_programm::updateWidget3Padding);
 
-
-
-    // 7. Регистрируем собранный блок в главном окне
-    topContainerBar->addWidget(topWrapper);
-    this->addToolBar(Qt::TopToolBarArea, topContainerBar);
-
-    // 8. Корректируем углы док-виджетов
-    this->setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
-    this->setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+        if (ui->centralwidget) {
+            ui->centralwidget->setAttribute(Qt::WA_StyledBackground, true);
+            if (ui->centralwidget->layout()) {
+                ui->centralwidget->layout()->setContentsMargins(0, 0, 0, 0);
+                ui->centralwidget->layout()->setSpacing(0);
+            }
+        }
 
     connect(ui->action_help, &QAction::triggered, this, [this]() {
 
@@ -434,10 +552,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             // Настраиваем базовые свойства окна
             rsc4->setWindowTitle("Автономный Терминал");
             rsc4->resize(600, 400);
-
-            // Сюда вы можете добавить любые внутренние компоненты, например:
-            // QVBoxLayout *layout = new QVBoxLayout(mySeparateWindow);
-            // layout->addWidget(new QTextEdit(mySeparateWindow));
         }
 
         // Если окно было свернуто или скрыто — восстанавливаем его и выводим на передний план
@@ -454,9 +568,9 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // =================================================================
 
     // Очищаем customTitleBarPanel от старого мусора из Designer
-    for (QWidget *child : ui->customTitleBarPanel->findChildren<QWidget*>()) {
-        child->deleteLater();
-    }
+    // for (QWidget *child : std::as_const(ui->customTitleBarPanel->findChildren<QWidget*>())) {
+    //     child->deleteLater();
+    // }
 
     if (ui->customTitleBarPanel->layout()) {
         ui->customTitleBarPanel->layout()->setParent(nullptr);
@@ -464,7 +578,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     QHBoxLayout *panelLayout = new QHBoxLayout(ui->customTitleBarPanel);
     panelLayout->setContentsMargins(0, 0, 0, 0); // Нулевые отступы для плотного прилегания кнопок к краю
-    panelLayout->setSpacing(0);
+    panelLayout->setSpacing(6);
 
     // Левая симметричная пружина
     panelLayout->addStretch();
@@ -475,6 +589,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     titleFont.setBold(true);
     titleLabel->setFont(titleFont);
     panelLayout->addWidget(titleLabel);
+    titleLabel->installEventFilter(this);
+    panelLayout->installEventFilter(this);
 
     // Правая симметричная пружина (надпись теперь строго по центру геометрии окна)
     panelLayout->addStretch();
@@ -497,69 +613,78 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     btnMaximize->setFlat(true);
     btnClose->setFlat(true);
 
-    // Добавляем плоские кнопки в самый правый край шапки
-    panelLayout->addWidget(btnMinimize);
-    panelLayout->addWidget(btnMaximize);
-    panelLayout->addWidget(btnClose);
+    // Находим макет, который управляет элементами внутри вашей шапки
+    if (panelLayout) {
+        // Очищаем старые привязки и заставляем макет выравнивать всё строго по вертикальному центру!
+        //panelLayout->setAlignment(Qt::AlignVCenter);
+
+        // Убираем скрытые верхние/нижние зазоры самого макета шапки
+        panelLayout->setContentsMargins(10, 0, 10, 0); // 10px отступы по бокам, 0px сверху и снизу
+        panelLayout->setSpacing(6); // Расстояние между кнопками управления
+
+        // ... (код добавления надписи "PyTorch Studio" и Stretch-распорки) ...
+
+        // ПРАВИЛЬНОЕ ДОБАВЛЕНИЕ КНОПОК С ФЛАГОМ Qt::AlignVCenter:
+        // Флаг принудительно выровняет каждую кнопку ровно по середине высоты бара
+        if (btnMinimize) panelLayout->addWidget(btnMinimize, 0, Qt::AlignVCenter);
+        if (btnMaximize) panelLayout->addWidget(btnMaximize, 0, Qt::AlignVCenter);
+        if (btnClose)    panelLayout->addWidget(btnClose,    0, Qt::AlignVCenter);
+    }
 
     // Логика сигналов для кнопок управления окном
-    connect(btnMinimize, &QPushButton::clicked, this, &Neuro_programm::showMinimized);
-    connect(btnClose, &QPushButton::clicked, this, &Neuro_programm::close);
-    connect(btnMaximize, &QPushButton::clicked, this, [this, btnMaximize]() {
-        if (this->isMaximized()) {
-            this->showNormal();
-            btnMaximize->setText("🗖");
-        } else {
-            this->showMaximized();
-            btnMaximize->setText("🗗");
-        }
-    });
-
-    topContainerBar->installEventFilter(this);
-    topWrapper->installEventFilter(this);
-    ui->customTitleBarPanel->installEventFilter(this);
-    customMenuBar->installEventFilter(this);
-    if (ui->widget_3) {
-        ui->widget_3->installEventFilter(this);
+    if (btnMinimize)
+    {
+        connect(btnMinimize, &QPushButton::clicked, this, &Neuro_programm::showMinimized);
+    }
+    if (btnClose)
+    {
+        connect(btnClose, &QPushButton::clicked, this, &Neuro_programm::close);
+    }
+    if (btnMaximize)
+    {
+        connect(btnMaximize, &QPushButton::clicked, this, [this]()
+        {
+            if (this->isMaximized())
+            {
+                this->showNormal();
+            } else {
+                this->showMaximized();
+            }
+        });
     }
 
     // Активируем трекинг мыши, чтобы пробить защиту QToolBar
     topContainerBar->setMouseTracking(true);
     topWrapper->setMouseTracking(true);
-    ui->customTitleBarPanel->setMouseTracking(true);
-
+    if (ui->customTitleBarPanel) {
+        ui->customTitleBarPanel->setMouseTracking(true);
+        // КРИТИЧЕСКИЙ ШАГ: Вешаем фильтр событий на шапку, чтобы заработал Drag & Drop!
+        ui->customTitleBarPanel->installEventFilter(this);
+    }
     self = this;
     trainingProcess = nullptr;
 
     networkManager = new QNetworkAccessManager(this);
 
-    // 1. Создаем вертикальный сплиттер
+    // Возвращаем стандартную сборку вертикального сплиттера:
     mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
 
-    // 2. Добавляем старый центр
     QWidget *oldCentral = ui->centralwidget;
     mainVerticalSplitter->addWidget(oldCentral);
 
-    // 3. ВАЖНО: ВЫДЕЛЯЕМ ПАМЯТЬ ПОД PANEL_OTHER ТУТ!
-    // Если этой строки нет, или она написана ниже — программа упадет!
-    panelOther = new Panel_other(this);
+    panelOther = new panel_other(this);
     mainVerticalSplitter->addWidget(panelOther);
-
-    // Назначаем новый центр
-    setCentralWidget(mainVerticalSplitter);
-
-    // Изначально скрываем панель
     panelOther->setVisible(false);
 
-    // =========================================================================
-    // КРИТИЧЕСКИЙ ФИКС РАЗМЕТКИ: Уничтожаем серую полосу над Панелью обучения
-    // =========================================================================
-    // Так как centralwebkit теперь живет внутри сплиттера, обнуляем его внешние поля,
-    // чтобы внутренний интерфейс ИИ-студии намертво прижался к верхнему кастомному меню!
-    if (oldCentral && oldCentral->layout()) {
+    // Делаем сплиттер главным центральным виджетом, как у вас и было изначально
+    this->setCentralWidget(mainVerticalSplitter);
+
+    if (oldCentral && oldCentral->layout())
+    {
         oldCentral->layout()->setContentsMargins(0, 0, 0, 0);
         oldCentral->layout()->setSpacing(0);
     }
+
 
     // Дополнительно обнуляем поля самого сплиттера
     if (mainVerticalSplitter->layout())
@@ -573,6 +698,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     btnLogs = new QPushButton("📋 Панель быстрых команд", this);
     btnTogglePip = new QPushButton("🛠 Управление пакетами", this);
     btnAIChat = new QPushButton("💬 ИИ-Ассистент", this);
+    btnStartDebug = new QPushButton("Запуск Debug", this);
+
 
     // Настраиваем окно вывода чата
     ui->chatLogWidget->setReadOnly(true);
@@ -591,23 +718,19 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     btnLogs->setCheckable(true);
     btnTogglePip->setCheckable(true);
     btnAIChat->setCheckable(true);
+    btnStartDebug->setCheckable(true);
 
     // Изначально при старте приложения нижняя панель закрыта, кнопки отжаты
     btnTerminal->setChecked(false);
     btnSearch->setChecked(false);
     btnLogs->setChecked(false);
     btnTogglePip->setChecked(false);
+    btnStartDebug->setChecked(false);
 
     btnTerminal->setAutoExclusive(false);
     btnTerminal->setStyle(new StatusButtonStyle(btnTerminal->style()));
 
     btnTerminal->setStyleSheet("QPushButton { border: none; padding: 4px 12px; color: #ffffff; font-weight: bold; }");
-
-    //btnTerminal->setStyleSheet(statusBarBtnStyle);
-    // btnSearch->setStyleSheet(statusBarBtnStyle);
-    // btnLogs->setStyleSheet(statusBarBtnStyle);
-    // btnTogglePip->setStyleSheet(statusBarBtnStyle);
-    // btnAIChat->setStyleSheet(statusBarBtnStyle);
 
     // 2. Добавляем кнопку в левую часть статусбара
     ui->statusbar->addWidget(leftSpacer);
@@ -615,42 +738,78 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     ui->statusbar->addWidget(btnSearch);
     ui->statusbar->addWidget(btnLogs);
     ui->statusbar->addWidget(btnAIChat);
+    ui->statusbar->addWidget(btnStartDebug);
     ui->statusbar->addPermanentWidget(btnTogglePip);
 
-    // 2. СВЯЗЫВАЕМ СИГНАЛЫ КНОПОК С УМНЫМ ТРИГГЕРОМ ПОКАЗА/СКРЫТИЯ
+    connect(btnStartDebug, &QPushButton::clicked, this, [this]() {
+        // 1. Считываем настройки и пути
+        QSettings settings;
+        QString venvPath = settings.value("python/venv_path", "").toString();
+        QString scriptPath = currentOpenProjectPath + "/test_debug.py";
 
-    // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm в файле neuro_programm.cpp ---
+    #if defined(Q_OS_WIN)
+        QString pythonExec = venvPath + "/Scripts/python.exe";
+    #else
+        QString pythonExec = venvPath + "/bin/python";
+    #endif
 
-    // --- Добавить в neuro_programm.cpp (Ориентировочно Страница 8-9) ---
-    // --- Полностью заменить коннект для btnTogglePip (neuro_programm.cpp, Страница 8) ---
-    connect(btnTogglePip, &QPushButton::clicked, this, [this](bool checked) {
-        if (checked) {
-            // 1. Отжимаем остальные кнопки навигации в статусбаре
-            btnTerminal->setChecked(false);
-            btnSearch->setChecked(false);
-            btnLogs->setChecked(false);
-            btnAIChat->setChecked(false);
-
-            // 2. Раскрываем нижнюю панель и активируем PIP-режим напрямую
+        // 2. Настраиваем логи вывода в левую консоль панели panelOther
+        connect(debuggedScriptProcess, &QProcess::readyReadStandardOutput, this, [this]() {
             if (panelOther) {
-                panelOther->setVisible(true);
-                panelOther->setPipPageActive(); // Аппаратный вызов метода из Шага 2 (0.1.35)
+                panelOther->appendLogText(QString::fromUtf8(debuggedScriptProcess->readAllStandardOutput()));
             }
+        });
 
-            // 3. Раздвигаем вертикальный сплиттер на фиксированные 250 пикселей под консоль
-            if (mainVerticalSplitter) {
-                mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
-            }
-        }
-        else {
-            // Повторный клик (кнопка отжалась) -> полностью закрываем нижнюю панель
+        connect(debuggedScriptProcess, &QProcess::readyReadStandardError, this, [this]() {
             if (panelOther) {
-                panelOther->setVisible(false);
+                panelOther->appendLogText(QString::fromUtf8(debuggedScriptProcess->readAllStandardError()));
             }
+        });
+
+        // 3. Стартуем процесс
+        QStringList args;
+        args << scriptPath;
+        debuggedScriptProcess->start(pythonExec, args);
+
+        // 4. Запускаем таймер на подключение сокета отладки
+        if (panelOther) {
+            // 1. Отправляем ПЕРВУЮ строку в дебаг-консоль
+            panelOther->appendDebugLog("⏳ Скрипт запущен. Ожидание инициализации порта...");
         }
+
+        disconnect(debuggedScriptProcess, &QProcess::started, nullptr, nullptr);
+        connect(debuggedScriptProcess, &QProcess::started, this, [this]() {
+            if (panelOther) {
+                panelOther->appendDebugLog("🔌 Запуск автоматического поиска порта отладки...");
+                panelOther->connectToDebugger(); // Сокет сам найдет порт, как только тот откроется!
+            }
+        });
+
+        QTimer::singleShot(1500, this, [this]() {
+            if (panelOther) {
+                panelOther->appendLogText("🔌 Подключаем Консоль отладки C++ к Python...");
+                panelOther->connectToDebugger();
+            }
+        });
     });
 
 
+    connect(btnTogglePip, &QPushButton::clicked, this, [this](bool checked) {
+        if (checked) {
+            // Гасим остальные кнопки статусбара
+            btnTerminal->setChecked(false);
+            btnSearch->setChecked(false);
+            btnLogs->setChecked(false);
+
+            if (panelOther) {
+                panelOther->setVisible(true);
+                // Открываем третью страницу — Таблицу пакетов
+                panelOther->setActivePage(panel_other::PagePipTable);
+            }
+        } else {
+            if (panelOther) panelOther->setVisible(false);
+        }
+    });
 
 
     connect(btnAIChat, &QPushButton::clicked, this, [this](bool checked) {
@@ -688,37 +847,17 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     });
 
     // --- neuro_programm.cpp (Страница 9) ---
-    connect(btnTerminal, &QPushButton::toggled, this, [this](bool checked) {
-        // Получаем текущую палитру кнопки
-        QPalette palette = btnTerminal->palette();
-
+    connect(btnTerminal, &QPushButton::clicked, this, [this](bool checked) {
         if (checked) {
-            // --- ПЕРВЫЙ ЩЕЛЧОК: кнопка нажата ---
-            // Задаем темный цвет для фона кнопки и подсвечиваем текст
-            palette.setColor(QPalette::Button, QColor(18, 18, 18));     // Темный фон
-            palette.setColor(QPalette::ButtonText, QColor(0, 122, 204)); // Синий/яркий текст
-
-            // Логика компонента
-            panelOther->setVisible(true);
-            panelOther->setTerminalPageActive();
-
-            if (mainVerticalSplitter) {
-                mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250}));
+            btnTogglePip->setChecked(false); // Выключаем кнопку пакетов
+            if (panelOther) {
+                panelOther->setVisible(true);
+                // Открываем первую страницу — Терминал с панелью установки
+                panelOther->setActivePage(panel_other::PageTerminal);
             }
+        } else {
+            if (panelOther) panelOther->setVisible(false);
         }
-        else {
-            // --- ПОВТОРНЫЙ ЩЕЛЧОК: кнопка отжата ---
-            // Возвращаем исходные стандартные цвета (светлый фон и белый текст)
-            palette.setColor(QPalette::Button, QColor::fromRgb(43, 43, 43));     // Светлый фон статусбара
-            palette.setColor(QPalette::ButtonText, QColor::fromRgb(255, 255, 255)); // Белый текст
-
-            // Логика компонента
-            panelOther->setVisible(false);
-        }
-
-        // Принудительно применяем измененную палитру к кнопке и обновляем её на экране
-        btnTerminal->setPalette(palette);
-        btnTerminal->update();
     });
 
 
@@ -794,7 +933,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     ui->treeView->setIndentation(20);
 
     //connect(ui->New_progect, &QAction::triggered, this, &Neuro_programm::new_progect);
-    connect(ui->action_settngs, &QAction::triggered, this, &Neuro_programm::open_settings);
     connect(ui->aboutProgram, &QAction::triggered, this, &Neuro_programm::open_about_program);
     //connect(ui->open_progect, &QAction::triggered, this, &Neuro_programm::onOpenProjectMenuTriggered);
     connect(save_progect_all, &QAction::triggered, this, &Neuro_programm::onSaveProjectMenuTriggered);
@@ -930,11 +1068,9 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 1. Создаем кастомный виджет для шапки дока
     QWidget *customTitleWidget = new QWidget(ui->leftDockWidget);
 
-    // // Задаем горизонтальный слой с минимальными отступами
-    QHBoxLayout *customTitleLayout = new QHBoxLayout(customTitleWidget);
-    // customTitleLayout->addWidget(someWidget);
-    // titleLayout->setContentsMargins(10, 4, 10, 4); // Небольшие аккуратные отступы
-    // titleLayout->setSpacing(0);
+    if (ui->leftDockWidget) {
+        ui->leftDockWidget->setFeatures(QDockWidget::NoDockWidgetFeatures);
+    }
 
     // 2. Создаем красивый текстовый заголовок
     QLabel *titleLabel1 = new QLabel("📁 Открытые файлы и проект", customTitleWidget);
@@ -942,6 +1078,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // ЗАЩИТА: Если метка не была найдена в Designer, создаем её сами прямо сейчас
     if (!titleLabel) {
         titleLabel = new QLabel("PyTorch Studio", ui->customTitleBarPanel);
+        QWidget *completelyEmptyTitle = new QWidget(ui->leftDockWidget);
+        ui->leftDockWidget->setTitleBarWidget(completelyEmptyTitle);
     }
 
     // Настраиваем строгий полужирный шрифт в стиле Breeze
@@ -982,30 +1120,11 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // По умолчанию при старте выделяем первую строку (Панель ИИ)
     ui->openFilesListWidget->setCurrentRow(0);
 
-    // ХИРУРГИЧЕСКИЙ ФИКС НАЛОЖЕНИЯ ТЕКСТА:
-    // Намертво удаляем старые текстовые метки из Designer, чтобы они не слипались в углу
-    // if (ui->label) {
-    //     ui->label->setParent(nullptr);
-    //     ui->label->deleteLater();
-    // }
-    // if (ui->label_2) {
-    //     ui->label_2->setParent(nullptr);
-    //     ui->label_2->deleteLater();
-    // }
-
     // 2. ИЗНАЧАЛЬНО СКРЫВАЕМ НИЖНИЙ КОНТЕЙНЕР ПРИ ЗАПУСКЕ ПРОГРАММЫ
     if (ui->openFilesContainer) {
         ui->openFilesContainer->setVisible(false);
     }
 
-    // 3. СБОРКА ВЕРТИКАЛЬНОГО СПЛИТТЕРА БЕЗ РАЗРЫВА РОДИТЕЛЬСКИХ СВЯЗЕЙ
-    // =========================================================================
-    // ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПУСТОТЫ И НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ
-    // =========================================================================
-
-    // =========================================================================
-    // ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПУСТОТЫ И НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ (ФИНАЛ)
-    // =========================================================================
     // =========================================================================
     // ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПУСТОТЫ И НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ (ФИНАЛ)
     // =========================================================================
@@ -1016,8 +1135,21 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         ui->leftDockWidget->setMaximumSize(QSize(300, 524287));
 
         // 2. Убираем встроенную плашку заголовка QDockWidget
-        QWidget *emptyTitleWidget = new QWidget(ui->leftDockWidget);
-        ui->leftDockWidget->setTitleBarWidget(emptyTitleWidget);
+        if (ui->leftDockWidget) {
+            // Способ 1: Отключаем все нативные фичи заголовка (он схлопнется сам)
+            ui->leftDockWidget->setFeatures(QDockWidget::NoDockWidgetFeatures);
+
+            // Способ 2: Создаем действительно пустой виджет БЕЗ фиксации высоты
+            // Qt сам поймет, что у него нулевой размер и уберет заголовок
+            QWidget *emptyTitle = new QWidget(ui->leftDockWidget);
+            ui->leftDockWidget->setTitleBarWidget(emptyTitle);
+
+            // Способ 3: Срезаем внутренние отступы у контейнера дока через QSS
+            ui->leftDockWidget->setStyleSheet(
+                "QDockWidget { background-color: #202225; border: none; padding: 0px; margin: 0px; }"
+                "QDockWidget::title { background-color: transparent; height: 0px; padding: 0px; margin: 0px; }"
+            );
+        }
 
         // 3. Срезаем скрытые рамки у самих списков
         ui->leftDockWidget->setStyleSheet(
@@ -1073,6 +1205,10 @@ Neuro_programm::Neuro_programm(QWidget *parent)
                        " padding-bottom: 2px !important;"
                        "}"
                    );
+        this->setStyleSheet(this->styleSheet() +
+            "QDockWidget { border: none; padding: 0px; margin: 0px; }"
+            "QDockWidget::title { background: transparent; height: 0px; max-height: 0px; padding: 0px; margin: 0px; border: none; }"
+        );
 
         // Считываем подложку дока и принудительно зануляем её макет
         QWidget *dockContents = ui->leftDockWidget->widget();
@@ -1080,6 +1216,19 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             dockContents->layout()->setContentsMargins(0, 0, 0, 0);
             dockContents->layout()->setSpacing(0);
         }
+
+        this->setStyleSheet(this->styleSheet() +
+            "QMainWindow::separator { background: transparent; width: 0px; height: 0px; margin: 0px; padding: 0px; }"
+            "QMainWindow::separator:hover { background: transparent; width: 0px; height: 0px; }"
+        );
+
+        if (ui->leftDockWidget) {
+            // Говорим окну, что разделители вокруг этого дока не должны иметь кастомных отступов
+            ui->leftDockWidget->setContentsMargins(0, 0, 0, 0);
+        }
+
+        this->layout()->invalidate();
+        this->layout()->activate();
     }
 
 
@@ -1210,7 +1359,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             QString line = in.readLine(); // Читаем самую первую строчку "cpu ..."
             file.close();
 
-            QStringList tokens = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+            static const QRegularExpression spacesRegex("\\s+");
+            QStringList tokens = line.split(spacesRegex, Qt::SkipEmptyParts);
             if (tokens.size() > 4)
             {
                 long double user   = tokens[1].toDouble();
@@ -1299,18 +1449,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // Принудительно выставляем элемент "32" активным по умолчанию при старте программы
     ui->comboBatchSize->setCurrentText("32");
 
-    // ui->btnStartTraining->disconnect();
-
-    // // НАМЕРТВО ПРИВЯЗЫВАЕМ СИГНАЛ НАПРЯМУЮ ЧЕРЕЗ ЛЯМБДУ
-    // connect(ui->btnStartTraining, &QPushButton::clicked, this, [this]() {
-    //     // Выводим тестовую зеленую строчку во ВНЕШНИЙ терминал Arch Linux,
-    //     // чтобы прямо сейчас увидеть в консоли, что клик физически сработал!
-    //     qInfo() << "📱 [GUI ТРИГГЕР] Физический клик по кнопке Старт зафиксирован ядрами C++!";
-
-    //     // Вызываем сам метод запуска обучения
-    //     this->onStartTrainingClicked();
-    // });
-
     // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm в neuro_programm.cpp ---
 
     // Динамически сканируем всю графическую форму и ищем виджет с именем btnStartTraining
@@ -1365,84 +1503,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     initLossChart();
 
     // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm в файле neuro_programm.cpp ---
-
-
-
-    // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm в файле neuro_programm.cpp ---
-
-    // // 1. Создаем действие "Сохранить" (Ctrl + S)
-    // QAction *actionSave = new QAction("💾 Сохранить", this);
-    // actionSave->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S)); // Подсказка горячих клавиш в меню
-    // connect(actionSave, &QAction::triggered, this, &Neuro_programm::saveCurrentActiveFile);
-
-    // // 2. Создаем действие "Сохранить всё" (Ctrl + Shift + S)
-    // QAction *actionSaveAll = new QAction("📚 Сохранить всё", this);
-    // actionSaveAll->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
-    // connect(actionSaveAll, &QAction::triggered, this, &Neuro_programm::saveAllProjectChanges);
-
-    // 3. Создаем наше старое подменю "Открыть недавние"
     recentProjectsMenu = new QMenu("📁 Открыть недавние", this);
-
-    // 4. ИНТЕГРАЦИЯ В ВЕРХНЕЕ МЕНЮ "ФАЙЛ" ПО ЕГО НАЗВАНИЮ
-    //QMenuBar *bar = this->menuBar();
-    // if (bar)
-    // {
-    //     QList<QAction*> actions = bar->actions();
-    //     bool attached = false;
-
-    //     for (QAction *action : actions)
-    //     {
-    //         // Ищем вкладку меню, которая содержит слово "Файл" или "File"
-    //         if (action->menu() && (action->text().contains("Файл") || action->text().contains("File")))
-    //         {
-    //             QMenu *fileMenu = action->menu();
-
-    //             fileMenu->addSeparator();             // Рисуем тонкую разделительную линию Breeze
-    //             fileMenu->addAction(actionSave);      // Вставляем пункт "Сохранить"
-    //             fileMenu->addAction(actionSaveAll);   // Вставляем пункт "Сохранить всё"
-    //             fileMenu->addSeparator();             // Рисуем вторую линию разделителя
-    //             fileMenu->addMenu(recentProjectsMenu); // Вставляем наш список недавних проектов
-
-    //             attached = true;
-    //             break;
-    //         }
-    //     }
-
-        // // Создаем действие "Закрыть проект"
-        // QAction *actionCloseProject = new QAction("❌ Закрыть проект", this);
-        // actionCloseProject->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
-        // connect(actionCloseProject, &QAction::triggered, this, &Neuro_programm::onCloseProjectClicked);
-
-        // // ИНТЕГРИРУЕМ В НАШ СУЩЕСТВУЮЩИЙ ЦИКЛ ДИНАМИЧЕСКОГО ПОИСКА ВКЛАДКИ "ФАЙЛ"
-        // QMenuBar *bar = this->menuBar();
-        // if (bar)
-        // {
-        //     QList<QAction*> actions = bar->actions();
-        //     for (QAction *action : actions)
-        //     {
-        //         if (action->menu() && (action->text().contains("Файл") || action->text().contains("File")))
-        //         {
-        //             QMenu *fileMenu = action->menu();
-
-        //             // =================================================================
-        //             // ИСПРАВЛЕНИЕ: Просто добавляем кнопку в конец меню без угадывания имен!
-        //             // =================================================================
-        //             fileMenu->addSeparator();            // Тонкая разделительная черта Breeze
-        //             fileMenu->addAction(actionCloseProject); // Вставляем пункт "Закрыть проект"
-        //             break;
-        //         }
-        //     }
-        // }
-
-
-        // // Резервный вариант: если меню "Файл" не найдено, выводим элементы на верхнюю панель напрямую
-        // if (!attached) {
-        //     bar->addAction(actionSave);
-        //     bar->addAction(actionSaveAll);
-        //     bar->addMenu(recentProjectsMenu);
-        // }
-  //  }
-
 
     // 2. Инициализируем массив скрытых действий (экшенов) для недавних проектов
     for (int i = 0; i < MaxRecentFiles; ++i) {
@@ -1465,36 +1526,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         initLspServer();
     }
 
-
-    // connect(ui->new_file, &QAction::triggered, this, [this]()
-    // {
-    //     // Защита: Если проект еще не создан или не открыт, не даем создавать файлы
-    //     if (currentOpenProjectPath.isEmpty()) {
-    //         sendSystemNotification("Внимание", "Сначала откройте или создайте проект (*.pystudio)");
-    //         return;
-    //     }
-
-    //     bool ok;
-    //     // Всплывающее окно для ввода имени файла
-    //     QString fileName = QInputDialog::getText(this, "Создание файла",
-    //                                              "Введите имя нового Python-файла:",
-    //                                              QLineEdit::Normal, "script", &ok);
-
-    //     // Если пользователь нажал OK и строка не пустая
-    //     if (ok && !fileName.trimmed().isEmpty()) {
-    //         // Автоматически добавляем расширение .py, если пользователь его забыл
-    //         if (!fileName.endsWith(".py", Qt::CaseInsensitive)) {
-    //             fileName += ".py";
-    //         }
-
-    //         // Собираем абсолютный путь (например, создаем сразу в корне проекта)
-    //         QString fullPath = currentOpenProjectPath + "/" + fileName.trimmed();
-
-    //         // Запускаем ваш пуленепробиваемый метод открытия и инициализации в Jedi!
-    //         this->openNewFileInEditor(fullPath);
-    //     }
-    // });
-
     // Внутри конструктора Neuro_programm в файле neuro_programm.cpp
     connect(this, &Neuro_programm::completionDataReceived,
             this, &Neuro_programm::showCompletionMenuInGuiThread);
@@ -1505,15 +1536,19 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     connect(ui->quickActionsList, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onQuickActionTriggered);
     connect(ui->quickActionsList, &QListWidget::itemDoubleClicked, this, &Neuro_programm::onQuickActionTriggered);
 
-    for (QComboBox *combo : this->findChildren<QComboBox*>()) {
-        if (combo) combo->setStyle(new BreezeFlatStyle(combo->style()));
+    const auto comboList = this->findChildren<QComboBox*>();
+    for (QComboBox *combo : std::as_const(comboList)) {
+            if (combo) combo->setStyle(new BreezeFlatStyle(combo->style()));
     }
 
-    for (QSpinBox *spin : this->findChildren<QSpinBox*>()) {
-        if (spin) spin->setStyle(new BreezeFlatStyle(spin->style()));
+
+    const auto spinBoxes = this->findChildren<QSpinBox*>();
+    for (QSpinBox *spin : std::as_const(spinBoxes)) {
+            if (spin) spin->setStyle(new BreezeFlatStyle(spin->style()));
     }
 
-    for (QDoubleSpinBox *dSpin : this->findChildren<QDoubleSpinBox*>()) {
+    const auto dSpinBoxes = this->findChildren<QDoubleSpinBox*>();
+    for (QDoubleSpinBox *dSpin : std::as_const(dSpinBoxes)) {
         if (dSpin) dSpin->setStyle(new BreezeFlatStyle(dSpin->style()));
     }
 
@@ -1521,9 +1556,73 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     this->applyGlobalFonts();
 
-    //this->addProjectToRecent("/home/elf/pyTorch-Studio/projects/z1/z1.pystudio");
-    this->setContentsMargins(1, 1, 1, 2);
-}
+    // =========================================================================
+    // САМЫЙ КОНЕЦ КОНСТРУКТОРА NEURO_PROGRAMM (Вне любых лямбд и коннектов!)
+    // =========================================================================
+
+    // 1. Создаем временный «родной» менюбар, чтобы инициализировать геометрию окна
+    QMenuBar *fakeMenuBar = new QMenuBar(this);
+    this->setMenuBar(fakeMenuBar);
+
+    // 2. Намертво скрываем его и обнуляем все его отступы
+    fakeMenuBar->hide();
+    fakeMenuBar->setFixedHeight(0);
+    fakeMenuBar->setContentsMargins(0, 0, 0, 0);
+
+    // 3. ЖЕСТКО ВЫРЕЗАЕМ ЕГО ИЗ МАКЕТА ОКНА
+    // Метод setMenuWidget(nullptr) заставит QMainWindow полностью схлопнуть
+    // ту самую техническую щель, которая осталась в .ui файле
+    this->setMenuWidget(nullptr);
+    this->setMenuBar(nullptr);
+
+    // 1. Принудительно отключаем встроенные системные отступы стилей ОС
+    this->setStyle(QStyleFactory::create("Fusion")); // Переключаем на чистый кроссплатформенный стиль Fusion
+
+    // 2. Жестко сбрасываем геометрию макета окна, затирая дефолтные margins
+    if (this->layout()) {
+        this->layout()->setContentsMargins(1, 1, 1, 1);
+        this->layout()->setSpacing(0);
+    }
+    // Дублируем отступы для самого окна
+    this->setContentsMargins(1, 1, 1, 1);
+
+    // 3. Выставляем нулевые отступы для всех ключевых компонентов интерфейса
+    if (ui && ui->centralwidget) {
+        ui->centralwidget->setContentsMargins(0, 0, 0, 0);
+        if (ui->centralwidget->layout()) {
+            ui->centralwidget->layout()->setContentsMargins(0, 0, 0, 0);
+            ui->centralwidget->layout()->setSpacing(0);
+        }
+    }
+
+    // 1. Срезаем внутренние отступы у самой панели, в которой лежат кнопки
+    if (ui && ui->customTitleBarPanel) {
+        ui->customTitleBarPanel->setContentsMargins(0, 0, 0, 0);
+
+        // Сбрасываем отступы макета внутри этой панели
+        if (ui->customTitleBarPanel->layout()) {
+            ui->customTitleBarPanel->layout()->setContentsMargins(0, 0, 0, 0);
+            ui->customTitleBarPanel->layout()->setSpacing(2); // небольшой зазор между самими кнопками
+        }
+    }
+
+    if (ui->customTitleBarPanel) ui->customTitleBarPanel->installEventFilter(this);
+    if (topWrapper)              topWrapper->installEventFilter(this);
+    if (topContainerBar)         topContainerBar->installEventFilter(this);
+
+    // Ищем созданную на Странице 8 надпись и тоже вешаем на неё фильтр
+    QLabel *createdTitleLabel = ui->customTitleBarPanel->findChild<QLabel*>();
+    if (createdTitleLabel)
+    {
+        createdTitleLabel->setMouseTracking(true);
+        createdTitleLabel->installEventFilter(this);
+    }
+
+    onTorchCacheProcessFinished();
+
+} // <--- ВОТ ТУТ ОФИЦИАЛЬНО ЗАКАНЧИВАЕТСЯ ВАШ КОНСТРУКТОР
+
+
 
 Neuro_programm::~Neuro_programm()
 {
@@ -1568,6 +1667,11 @@ Neuro_programm::~Neuro_programm()
         lspProcess->deleteLater();
     }
 
+    if (tensorboardProcess && tensorboardProcess->state() != QProcess::NotRunning) {
+        tensorboardProcess->kill(); // Принудительно гасим сервер при закрытии IDE
+        tensorboardProcess->waitForFinished(1000);
+    }
+
     delete ui;
 }
 
@@ -1593,6 +1697,9 @@ void Neuro_programm::new_progect()
             // =================================================================
 
             initProjectTreeModel(fullProjectPath);
+            if (panelOther) {
+                panelOther->updateProjectVenv(fullProjectPath);
+            }
 
             // Запуск терминала с установкой venv (если требуется)
             if (rsc->shouldInstallVenv() && panelOther)
@@ -1781,7 +1888,14 @@ void Neuro_programm::open_project(const QString &path)
     // Вычисляем корень проекта на основе расположения .pystudio файла
     QFileInfo fileInfo(selectedFile);
     QString fullProjectPath = fileInfo.absoluteDir().absolutePath();
+    // Внутри метода open_project, ближе к концу:
     currentOpenProjectPath = fullProjectPath;
+
+    if (panelOther) {
+        panelOther->setCurrentProjectPath(fullProjectPath);
+        // ДОБАВЬТЕ ЭТУ СТРОКУ:
+        panelOther->updateProjectVenv(fullProjectPath);
+    }
 
     // 4. Инициализируем GUI элементы, дерево файлов и стэк
     initProjectTreeModel(fullProjectPath);
@@ -2347,7 +2461,7 @@ void Neuro_programm::sendChatMessageToAI()
 
     QJsonObject userMessage;
     userMessage["role"] = "user";
-    userMessage["content"] = userQuery.split('\n').first(); // Краткое действие
+    userMessage["content"] = userQuery.split('\n').constFirst();
     messagesArray.append(userMessage);
 
     requestBody["messages"] = messagesArray;
@@ -2376,7 +2490,7 @@ void Neuro_programm::sendChatMessageToAI()
 
         if (reply->error() == QNetworkReply::NoError) {
             QJsonObject responseObj = QJsonDocument::fromJson(reply->readAll()).object();
-            QString aiResponse = responseObj["message"].toObject()["content"].toString().trimmed();
+            QString aiResponse = responseObj.value("message").toObject().value("content").toString().trimmed();
 
             if (!aiResponse.isEmpty()) {
                 QString formattedHtml = this->parseMarkdownCodeBlocks(aiResponse);
@@ -2560,7 +2674,7 @@ void Neuro_programm::readTrainingOutput()
     static QRegularExpression metricsRegex("METRICS:\\s*epoch=(\\d+),\\s*accuracy=([0-9.]+)%\\s*vram=([0-9.]+)GB,\\s*speed=(\\d+)");
 
     QStringList lines = outputText.split('\n', Qt::SkipEmptyParts);
-    for (const QString &line : lines)
+    for (const QString &line : std::as_const(lines))
     {
         // Парсинг синей кривой Loss
         QRegularExpressionMatch lossMatch = lossRegex.match(line.trimmed());
@@ -2569,10 +2683,10 @@ void Neuro_programm::readTrainingOutput()
             double loss = lossMatch.captured(2).toDouble();
             if (lossSeries) lossSeries->append(epoch, loss);
             if (lossChart) {
-                lossChart->axes(Qt::Horizontal).first()->setRange(1, qMax(10.0, epoch));
+                lossChart->axes(Qt::Horizontal).constFirst()->setRange(1, qMax(10.0, static_cast<double>(epoch)));
                 static double maxLoss = 0.1;
                 if (loss > maxLoss) maxLoss = loss;
-                lossChart->axes(Qt::Vertical).first()->setRange(0, maxLoss * 1.1);
+                lossChart->axes(Qt::Vertical).constFirst()->setRange(0, maxLoss * 1.1);
             }
         }
 
@@ -2594,13 +2708,11 @@ void Neuro_programm::readTrainingOutput()
                                      " <tr><td><b>Скорость вычислений:</b></td><td align='right' style='color:#f39c12; font-weight:bold;'>%4 img/s</td></tr>"
                                      " </table>"
                                      "</div>"
-                                     ).arg(epochStr).arg(accStr).arg(vramStr).arg(speedStr);
+                                     ).arg(epochStr, accStr, vramStr, speedStr);
             ui->summaryMetrics->setHtml(htmlReport);
         }
     }
 }
-
-
 
 void Neuro_programm::trainingFinished(int exitCode)
 {
@@ -3610,7 +3722,7 @@ void Neuro_programm::readLspResponse()
                     int maxDocLength = activeEditor->document()->characterCount();
 
                     // Строим маркеры для каждой ошибки из нашего заполненного списка
-                    for (const auto& errorBlock : Neuro_programm::globalLspErrors)
+                    for (const auto& errorBlock : std::as_const(Neuro_programm::globalLspErrors))
                     {
                         QTextCursor cursor(activeEditor->document());
                         QTextBlock block = activeEditor->document()->findBlockByLineNumber(errorBlock.line);
@@ -3624,7 +3736,7 @@ void Neuro_programm::readLspResponse()
                             if (startPos >= 0 && startPos < maxDocLength && endPos >= 0 && endPos <= maxDocLength)
                             {
                                 QTextEdit::ExtraSelection selection;
-                                QColor brightRed("#ff2a2a");
+                                QColor brightRed(255, 42, 42);
                                 selection.format.setUnderlineColor(brightRed);
                                 selection.format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
                                 selection.format.setFontUnderline(true);
@@ -3749,7 +3861,23 @@ void Neuro_programm::readLspResponse()
                     {
                         QPoint globalMousePos = activeEditor->property("lastTooltipGlobalPos").toPoint();
 
-                        QMetaObject::invokeMethod(this, [activeEditor, htmlTooltip = docstringText, globalMousePos]() {
+                        // Выносим создание переменной наружу, чтобы разгрузить синтаксис лямбды
+                        QString htmlTooltip = docstringText;
+
+                        // Передаем activeEditor в качестве контекста безопасности (3-й параметр invokeMethod)
+                        QMetaObject::invokeMethod(this, [activeEditor, htmlTooltip, globalMousePos]()
+                        {
+                            // 1. Безопасное закрытие и удаление ПРЕДЫДУЩЕГО окна всплывающей подсказки
+                            QVariant oldVar = activeEditor->property("currentHoverWidget");
+                            if (oldVar.isValid()) {
+                                QWidget *oldWindow = oldVar.value<QWidget*>();
+                                if (oldWindow) {
+                                    oldWindow->close();
+                                    oldWindow->deleteLater(); // Гарантированно очищаем память!
+                                }
+                            }
+
+                            // 2. Создание нового окна подсказки
                             QWidget *hoverWindow = new QWidget(nullptr, Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
                             hoverWindow->setObjectName("activeLspHoverWindow");
 
@@ -3770,16 +3898,16 @@ void Neuro_programm::readLspResponse()
                             label->setMaximumWidth(500);
                             layout->addWidget(label);
 
+                            // Позиционируем окно с аккуратным отступом от курсора
                             hoverWindow->move(globalMousePos.x() + 15, globalMousePos.y() + 25);
 
-                            if (activeEditor->property("currentHoverWidget").value<QWidget*>()) {
-                                activeEditor->property("currentHoverWidget").value<QWidget*>()->close();
-                            }
+                            // 3. Сохраняем указатель на НОВОЕ окно обратно в свойства редактора
                             activeEditor->setProperty("currentHoverWidget", QVariant::fromValue(hoverWindow));
 
                             hoverWindow->show();
                         }, Qt::QueuedConnection);
                     }
+
                 }
 
                 // Очищаем буфер от пакета ховера
@@ -3952,58 +4080,108 @@ void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completion
 
 bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
 {
-    // =========================================================================
-    // ЖЕЛЕЗНЫЙ КРОСС ПЛАТФОРМЕННЫЙ ОБХОД ДЛЯ СКРОЛЛИНГА
-    // Если пользователь крутит колесико мыши в редакторе кода или списках,
-    // мы МГНОВЕННО отдаем это событие системе, запрещая фильтру блокировать его.
-    // =========================================================================
-    if (event->type() == QEvent::Wheel)
+    static QPoint dragStartPos;
+    static bool isDraggingTitle = false;
+
+    if (event->type() == QEvent::Wheel) {
+        return QMainWindow::eventFilter(obj, event);
+    }
+
+    // Игнорируем клики по кнопкам управления и менюбару, чтобы не ломать их нажатия
+    QString className = obj->metaObject()->className();
+    if (className == "QPushButton" || className == "QMenuBar" || className == "QComboBox" ||
+        obj->objectName() == "btnMinimize" || obj->objectName() == "btnMaximize" || obj->objectName() == "btnClose")
     {
         return QMainWindow::eventFilter(obj, event);
     }
 
-    // =================================================================
-    // БЛОК 1: СИСТЕМНОЕ ПЕРЕТАСКИВАНИЕ + ДВОЙНОЙ ЩЕЛЧОК ДЛЯ РАЗВОРAЧИВАНИЯ
-    // =================================================================
-    if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick)
+    // =========================================================================
+    // БЛОК 1: АСИНХРОННОЕ СИСТЕМНОЕ ПЕРЕТАСКИВАНИЕ + ДВОЙНОЙ КЛИК (DEBBUG FIXED)
+    // =========================================================================
+
+    // 1. АППАРАТНЫЙ ПЕРЕХВАТ ДВОЙНОГО ЩЕЛЧКА ЛКМ (Сворачивание в Normal <-> Maximized)
+    if (event->type() == QEvent::MouseButtonDblClick)
     {
         QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
         if (mouseEvent->button() == Qt::LeftButton)
         {
-            // Защита: если кликнули по кнопкам управления или меню, отдаем управление им
-            QString className = obj->metaObject()->className();
-            if (className == "QPushButton" || className == "QMenuBar" ||
-                    className == "QComboBox" || (obj->parent() && obj->parent()->metaObject()->className() == "QComboBox"))
-            {
-                return false;
-            }
-
-            // Переводим позицию курсора на экране в координаты главного окна
             QPoint windowLocalPos = this->mapFromGlobal(QCursor::pos());
-
-            // Если клик пришелся на верхнюю область шапки (первые 75 пикселей по высоте)
-            if (windowLocalPos.y() >= 0 && windowLocalPos.y() <= 75)
+            if (windowLocalPos.y() >= 0 && windowLocalPos.y() <= 100)
             {
-                // 1. ОБРАБОТКА ДВОЙНОГО ЩЕЛЧКА (Разворачивание / Сворачивание)
-                if (event->type() == QEvent::MouseButtonDblClick)
-                {
-                    if (this->isMaximized()) {
-                        this->showNormal();
-                    } else {
-                        this->showMaximized();
-                    }
-                    return true; // Перехватываем событие, дальше код не идет
+                if (this->isMaximized()) {
+                    this->showNormal();   // Сжимаем обратно в оконный режим
+                } else {
+                    this->showMaximized(); // Разворачиваем на весь экран
                 }
-
-                // 2. ОБРАБОТКА ОДИНОЧНОГО КЛИКА (Перетаскивание силами ОС)
-                if (event->type() == QEvent::MouseButtonPress && this->windowHandle())
-                {
-                    this->windowHandle()->startSystemMove();
-                    return true;
-                }
+                event->accept();
+                return true; // Поглощаем событие двойного клика
             }
         }
     }
+
+    // 2. БЕЗОПАСНЫЙ ПРОБРОС ПЕРЕТАСКИВАНИЯ В ЯДРО LINUX (ПРИ НАЖАТИИ ЛКМ)
+    // 2. БЕЗОПАСНЫЙ ПРОБРОС ПЕРЕТАСКИВАНИЯ В ЯДРО LINUX (НАЖАТИЕ + ПЕРЕМЕЩЕНИЕ)
+    else if (event->type() == QEvent::MouseButtonPress)
+    {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::LeftButton)
+        {
+            QPoint windowLocalPos = this->mapFromGlobal(QCursor::pos());
+            // Проверяем нажатие в нашей 100-пиксельной верхней зоне шапки
+            if (windowLocalPos.y() >= 0 && windowLocalPos.y() <= 100)
+            {
+                // Запоминаем локальную точку клика для ручного сдвига развернутого окна
+                dragStartPos = mouseEvent->pos();
+                isDraggingTitle = true;
+            }
+        }
+    }
+    else if (event->type() == QEvent::MouseMove)
+    {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+        if (isDraggingTitle && (mouseEvent->buttons() & Qt::LeftButton))
+        {
+            // КРИТИЧЕСКИЙ ФИКС ДЛЯ РАЗВЕРНУТОГО ОКНА:
+            if (this->isMaximized())
+            {
+                // Считаем пропорцию клика по горизонтали, чтобы окно не прыгало краем
+                double relativeX = static_cast<double>(mouseEvent->globalPosition().x()) / this->width();
+
+                // Сбрасываем окно из полноэкранного режима в нормальный оконный
+                this->showNormal();
+
+                // Вычисляем новые координаты окна, чтобы курсор остался ровно под мышкой
+                int newX = mouseEvent->globalPosition().x() - (this->width() * relativeX);
+                int newY = mouseEvent->globalPosition().y() - dragStartPos.y();
+                this->move(newX, newY);
+
+                // Корректируем точку захвата под геометрию уже нормального окна
+                dragStartPos = QPoint(this->width() * relativeX, dragStartPos.y());
+                return true;
+            }
+
+            // Если окно уже в нормальном режиме — передаем управление менеджеру окон Linux (KWin)
+            if (this->windowHandle())
+            {
+                isDraggingTitle = false; // Системный вызов сам завершит перемещение
+
+                // ХАК ДЛЯ ОТЛАДКИ (Снимает Deadlock в GDB)
+                QMouseEvent releaseEvent(QEvent::MouseButtonRelease, mouseEvent->position(),
+                                         mouseEvent->globalPosition(), Qt::LeftButton,
+                                         Qt::NoButton, mouseEvent->modifiers());
+                QCoreApplication::sendEvent(obj, &releaseEvent);
+
+                this->windowHandle()->startSystemMove();
+                return true;
+            }
+        }
+    }
+    else if (event->type() == QEvent::MouseButtonRelease)
+    {
+        isDraggingTitle = false;
+    }
+
+
 
     // =========================================================================
     // БЛОК 2: КОД ДЛЯ РАБОТЫ С JEDI (ПОЛНОСТЬЮ ИЗОЛИРОВАН ОТ МЫШИ)
@@ -4093,7 +4271,6 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
                 QTextCursor tc = editor->textCursor();
                 QString lineText = tc.block().text().left(tc.columnNumber());
                 int lastDotIndex = lineText.lastIndexOf('.');
-
                 if (lastDotIndex == -1) {
                     this->activeCompletionPopup->close();
                     this->activeCompletionPopup = nullptr;
@@ -4132,12 +4309,12 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
                 if (absoluteFilePath.isEmpty()) {
                     absoluteFilePath = editor->objectName();
                 }
-                if (!absoluteFilePath.isEmpty() && !this->isWindowModified()) {
-                    QFileInfo info(absoluteFilePath);
+                if (!absoluteFilePath.isEmpty() && !this->isWindowModified())
+                {QFileInfo info(absoluteFilePath);
                     this->setWindowModified(true);
                     editor->document()->setModified(true);
-                    if (ui->fileComboBox) {
-                        int comboIdx = ui->fileComboBox->findData(absoluteFilePath);
+                    if (ui->fileComboBox)
+                    {int comboIdx = ui->fileComboBox->findData(absoluteFilePath);
                         if (comboIdx != -1) ui->fileComboBox->setItemText(comboIdx, info.fileName() + " *");
                     }
                 }
@@ -4145,28 +4322,21 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
             }
         }
     }
-
-    // =================================================================
+    // =========================================================================
     // БЛОК 3: ПРИНУДИТЕЛЬНОЕ ДОБАВЛЕНИЕ ЗВЁЗДОЧКИ ПРИ РЕДАКТИРОВАНИИ
-    // =================================================================
+    // =========================================================================
     if (event->type() == QEvent::KeyPress)
     {
         CodeEditor *editor = qobject_cast<CodeEditor*>(obj);
-        if (!editor && obj->parent()) {
+        if (editor == nullptr && obj->parent() != nullptr)
+        {
             editor = qobject_cast<CodeEditor*>(obj->parent());
         }
         if (editor)
-        {
-            QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        {QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
             int key = keyEvent->key();
-            if (key != Qt::Key_Left && key != Qt::Key_Right &&
-                    key != Qt::Key_Up && key != Qt::Key_Down &&
-                    key != Qt::Key_Control && key != Qt::Key_Shift &&
-                    key != Qt::Key_Alt && key != Qt::Key_CapsLock &&
-                    key != Qt::Key_Escape && key != Qt::Key_PageUp &&
-                    key != Qt::Key_PageDown && key != Qt::Key_Home && key != Qt::Key_End)
-            {
-                QString absoluteFilePath = obj->property("filePath").toString();
+            if (key != Qt::Key_Left && key != Qt::Key_Right &&key != Qt::Key_Up && key != Qt::Key_Down &&key != Qt::Key_Control && key != Qt::Key_Shift &&key != Qt::Key_Alt && key != Qt::Key_CapsLock &&key != Qt::Key_Escape && key != Qt::Key_PageUp &&key != Qt::Key_PageDown && key != Qt::Key_Home && key != Qt::Key_End)
+            {QString absoluteFilePath = obj->property("filePath").toString();
                 if (absoluteFilePath.isEmpty() && editor)
                 {absoluteFilePath = editor->property("filePath").toString();
                 }
@@ -4179,14 +4349,16 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
                     QFileInfo info(absoluteFilePath);
                     if (ui->fileComboBox)
                     {int comboIdx = ui->fileComboBox->findData(absoluteFilePath);
-                        if (comboIdx != -1) {ui->fileComboBox->setItemText(comboIdx, info.fileName() + " *");
+                        if (comboIdx != -1)
+                        {ui->fileComboBox->setItemText(comboIdx, info.fileName() + " *");
                         }
                     }
                     if (ui->openFilesListWidget)
                     {for (int i = 0; i < ui->openFilesListWidget->count(); ++i)
                         {QListWidgetItem *item = ui->openFilesListWidget->item(i);
                             if (item && item->data(Qt::UserRole).toString() == absoluteFilePath)
-                            {item->setText(info.fileName() + " *");break;
+                            {item->setText(info.fileName() + " *");
+                                break;
                             }
                         }
                     }
@@ -4194,7 +4366,7 @@ bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
                 }
             }
         }
-    }// Во всех остальных случаях отдаем события базовому классу QMainWindowreturn
+    }
     return QMainWindow::eventFilter(obj, event);
 }
 
@@ -4287,7 +4459,7 @@ QString Neuro_programm::parseMarkdownCodeBlocks(const QString &rawText) {
     QString htmlResult = rawText.toHtmlEscaped();
     htmlResult.replace("&lt;br&gt;", "\n");
 
-    QRegularExpression rx("```(?:python|py)?\\n([\\s\\S]*?)\\n```");
+    static const QRegularExpression rx("```(?:python|py)?\\n([\\s\\S]*?)\\n```");
     QRegularExpressionMatchIterator it = rx.globalMatch(htmlResult);
 
     while (it.hasNext()) {
@@ -4531,7 +4703,7 @@ void Neuro_programm::onQuickActionTriggered(QListWidgetItem *item)
 
     // МАКРОС АСИНХРОННОСТИ: Снимаем блокировку не сразу, а через 100 миллисекунд.
     // Это гарантирует, что все "эхо-сигналы" от переключения комбобокса успеют разбиться о наш предохранитель!
-    QTimer::singleShot(100, [=]() {
+    QTimer::singleShot(100, this, [=]() {
         isProcessing = false;
     });
 }
@@ -4801,11 +4973,13 @@ void Neuro_programm::applyGlobalFonts()
     // =========================================================================
     // 3. АППАРАТНЫЙ ОБХОД И СБРОС СТИЛЕЙ БЛОКИРОВЩИКОВ
     // =========================================================================
-    for (QWidget *widget : QApplication::allWidgets())
+    const QWidgetList allAppWidgets = QApplication::allWidgets();
+    for (QWidget *widget : std::as_const(allAppWidgets))
     {
         if (!widget) continue;
 
-        if (widget->window()->metaObject()->className() == QString("Settings")) {
+        if (widget->window()->metaObject()->className() == QString("Settings"))
+        {
             continue;
         }
 
@@ -4852,21 +5026,8 @@ void Neuro_programm::applyGlobalFonts()
     qApp->processEvents();
 }
 
-
-// void Neuro_programm::actionOpenSettings()
-// {
-//     // 1. Создаем объект диалогового окна
-//     Settings dialog(this);
-
-//     // 2. СВЯЗЫВАЕМ СИГНАЛ ДИАЛОГА С МЕТОДОМ ГЛАВНОГО ОКНА
-//     // Как только в диалоге нажмут кнопку "Сохранить/ОК", сработает этот коннект
-//     connect(&dialog, &Settings::settingsChanged, this, &Neuro_programm::applyGlobalFonts);
-
-//     // 3. Запускаем диалоговое окно в модальном режиме
-//     dialog.exec();
-// }
-
-void Neuro_programm::applyThemeColors(bool /*isDarkTheme*/) {
+void Neuro_programm::applyThemeColors(bool /*isDarkTheme*/)
+{
     QPalette sysPalette = qApp->palette();
     QString colorHighlight = sysPalette.color(QPalette::Highlight).name();
 
@@ -4876,68 +5037,45 @@ void Neuro_programm::applyThemeColors(bool /*isDarkTheme*/) {
     QString colorBorder        = "#bcbebf"; // Оставляем только для нижней панели файлов widget_3
 
     QString style = QString(
-                        // Полностью убираем любые рамки и линии у главного окна и тулбара
-                        "QMainWindow, QToolBar {"
-                        "   background: %1 !important;"
-                        "   background-color: %1 !important;"
-                        "   border: none !important;"
-                        "   padding: 0px !important;"
-                        "   spacing: 0px !important;"
-                        "}"
+                            // КНОПКИ УПРАВЛЕНИЯ ОКНОМ
+                            "QPushButton#btnMinimize, QPushButton#btnMaximize, QPushButton#btnClose {"
+                            "   background-color: transparent !important;"
+                            "   border: 0px solid transparent !important;"
+                            "   border-radius: 0px; outline: none;"
+                            "   color: %2 !important;"
+                            "   font-size: 11px;"
+                            "}"
+                            "QPushButton#btnMinimize:hover, QPushButton#btnMaximize:hover {"
+                            "   background-color: #e1e2e3 !important;"
+                            "}"
+                            "QPushButton#btnClose:hover {"
+                            "   background-color: #e81123 !important;"
+                            "   color: white !important;"
+                            "}"
 
-                        // ЖЕСТКО УБИРАЕМ ЛИНИЮ У ЗАГОЛОВКА: выставляем border: none для всей панели
-                        "QWidget#customTitleBarPanel {"
-                        "   background: %1 !important;"
-                        "   background-color: %1 !important;"
-                        "   border: none !important;" // Никаких рамок и линий ни с одной из сторон!
-                        "   padding: 0px !important;"
-                        "   margin: 0px !important;"
-                        "}"
+                            // МЕНЮБАР (Сливается с заголовком без разделителей)
+                            "QMenuBar {"
+                            "   background-color: %1 !important;"
+                            "   color: %2 !important;"
+                            "   border: none !important;"
+                            "}"
+                            "QMenuBar::item:selected {"
+                            "   background-color: %3 !important;"
+                            "   color: white !important;"
+                            "}"
 
-                        "QLabel { color: %2 !important; }"
-
-                        // КНОПКИ УПРАВЛЕНИЯ ОКНОМ
-                        "QPushButton#btnMinimize, QPushButton#btnMaximize, QPushButton#btnClose {"
-                        "   background-color: transparent !important;"
-                        "   border: 0px solid transparent !important;"
-                        "   border-radius: 0px; outline: none;"
-                        "   color: %2 !important;"
-                        "   font-size: 11px;"
-                        "}"
-                        "QPushButton#btnMinimize:hover, QPushButton#btnMaximize:hover {"
-                        "   background-color: #e1e2e3 !important;"
-                        "}"
-                        "QPushButton#btnClose:hover {"
-                        "   background-color: #e81123 !important;"
-                        "   color: white !important;"
-                        "}"
-
-                        // МЕНЮБАР (Сливается с заголовком без разделителей)
-                        "QMenuBar {"
-                        "   background-color: %1 !important;"
-                        "   color: %2 !important;"
-                        "   border: none !important;"
-                        "}"
-                        "QMenuBar::item:selected {"
-                        "   background-color: %3 !important;"
-                        "   color: white !important;"
-                        "}"
-
-                        // Линию оставляем ТОЛЬКО под widget_3, чтобы рабочая область визуально отделялась от шапки
-                        "QWidget#widget_3 {"
-                        "   background-color: %5 !important;"
-                        "   color: %2 !important;"
-                        "   border-top: none !important;"
-                        "   border-left: none !important;"
-                        "   border-right: none !important;"
-                        "   border-bottom: 1px solid %4 !important;"
-                        "}"
-                        )
-                        .arg(colorBreezeLight) // %1
-                        .arg(colorBreezeText)  // %2
-                        .arg(colorHighlight)   // %3
-                        .arg(colorBorder)      // %4
-                        .arg(colorWidget3Bg);  // %5
+                            // Линию оставляем ТОЛЬКО под widget_3, чтобы рабочая область визуально отделялась от шапки
+                            "QWidget#widget_3 {"
+                            "   background-color: %5 !important;"
+                            "   color: %2 !important;"
+                            "   border-top: none !important;"
+                            "   border-left: none !important;"
+                            "   border-right: none !important;"
+                            "   border-bottom: 1px solid %4 !important;"
+                            "}"
+                            )
+                            // Исправлено: Один вызов multi-arg через запятую
+                            .arg(colorBreezeLight, colorBreezeText, colorHighlight, colorBorder, colorWidget3Bg);
 
     this->setStyleSheet(style);
 }
@@ -5494,12 +5632,23 @@ void Neuro_programm::onOpenProjectMenuTriggered()
         this->monitorTimer->stop();
     }
     QList<QProcess*> activeProcesses = this->findChildren<QProcess*>();
-    for (QProcess *proc : activeProcesses) {
-        if (proc && proc->state() == QProcess::Running) {
-            proc->kill();
+    for (QProcess *proc : std::as_const(activeProcesses))
+    {
+        if (proc && proc->state() != QProcess::NotRunning)
+        {
+            // Посылаем сигнал мягкой остановки (Ctrl+C), чтобы PyTorch успел сохранить веса.
+            // Если через 2 секунды процесс не закроется — убиваем жестко.
+            proc->terminate();
+            if (!proc->waitForFinished(2000))
+            {
+                proc->kill();
+            }
             proc->deleteLater();
         }
     }
+
+    // 2. ОБЯЗАТЕЛЬНО очищаем сам контейнер, чтобы внутри не осталось "мусорных" указателей
+    activeProcesses.clear();
     QCoreApplication::processEvents();
 
     // =========================================================================
@@ -5678,85 +5827,145 @@ QString Neuro_programm::getSafeSaveFolderPath()
     return savePath;
 }
 
+#include "advancedclosedialog.h" // ОБЯЗАТЕЛЬНО подключите этот заголовок в самом верху neuro_programm.cpp
+#include <QMessageBox>
+#include <QPushButton>
+#include <QCloseEvent>
+#include <QFile>
+#include <QProcess>
+#include <iostream>
+
+#ifndef Q_OS_WIN
+#include <sys/types.h>
+#include <signal.h>
+#endif
+
 void Neuro_programm::closeEvent(QCloseEvent *event)
 {
-    std::cout << "\n[ШАГ 1] МЕТОД closeEvent УСПЕШНО ВЫЗВАН КРЕСТИКОМ!" << std::endl;
+    std::cout << "\n[ВХОД] Начало цепочки проверок закрытия PyTorch Studio..." << std::endl;
     std::cout.flush();
 
-    // =========================================================================
-    // АВТОНОМНЫЙ ДИНАМИЧЕСКИЙ ПОИСК ВНЕШНЕГО ИНТЕРПРЕТАТОРА PYTHON VENV
-    // =========================================================================
-    QString safeVenvPython = "";
+    // 1. Собираем текущее состояние среды разработки
+    bool hasModifiedFiles = this->isWindowModified();
+    bool isTraining = (trainingProcess && trainingProcess->state() != QProcess::NotRunning);
 
-    if (!currentOpenProjectPath.isEmpty()) {
-        QString projectVenv = currentOpenProjectPath + "/venv/bin/python";
-        if (QFile::exists(projectVenv)) {
-            safeVenvPython = projectVenv;
+    // Если всё чисто, процессы молчат и нет кастомных фоновых задач — выходим мгновенно без диалогов
+    if (!hasModifiedFiles && !isTraining && !this->property("isInstallingPackages").toBool()) {
+        std::cout << "[БЫСТРЫЙ ВЫХОД] Нет активных процессов и изменений. Мгновенное закрытие." << std::endl;
+
+        if (lspProcess) {
+            lspProcess->kill();
+            lspProcess->waitForFinished(500);
         }
+        event->accept();
+        return;
     }
 
-    if (safeVenvPython.isEmpty()) {
-        QString z1Venv = "/home/elf/projects/z1/venv/bin/python";
-        if (QFile::exists(z1Venv)) {
-            safeVenvPython = z1Venv;
+    // 2. Вызываем наше кастомное структурное окно из 5 пунктов
+    AdvancedCloseDialog dialog(hasModifiedFiles, isTraining, this);
+    int result = dialog.exec();
+
+    // 3. Разбираем действия пользователя по нажатым кнопкам
+    switch (result) {
+        case AdvancedCloseDialog::ResultCancel: {
+            std::cout << "[ОТМЕНА] Закрытие отменено пользователем." << std::endl;
+            event->ignore(); // Отменяем событие закрытия, IDE продолжает работать
+            return;
         }
-    }
 
-    if (safeVenvPython.isEmpty()) {
-        safeVenvPython = "/home/elf/pyTorch-Studio/venv/bin/python";
+        case AdvancedCloseDialog::ResultToTray: {
+            std::cout << "[ФОН] Окно скрыто. Процесс обучения переведен в фоновый режим." << std::endl;
+            this->hide();    // Просто прячем главное окно, процессы продолжают жить
+            event->ignore(); // Запрещаем операционной системе уничтожать приложение
+            return;
+        }
+
+        case AdvancedCloseDialog::ResultSaveAndExit: {
+            if (hasModifiedFiles) {
+                std::cout << "[СОХРАНЕНИЕ] Запись изменений во все открытые файлы..." << std::endl;
+                this->saveAllProjectChanges(); // Вызываем ваш метод сохранения
+            }
+            break; // Переходим ниже к финализации процессов
+        }
+
+        case AdvancedCloseDialog::ResultDiscardAndExit: {
+            std::cout << "[СБРОС] Выход без сохранения изменений в коде." << std::endl;
+            break; // Переходим ниже к финализации процессов
+        }
+
+        default:
+            event->ignore();
+            return;
     }
 
     // =========================================================================
-    // СБОРЩИК ПАКЕТОВ: ПИШЕМ СТРОГО В ДИРЕКТОРИЮ ШАБЛОНОВ PROJECTS/Z1
+    // ФИНАЛИЗАЦИЯ И ОСТАНОВКА ПРОЦЕССОВ ПРИ ПОДТВЕРЖДЕННОМ ВЫХОДЕ
     // =========================================================================
-    if (QFile::exists(safeVenvPython))
-    {
-        std::cout << "[ШАГ 2] ИНТЕРПРЕТАТОР НАЙДЕН ПО АВТОНОМНОМУ ПУТИ: " << safeVenvPython.toStdString() << std::endl;
-        std::cout.flush();
 
-        // 1. Указываем базовый каталог исходников программы
-        QString programRootPath = "/home/elf/pyTorch-Studio";
-
-        // 2. ИДЕНТИФИЦИРУЕМ ПРАВИЛЬНЫЙ ЦЕЛЕВОЙ КАТАЛОГ (С добавлением подпапки проекта)
-        QString targetFolder = programRootPath + "/projects/z1";
-        QString requirementsPath = targetFolder + "/requirements.txt";
-
-        QProcess pipProcess;
-
-        // Устанавливаем рабочую папку процесса в целевой каталог z1
-        pipProcess.setWorkingDirectory(targetFolder);
-
-        QStringList args;
-        args << "-m" << "pip" << "freeze";
-
-        // Направляем поток вывода pip freeze строго в /pyTorch-Studio/projects/z1/requirements.txt
-        pipProcess.setStandardOutputFile(requirementsPath);
-
-        std::cout << "[ШАГ 3] ЗАПУСКАЮ PIP PROCESS ДЛЯ ЗАПИСИ В ЦЕЛЕВОЙ ШАБЛОН: " << requirementsPath.toStdString() << std::endl;
-        std::cout.flush();
-
-        pipProcess.start(safeVenvPython, args);
-
-        if (pipProcess.waitForFinished(3000)) {
-            std::cout << "[ШАГ 4 SUCCESS] PIP УСПЕШНО ЗАВЕРШИЛСЯ! Код: " << pipProcess.exitCode() << std::endl;
-            std::cout << "[ФИНАЛ] Проверяю размер обновленного файла на диске: " << QFile(requirementsPath).size() << " байт." << std::endl;
+    // Обработка чекбокса: Сохранение весов модели перед выходом
+    if (isTraining) {
+        if (dialog.shouldSaveWeights()) {
+            std::cout << "[КУЛЬТУРНЫЙ ОСТАНОВ] Отправляем SIGINT для перехвата в train.py и сохранения весов..." << std::endl;
+            // На Linux/Unix отправляем сигнал прерывания вместо жесткого убийства процесса
+            #ifndef Q_OS_WIN
+                pid_t pid = trainingProcess->processId();
+                kill(pid, SIGINT);
+            #else
+                trainingProcess->kill(); // На Windows штатного SIGINT для подпроцессов Qt нет
+            #endif
+            trainingProcess->waitForFinished(3000); // Даем 3 секунды на работу torch.save() внутри вашего Python-скрипта
         } else {
-            std::cout << "[ШАГ 4 СБОЙ] ТАЙМАУТ ПРИ ЗАПИСИ ФАЙЛА ПРОЕКТА Z1!" << std::endl;
+            std::cout << "[ПРИНУДИТЕЛЬНО] Жесткое прерывание обучения (kill)..." << std::endl;
+            trainingProcess->kill();
+            trainingProcess->waitForFinished(1000);
         }
-        std::cout.flush();
-    }
-    else {
-        std::cout << "[КРИТИЧЕСКИЙ СБОЙ] Внешний интерпретатор Python venv не обнаружен на диске Linux!" << std::endl;
-        std::cout.flush();
     }
 
-    // Ваш оригинальный рабочий код вежливого закрытия LSP-сервера Jedi
+    // Обработка чекбокса: Экспорт requirements.txt перед выходом (Ваш оригинальный код)
+    if (dialog.shouldExportRequirements()) {
+        QString safeVenvPython = "";
+        if (!currentOpenProjectPath.isEmpty()) {
+            QString projectVenv = currentOpenProjectPath + "/venv/bin/python";
+            if (QFile::exists(projectVenv)) safeVenvPython = projectVenv;
+        }
+        if (safeVenvPython.isEmpty()) {
+            QString z1Venv = "/home/elf/projects/z1/venv/bin/python";
+            if (QFile::exists(z1Venv)) safeVenvPython = z1Venv;
+        }
+        if (safeVenvPython.isEmpty()) {
+            safeVenvPython = "/home/elf/pyTorch-Studio/venv/bin/python";
+        }
+
+        if (QFile::exists(safeVenvPython)) {
+            std::cout << "[ПАКЕТЫ] Запуск финального pip freeze..." << std::endl;
+            QString programRootPath = "/home/elf/pyTorch-Studio";
+            QString targetFolder = programRootPath + "/projects/z1";
+            QString requirementsPath = targetFolder + "/requirements.txt";
+
+            QProcess pipProcess;
+            pipProcess.setWorkingDirectory(targetFolder);
+            QStringList args;
+            args << "-m" << "pip" << "freeze";
+            pipProcess.setStandardOutputFile(requirementsPath);
+
+            pipProcess.start(safeVenvPython, args);
+            if (pipProcess.waitForFinished(3000)) {
+                std::cout << "[УСПЕХ] Файл requirements.txt успешно зафиксирован. Размер: " << QFile(requirementsPath).size() << " байт." << std::endl;
+            }
+        }
+    }
+
+    // Очистка системных демонов (Ваш оригинальный код вежливого закрытия LSP-сервера Jedi)
     if (lspProcess) {
+        std::cout << "[ОЧИСТКА] Остановка LSP сервера подсказок Jedi..." << std::endl;
         lspProcess->kill();
-        lspProcess->waitForFinished();
+        lspProcess->waitForFinished(500);
     }
 
-    event->accept();
+    std::cout << "[УСПЕХ] PyTorch Studio успешно завершила работу." << std::endl;
+    std::cout.flush();
+
+    event->accept(); // Окончательно закрываем приложение и освобождаем память ОС
 }
 
 void Neuro_programm::close_program()
@@ -5833,6 +6042,7 @@ void Neuro_programm::checkAndCreateVenvAsync(const QString &projectPath, bool is
         if (!existingVenvDir.isEmpty())
         {
             QString chosenPython = existingVenvDir + "/bin/python";
+            saveSettings();
             if (QFile::exists(chosenPython))
             {
                 this->venvPythonBinary = chosenPython;
@@ -6084,20 +6294,11 @@ void Neuro_programm::paintEvent(QPaintEvent *event)
 
     QPainter painter(this);
     // Для теста оставляем красный, потом замените на QColor("#4d5455")
-    QPen pen(QColor("#4d5455"), 1);
+    QPen pen(QColor(0, 0, 0), 1); // Наш черный карандаш толщиной 1px
     painter.setPen(pen);
 
-    int w = this->width();
-    int h = this->height();
-
-    // Рисуем каждую линию индивидуально с защитным сдвигом снизу
-    painter.drawLine(0, 0, w - 1, 0);         // Верхняя линия
-    painter.drawLine(0, 0, 0, h - 1);         // Левая линия
-    painter.drawLine(w - 1, 0, w - 1, h - 1); // Правая линия
-
-    // ЖЕЛЕЗНЫЙ ФИКС ДЛЯ ОКОННОГО РЕЖИМА LINUX:
-    // Поднимаем нижнюю линию на 1 пиксель выше (h - 2), чтобы KWin её не обрезал
-    painter.drawLine(0, h - 2, w - 1, h - 2);
+    // Рисуем прямоугольник строго по внутреннему краю окна
+    painter.drawRect(0, 0, this->width() - 1, this->height() - 1);
 }
 
 void Neuro_programm::changeEvent(QEvent *event)
@@ -6110,10 +6311,6 @@ void Neuro_programm::changeEvent(QEvent *event)
         this->update();
     }
 }
-
-#include <QFileDialog>
-#include <QFile>
-#include <QFileInfo>
 
 void Neuro_programm::saveProjectAs()
 {
@@ -6189,30 +6386,437 @@ void Neuro_programm::saveProjectAs()
     }
 }
 
+void Neuro_programm::onInstallSinglePackageTriggered()
+{
+    // 1. ПРОВЕРКА АКТИВНОГО ПРОЕКТА
+    if (this->currentOpenProjectPath.isEmpty()) {
+        sendSystemNotification("Внимание", "Сначала откройте или создайте ИИ-проект (*.pystudio)"); //
+        return;
+    }
+
+    // Проверяем, существует ли локальный интерпретатор venv
+    QString venvPythonPath = this->currentOpenProjectPath + "/venv/bin/python"; //
+    if (!QFile::exists(venvPythonPath)) {
+        // Если venv не найден, используем глобальный системный Python Arch Linux
+        venvPythonPath = "/usr/bin/python"; //
+    }
+
+    // 2. ВЫЗОВ ДИАЛОГОВОГО ОКНА ДЛЯ ВВОДА ИМЕНИ ПАКЕТА
+    bool ok;
+    QString packageName = QInputDialog::getText(
+        this,
+        "Установка пакета Python",
+        "Введите точное имя библиотеки для pip (например, scipy):",
+        QLineEdit::Normal,
+        "",
+        &ok
+    );
+
+    // Если пользователь нажал "Отмена" или ввёл пустую строку — выходим
+    if (!ok || packageName.trimmed().isEmpty()) return;
+
+    // 3. АВТО-РАСКРЫТИЕ ИНТЕРФЕЙСА НИЖНЕЙ ПАНЕЛИ КОНСОЛИ
+    if (this->panelOther) {
+        this->panelOther->setVisible(true); //
+        this->panelOther->setTerminalPageActive(); // Активируем вкладку Терминала
+    }
+
+    // Синхронизируем кнопки управления статус-бара
+    if (btnTerminal) btnTerminal->setChecked(true); //
+    if (btnAIChat) btnAIChat->setChecked(false); //
+
+    // Раздвигаем центральный сплиттер на фиксированные 250 пикселей под консоль вывода
+    if (mainVerticalSplitter) {
+        mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250})); //
+    }
+
+    // Выводим стартовый маркер начала установки в ваш бинарный терминал
+    this->printToConsole(QString("\n>>> [PIP АВТОМАТИКА] Запуск установки пакета: %1...\n").arg(packageName).toUtf8());
+
+    // 4. ЗАПУСК ФОНОВОГО ПРОЦЕССА УСТАНОВКИ ЧЕРЕЗ QPROCESS
+    QProcess *pipInstallProc = new QProcess(this);
+    pipInstallProc->setWorkingDirectory(this->currentOpenProjectPath); //
+
+    // Настраиваем изолированное окружение без буферизации данных
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment(); //
+    env.insert("PYTHONUNBUFFERED", "1"); //
+    env.insert("PYTHONIOENCODING", "UTF-8"); //
+    pipInstallProc->setProcessEnvironment(env); //
+
+    // Подключаем вывод логов pip напрямую в метод printToConsole
+    connect(pipInstallProc, &QProcess::readyReadStandardOutput, this, [this, pipInstallProc]() {
+        this->printToConsole(pipInstallProc->readAllStandardOutput());
+    });
+    connect(pipInstallProc, &QProcess::readyReadStandardError, this, [this, pipInstallProc]() {
+        this->printToConsole(pipInstallProc->readAllStandardError());
+    });
+
+    // Настраиваем вежливую очистку памяти после завершения работы pip
+    connect(pipInstallProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, packageName, pipInstallProc](int exitCode, QProcess::ExitStatus status) {
+        pipInstallProc->deleteLater(); // Освобождаем оперативную память подпроцесса
+
+        if (exitCode == 0 && status == QProcess::NormalExit) {
+            this->printToConsole(QString("✔ [PIP УСПЕХ] Библиотека %1 успешно добавлена в окружение.\n").arg(packageName).toUtf8());
+            sendSystemNotification("Менеджер пакетов", QString("Пакет %1 успешно установлен").arg(packageName)); //
+        } else {
+            this->printToConsole(QString("❌ [PIP СБОЙ] Ошибка установки пакета %1. Код вылета: %2\n").arg(packageName).arg(exitCode).toUtf8());
+        }
+    });
+
+    // Формируем бинарные аргументы запуска пакетного менеджера
+    QStringList pipArgs;
+    pipArgs << "-m" << "pip" << "install" << packageName.trimmed();
+
+    // Асинхронно стартуем pip, не блокируя работу интерфейса IDE
+    pipInstallProc->start(venvPythonPath, pipArgs); //
+}
+
+void Neuro_programm::install_from_requirements()
+{
+    // 1. ПРОВЕРКА АКТИВНОГО ПРОЕКТА
+    if (this->currentOpenProjectPath.isEmpty()) {
+        sendSystemNotification("Внимание", "Сначала откройте или создайте ИИ-проект (*.pystudio)"); //
+        return;
+    }
+
+    // Вычисляем путь к Python внутри виртуального окружения venv
+    QString venvPythonPath = this->currentOpenProjectPath + "/venv/bin/python"; //
+    if (!QFile::exists(venvPythonPath)) {
+        venvPythonPath = "/usr/bin/python"; // Фоллбэк на глобальный Python, если venv нет
+    }
+
+    // 2. АВТОМАТИЧЕСКИЙ ПОИСК ФАЙЛА REQUIREMENTS В КОРНЕ
+    QString targetReqPath = this->currentOpenProjectPath + "/requirements.txt";
+
+    // Если в корне проекта файла нет — даем пользователю выбрать его вручную через QFileDialog
+    if (!QFile::exists(targetReqPath)) {
+        this->printToConsole("⚠ [PIP] Файл requirements.txt не найден в корне проекта. Открываю проводник...\n");
+        targetReqPath = QFileDialog::getOpenFileName(
+            this,
+            "Выберите файл зависимостей проекта",
+            this->currentOpenProjectPath,
+            "Файлы требований (*.txt);;Все файлы (*)"
+        );
+    }
+
+    // Если пользователь закрыл диалог выбора файла или нажал "Отмена" — выходим
+    if (targetReqPath.isEmpty() || !QFile::exists(targetReqPath)) {
+        this->printToConsole("❌ [PIP] Операция установки отменена пользователем.\n");
+        return;
+    }
+
+    // 3. АВТО-РАСКРЫТИЕ ИНТЕРФЕЙСА КОНСОЛИ
+    if (this->panelOther) {
+        this->panelOther->setVisible(true); //
+        this->panelOther->setTerminalPageActive(); //
+    }
+
+    // Включаем подсветку кнопки в статус-баре
+    if (btnTerminal) btnTerminal->setChecked(true); //
+    if (btnAIChat) btnAIChat->setChecked(false); //
+
+    // Выделяем фиксированные 250 пикселей под вывод консоли
+    if (mainVerticalSplitter) {
+        mainVerticalSplitter->setSizes(QList<int>({this->height() - 250, 250})); //
+    }
+
+    this->printToConsole(QString("\n>>> [PIP АВТОМАТИКА] Считывание манифеста: %1\n").arg(targetReqPath).toUtf8());
+    this->printToConsole(">>> Запуск пакетной установки ИИ-зависимостей PyTorch...\n");
+
+    // 4. ЗАПУСК ФОНОВОГО ПРОЦЕССА PIP
+    QProcess *pipBatchProc = new QProcess(this);
+    pipBatchProc->setWorkingDirectory(this->currentOpenProjectPath); //
+
+    // Настраиваем небуферизированное окружение Linux для tqdm прогресс-баров
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment(); //
+    env.insert("PYTHONUNBUFFERED", "1"); //
+    env.insert("PYTHONIOENCODING", "UTF-8"); //
+    pipBatchProc->setProcessEnvironment(env); //
+
+    // Связываем вывод pip напрямую с вашим TerminalWidget через бинарный метод printToConsole
+    connect(pipBatchProc, &QProcess::readyReadStandardOutput, this, [this, pipBatchProc]() {
+        this->printToConsole(pipBatchProc->readAllStandardOutput());
+    });
+    connect(pipBatchProc, &QProcess::readyReadStandardError, this, [this, pipBatchProc]() {
+        this->printToConsole(pipBatchProc->readAllStandardError());
+    });
+
+    // Обработчик успешного или аварийного завершения установки
+    connect(pipBatchProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, pipBatchProc](int exitCode, QProcess::ExitStatus status) {
+        pipBatchProc->deleteLater(); // Очищаем память
+
+        if (exitCode == 0 && status == QProcess::NormalExit) {
+            this->printToConsole("\n✔ [PIP УСПЕХ] Все пакеты из файла требований успешно развёрнуты.\n");
+            sendSystemNotification("Менеджер окружения", "✔ Зависимости PyTorch успешно обновлены"); //
+        } else {
+            this->printToConsole(QString("\n❌ [PIP СБОЙ] Ошибка при пакетной установке библиотек. Код вылета Linux: %1\n").arg(exitCode).toUtf8());
+        }
+    });
+
+    // Формируем стандартную команду пакетной установки: python -m pip install -r requirements.txt
+    QStringList pipArgs;
+    pipArgs << "-m" << "pip" << "install" << "-r" << targetReqPath;
+
+    // Асинхронно стартуем pip в фоновом режиме, сохраняя отзывчивость интерфейса
+    pipBatchProc->start(venvPythonPath, pipArgs); //
+}
+
+bool Neuro_programm::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
+{
+    // Проверяем, что видеосервер Linux использует протокол X11/XCB (включая XWayland)
+    if (eventType == "xcb_generic_event_t")
+    {
+        // Используем базовый указатель на структуру данных, чтобы не зависеть от приватных библиотек Qt
+        unsigned char *ev = static_cast<unsigned char*>(message);
+
+        // В протоколе XCB тип события всегда хранится в самом первом байте структуры
+        uint8_t responseType = ev[0] & ~0x80;
+
+        // 0x22 — это аппаратный код системного запроса Linux (XCB_GE_GENERIC)
+        if (responseType == 0x22 || responseType == 4) // Перехватываем опрос координат мыши
+        {
+            // Переводим глобальные координаты мыши в локальные координаты окна
+            QPoint localPos = this->mapFromGlobal(QCursor::pos());
+
+            // Если мышка находится в пределах вашей 75-пиксельной шапки
+            if (localPos.y() >= 0 && localPos.y() <= 75)
+            {
+                // Защита: если курсор над кнопками управления или меню, отдаем управление Qt
+                QWidget *child = this->childAt(localPos);
+                if (child && (child->inherits("QPushButton") || child->inherits("QMenuBar") || child->inherits("QComboBox"))) {
+                    return QMainWindow::nativeEvent(eventType, message, result);
+                }
+
+                // МАГИЯ LINUX: Сообщаем оконному менеджеру KWin, что эта зона — Заголовок Окна!
+                // Число 2 — это нативный маркер HTCAPTION.
+                // После этого ОС сама включает и идеальный двойной клик (сжатие/разворачивание), и перетаскивание!
+                *result = 2;
+                return true; // Завершаем обработку, Linux всё сделает за нас
+            }
+        }
+    }
+
+    // Во всех остальных случаях отдаем управление стандартному движку Qt
+    return QMainWindow::nativeEvent(eventType, message, result);
+}
+
+// 1. НАЖАТИЕ МЫШИ И ДВОЙНОЙ ЩЕЛЧОК
+void Neuro_programm::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton)
+    {
+        // Ловим строго ДВОЙНОЙ КЛИК ядра Qt
+        if (event->type() == QEvent::MouseButtonDblClick)
+        {
+            QPoint localPos = event->pos();
+            // Если кликнули в районе верхней шапки приложения
+            if (localPos.y() >= 0 && localPos.y() <= 100)
+            {
+                if (this->isMaximized()) {
+                    this->showNormal();   // Сжимаем в окно
+                } else {
+                    this->showMaximized(); // Разворачиваем во весь экран
+                }
+                event->accept();
+                this->m_isDragging = false; // Страховка от залипания
+                return;
+            }
+        }
+    }
+    QMainWindow::mousePressEvent(event);
+}
 
 
+// 2. ФИЗИЧЕСКОЕ ПЛАВНОЕ ПЕРЕМЕЩЕНИЕ ОКНА
+void Neuro_programm::mouseMoveEvent(QMouseEvent *event)
+{
+    // Если левая кнопка зажата в шапке и мы потащили мышь
+    if (this->m_isDragging && (event->buttons() & Qt::LeftButton))
+    {
+        // Двигаем окно в новые координаты с учетом сохраненной дельты
+        this->move(event->globalPosition().toPoint() - this->m_dragPosition);
+        event->accept();
+        return;
+    }
+    QMainWindow::mouseMoveEvent(event);
+}
 
+// 3. ОТПУСКАНИЕ МЫШИ
+void Neuro_programm::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        this->m_isDragging = false; // Сбрасываем флаг перетаскивания
+    }
+    QMainWindow::mouseReleaseEvent(event);
+}
 
+void Neuro_programm::saveSettings()
+{
+    QSettings settings;
 
+    if (!currentOpenProjectPath.isEmpty())
+    {
+        // Если проект открыт — берем его venv
+        QString currentVenvPath = currentOpenProjectPath + "/venv";
+        settings.setValue("python/venv_path", currentVenvPath);
+    } else {
+        // ЕСЛИ ПРОЕКТ НЕ ОТКРЫТ: Выходим из папки build наружу, в корень программы
+        QDir baseDir(QCoreApplication::applicationDirPath());
 
+        // Обычно папка build лежит на одном уровне с каталогом Projects.
+        // Поднимаемся на 1 или 2 уровня вверх (в зависимости от вашей структуры сборки)
+        baseDir.cdUp(); // вышли из Debug/Release
+        baseDir.cdUp(); // вышли из папки build_... в корень программы
 
+        // Собираем дефолтный путь: корень_программы / Projects / (имя дефолтной папки) / venv
+        // Замените "DefaultProject", если папка по умолчанию называется иначе
+        QString defaultVenvPath = baseDir.absolutePath() + "/Projects/DefaultProject/venv";
 
+        settings.setValue("python/venv_path", defaultVenvPath);
+    }
 
+    settings.setValue("interface/font_size", 10);
+    settings.setValue("interface/dark_theme", true);
 
+    settings.sync();
+}
 
+void Neuro_programm::btnStartDebug_clicked() {
+    // Останавливаем старый процесс отладки, если он был запущен ранее
+    if (debuggedScriptProcess->state() == QProcess::Running) {
+        debuggedScriptProcess->terminate();
+        debuggedScriptProcess->waitForFinished(1000);
+    }
 
+    // 1. Считываем правильные пути к venv и файлу скрипта
+    QSettings settings;
+    QString venvPath = settings.value("python/venv_path", "").toString();
+    QString scriptPath = currentOpenProjectPath + "/test_debug.py"; // Убедитесь, что имя файла совпадает!
 
+#if defined(Q_OS_WIN)
+    QString pythonExec = venvPath + "/Scripts/python.exe";
+#else
+    QString pythonExec = venvPath + "/bin/python";
+#endif
 
+    // Отладочный лог в консоль IDE (для проверки путей)
+    qDebug() << "Исполняемый файл Python:" << pythonExec;
+    qDebug() << "Путь к тестовому скрипту:" << scriptPath;
 
+    // 2. Настраиваем перенаправление вывода (stdout/stderr) в левую консоль
+    disconnect(debuggedScriptProcess, &QProcess::readyReadStandardOutput, nullptr, nullptr);
+    disconnect(debuggedScriptProcess, &QProcess::readyReadStandardError, nullptr, nullptr);
 
+    // В файле neuro_programm.cpp внутри метода кнопки отладки:
 
+    // 1. Настраиваем логи вывода (просто печатаем текст, без ручных проверок строк)
+    connect(debuggedScriptProcess, &QProcess::readyReadStandardOutput, this, [this]() {
+        if (panelOther) {
+            panelOther->appendLogText(QString::fromUtf8(debuggedScriptProcess->readAllStandardOutput()));
+        }
+    });
+    connect(debuggedScriptProcess, &QProcess::readyReadStandardError, this, [this]() {
+        if (panelOther) {
+            panelOther->appendLogText(QString::fromUtf8(debuggedScriptProcess->readAllStandardError()));
+        }
+    });
 
+    // 2. Пишем стартовый лог в дебаг-окно
+    if (panelOther) {
+        panelOther->appendDebugLog("⏳ Скрипт запущен. Ожидание инициализации порта...");
+    }
 
+    // 3. Запускаем процесс
+    QStringList args;
+    args << "-Xfrozen_modules=off" << "-u" << scriptPath;
+    debuggedScriptProcess->start(pythonExec, args);
 
+    // 4. 🔥 СИНХРОНИЗАЦИЯ ПО СИГНАЛУ СТАРТА ПРОЦЕССА:
+    // Отключаем старые коннекты, чтобы не дублировались
+    disconnect(debuggedScriptProcess, &QProcess::started, nullptr, nullptr);
 
+    // Ловим сигнал, когда ОС РЕАЛЬНО запустила интерпретатор (после всех проверок bash)
+    connect(debuggedScriptProcess, &QProcess::started, this, [this]() {
+        // Как только скрипт физически пошел выполняться, даем ему ровно 1.5 секунды
+        // на импорт torch и открытие порта 5678, а затем бьем сокетом со 100% точностью!
+        QTimer::singleShot(1500, this, [this]() {
+            if (panelOther) {
+                panelOther->appendDebugLog("🔌 Подключаем Консоль отладки C++ к Python...");
+                panelOther->connectToDebugger();
+            }
+        });
+    });
 
+}
 
+void Neuro_programm::startTensorBoard(const QString &logDir) {
+    // 1. Создаем объект QProcess как поле класса (чтобы он не удалился при выходе из функции)
+    if (!tensorboardProcess) {
+        tensorboardProcess = new QProcess(this);
+    } else {
+        tensorboardProcess->kill(); // Если сервер уже работал, перезапускаем его
+        tensorboardProcess->waitForFinished();
+    }
 
+    // 2. Настраиваем аргументы запуска
+    // Указываем фиксированный порт, например, 6006, и путь к логам PyTorch
+    QStringList arguments;
+    arguments << "-m" << "tensorboard.main"
+              << "--logdir" << QDir::toNativeSeparators(logDir)
+              << "--port" << "6006";
+
+    // 3. Ловим логи запуска сервера (для отладки в вашей консоли вывода)
+    connect(tensorboardProcess, &QProcess::readyReadStandardOutput, this, [=]() {
+        qDebug() << "TensorBoard Output:" << tensorboardProcess->readAllStandardOutput();
+    });
+
+    connect(tensorboardProcess, &QProcess::readyReadStandardError, this, [=]() {
+        qDebug() << "TensorBoard Error/Status:" << tensorboardProcess->readAllStandardError();
+    });
+
+    // 4. Запускаем процесс через системный интерпретатор Python
+    // (Убедитесь, что в используемом окружении Python установлен пакет tensorboard)
+    tensorboardProcess->start("python", arguments);
+
+    // 5. Даем серверу 1.5–2 секунды на инициализацию, прежде чем загружать страницу
+    QTimer::singleShot(2000, this, [=]() {
+        if (ui->tensorboardWebView) {
+            ui->tensorboardWebView->setUrl(QUrl("http://localhost:6006"));
+        }
+    });
+}
+
+void Neuro_programm::onTorchCacheProcessFinished() {
+    if (!torchCacheProc) return;
+
+    QString confPath = QDir::homePath() + "/.config/PyTorchStudio/IDE.conf";
+    QSettings settings(confPath, QSettings::IniFormat);
+
+    QString out = QString::fromUtf8(torchCacheProc->readAllStandardOutput()).trimmed();
+    QString err = QString::fromUtf8(torchCacheProc->readAllStandardError()).trimmed();
+
+    QString torchVersion;
+
+    if (!out.isEmpty() && !out.contains("Error")) {
+        // ИСПРАВЛЕНО: Зашиваем черный цвет (#000000) для вывода в HTML
+        torchVersion = QString("<span style='color: #000000;'>%1</span>").arg(out);
+    } else if (!err.isEmpty()) {
+        // Ошибки Python выделим темно-красным для контраста
+        torchVersion = QString("<span style='color: #880000;'>Ошибка Python: %1</span>").arg(err.split('\n').constFirst().left(60));
+    } else {
+        torchVersion = "<span style='color: #000000;'>Ошибка: Интерпретатор вернул пустой ответ</span>";
+    }
+
+    // Сохраняем готовую HTML-строку в кэш конфигурации
+    settings.setValue("cache/ai_stack", torchVersion);
+    settings.setValue("cache/ollama_version", cachedOllamaVersion);
+    settings.sync();
+
+    torchCacheProc->deleteLater();
+    torchCacheProc = nullptr;
+}
 
 
 

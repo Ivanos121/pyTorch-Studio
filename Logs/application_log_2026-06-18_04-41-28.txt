@@ -1,0 +1,23 @@
+2026-06-18 04:41:28.526 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:143)
+2026-06-18 04:41:28.663 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-18 04:41:28.663 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-18 04:41:28.834 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1475)
+2026-06-18 04:41:28.834 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-18 04:41:30.910 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:41:39.673 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.405 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.412 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.412 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.419 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.419 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.613 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.613 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.620 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:20.620 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4137)
+2026-06-18 04:42:25.012 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/neuro_programm/neuro/projects/z1/z1.pystudio" (../../../../pyTorch-Studio/neuro_programm.cpp:2945)
+2026-06-18 04:42:51.118 [WARN]  [LSP_INIT] Локальный venv не найден. Временно подменяем системным интерпретатором: "/usr/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3283)
+2026-06-18 04:42:55.424 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../../../../pyTorch-Studio/codeeditor.cpp:1414)
+2026-06-18 04:42:55.426 [WARN]  [LSP_INIT] Локальный venv не найден. Временно подменяем системным интерпретатором: "/usr/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3283)
+2026-06-18 04:42:55.928 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-18 04:42:56.579 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../../../../pyTorch-Studio/codeeditor.cpp:1351)
+2026-06-18 04:42:57.678 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 14 (../../../../pyTorch-Studio/codeeditor.cpp:1635)

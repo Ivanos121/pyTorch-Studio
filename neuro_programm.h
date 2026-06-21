@@ -55,8 +55,15 @@ public:
         QString message;
         QString code;
     };
+    enum PageIndex {
+        PageLogs = 0,         // Обычный текстовый вывод
+        PagePipInstall = 1,   // Консоль установки пакетов
+        PageTensorBoard = 2,  // Графики
+        PagePipTable = 3      // Таблица установленных пакетов (Ваш QTableWidget)
+    };
     static QList<LspErrorData> globalLspErrors;
     QProcess *lspProcess = nullptr;
+    QProcess *tensorboardProcess = nullptr;
 
 
 signals:
@@ -70,6 +77,10 @@ protected:
     void closeEvent(QCloseEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
     void changeEvent(QEvent *event) override;
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
 
 protected slots:
     void new_progect();
@@ -80,6 +91,8 @@ protected slots:
     void open_about_program();
     void close_program();
     void saveProjectAs();
+
+    void btnStartDebug_clicked();
 
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
@@ -103,6 +116,8 @@ private:
     QPushButton *btnStatusAI = nullptr;
     void applyThemeColors(bool isDarkTheme);
     QString getSafeSaveFolderPath();
+    void saveSettings();
+
 
 private slots:
     void onFileDoubleClicked(const QModelIndex &index);
@@ -120,21 +135,24 @@ private slots:
     void onCloseProjectClicked();
     void readLspResponse();
     void showCompletionMenuInGuiThread(const QStringList &completions);
-    //void on_actionOpenSettings_triggered();
     void triggerEditAction();
+    void onInstallSinglePackageTriggered();
+    void install_from_requirements();
+    void onTorchCacheProcessFinished();
 
 private:
     Start_progect *rsc;
     Settings    *rsc2;
     About_program *rsc3;
-    QWidget *rsc4;
-    Panel_other *panelOther;
+    QWidget *rsc4; 
+    panel_other *panelOther;
     QSplitter   *mainVerticalSplitter;
     QPushButton *btnTerminal;
     QPushButton *btnSearch;
     QPushButton *btnLogs;
     QPushButton *btnTogglePip;
     QPushButton *btnAIChat;
+    QPushButton *btnStartDebug;
     QFileSystemModel *projectModel;
     QProcess *trainingProcess;
     QChart      *lossChart;
@@ -162,10 +180,12 @@ private:
     QPushButton *topBtnSettings = nullptr;
     QByteArray m_lspAccumulatedBuffer;
     bool m_dragging = false;
+    bool m_isDragging = false;
     class QSpacerItem *leftPaddingSpacer = nullptr; // Указатель на левый отступ фальш-панели
     void updateWidget3Padding();
     QString currentFilePath;
     QTimer *monitorTimer;
+    QProcess *debuggedScriptProcess;
     void updateTabName();
     void setFileModifiedState(CodeEditor *editor, bool modified);
     bool archiveProject(const QString &sourceDir, const QString &outputSavePath);
@@ -176,5 +196,9 @@ private:
     void checkAndCreateVenvAsync(const QString &projectPath, bool isFreshExtract = false);
     void installPackagesFromRequirements(const QString &workingDir, const QString &pythonPath, const QString &reqPath);
     void printToConsole(const QByteArray &rawBytes);
+    void startTensorBoard(const QString &logDir);
+    void updateAiStackCache();
+    QString cachedOllamaVersion;
+    QProcess *torchCacheProc = nullptr;
 };
 #endif // NEURO_PROGRAMM_H

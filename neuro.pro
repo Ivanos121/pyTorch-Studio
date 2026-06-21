@@ -1,4 +1,4 @@
-QT += widgets dbus network charts webenginewidgets
+QT += widgets dbus network charts webenginewidgets gui
 
 CONFIG += c++17
 
@@ -8,12 +8,14 @@ CONFIG += c++17
 
 SOURCES += \
     about_program.cpp \
+    advancedclosedialog.cpp \
     breezeflatstyle.cpp \
     codeeditor.cpp \
     help_window.cpp \
     main.cpp \
     neuro_programm.cpp \
     panel_other.cpp \
+    replwidget.cpp \
     settings.cpp \
     start_progect.cpp \
     statusbuttonstyle.cpp \
@@ -22,11 +24,13 @@ SOURCES += \
 HEADERS += \
     FolderBlockData.h \
     about_program.h \
+    advancedclosedialog.h \
     breezeflatstyle.h \
     codeeditor.h \
     help_window.h \
     neuro_programm.h \
     panel_other.h \
+    replwidget.h \
     settings.h \
     start_progect.h \
     statusbuttonstyle.h \
@@ -50,3 +54,21 @@ RESOURCES += \
 
 DISTFILES += \
     Data/Icons/pTS.svg
+
+# =========================================================================
+# АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ ВЕРСИИ И БИЛДА (БЕЗ ХАРДКОДА В C++)
+# =========================================================================
+# Маркетинговая версия (меняется вручную только при крупных релизах)
+APP_VERSION_MAJOR = 2026
+APP_VERSION_MINOR = 1
+APP_VERSION_PATCH = LTS
+
+# Номер билда генерируется автоматически по текущей дате Linux (Формат: ГГММДД, например 260621)
+# Утилита date выполнится на уровне ядра Linux в момент сборки
+APP_BUILD_NUMBER = $$system(date +%y%m%d)
+
+# Экранируем и передаем переменные из qmake напрямую в макросы компилятора C++
+DEFINES += APP_VERSION_MAJOR=\\\"$${APP_VERSION_MAJOR}\\\"
+DEFINES += APP_VERSION_MINOR=\\\"$${APP_VERSION_MINOR}\\\"
+DEFINES += APP_VERSION_PATCH=\\\"$${APP_VERSION_PATCH}\\\"
+DEFINES += APP_BUILD_NUMBER=\\\"$${APP_BUILD_NUMBER}\\\"

@@ -1,0 +1,32 @@
+2026-06-20 03:41:13.804 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:143)
+2026-06-20 03:41:14.114 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
+2026-06-20 03:41:14.115 [WARN]  No physical devices
+2026-06-20 03:41:14.577 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-20 03:41:14.578 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-20 03:41:14.831 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1470)
+2026-06-20 03:41:14.831 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-20 03:41:17.184 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.191 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.198 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.198 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.653 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.653 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.796 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.796 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.803 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:17.803 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:19.357 [WARN]  This plugin supports grabbing the mouse only for popup windows
+2026-06-20 03:41:19.536 [WARN]  This plugin supports grabbing the mouse only for popup windows
+2026-06-20 03:41:20.441 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:20.441 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:20.522 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:20.522 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:22.416 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:28.097 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:28.097 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:28.098 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:28.098 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:28.098 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:28.121 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:28.121 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)
+2026-06-20 03:41:28.122 [DEBUG] [DRAG_DEBUG] Движение мыши. Кнопки: QFlags<Qt::MouseButton>(NoButton) Флаг m_isDragging: false (../../../../pyTorch-Studio/neuro_programm.cpp:4147)

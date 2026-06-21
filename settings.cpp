@@ -342,50 +342,50 @@ void Settings::btnApply_clicked()
         if (mainWin) break;
     }
 
+    // ... внутри метода Settings::btnApply_clicked() в settings.cpp ...
     if (mainWin) {
         mainWin->applyGlobalFonts();
+
         if (themeFilePath.contains("dark") || themeFilePath.contains("monokai"))
         {
-            // =========================================================================
-            // ТОТАЛЬНЫЙ ФИКС ВЕРХНЕЙ ПОЛОСЫ ДЛЯ ТЁМНОЙ ТЕМЫ
-            // =========================================================================
-            // Окрашиваем сам QToolBar и его внутреннюю обертку в глубокий тёмный цвет меню (#232629)
-            // И намертво сносим встроенную рамку (border: none), которая давала светлую полосу!
+            // ТОТАЛЬНАЯ ЗАЧИСТКА ВЕРХНЕЙ СЕРОЙ ПОЛОСЫ
             mainWin->setStyleSheet(
-                "QMainWindow {"
-                "   background-color: #232629;"
+                "QMainWindow, QSplitter {"
+                "   background-color: #202225;" /* Базовый темный фон */
                 "   border: 1px solid #4d5455;"
                 "}"
-                "QToolBar#topContainerBar, QToolBar#topContainerBar QWidget {"
-                "   background-color: #232629 !important;" // Цвет один в один как у менюбара!
-                "   border: none !important;"               // Уничтожает разделительную линию Linux
-                "   margin: 0px;"
-                "   padding: 0px;"
-                "   spacing: 0px;"
+                // Насильно красим менюбар и обертку шапки в цвет карточек,
+                // полностью уничтожая серую полосу!
+                "QMenuBar, QWidget#topContainerBar, QWidget#topContainerBar QWidget {"
+                "   background-color: #202225 !important;"
+                "   color: #d4d4d4 !important;" /* Светлый текст для меню */
+                "   border: none !important;"
+                "}"
+                // Элементы меню (Файл, Правка) при наведении мыши
+                "QMenuBar::item:selected {"
+                "   background-color: #3daee9;" /* Синяя подсветка Breeze */
+                "   color: white;"
                 "}"
                 );
         }
         else
         {
-            // Корректный возврат для Светлой темы Breeze
+            // Возврат к стандартной светлой теме Breeze
             mainWin->setStyleSheet(
                 "QMainWindow {"
                 "   background-color: #eff0f1;"
                 "   border: 1px solid #bcbcbc;"
                 "}"
-                "QToolBar#topContainerBar, QToolBar#topContainerBar QWidget {"
+                "QMenuBar, QWidget#topContainerBar, QWidget#topContainerBar QWidget {"
                 "   background-color: #eff0f1;"
+                "   color: #232629;"
                 "   border: none;"
-                "   margin: 0px;"
-                "   padding: 0px;"
-                "   spacing: 0px;"
                 "}"
                 );
         }
-
-        // Принудительно заставляем верхний тулбар пересчитать макет и цвет пикселей
         mainWin->update();
     }
+
 }
 
 void Settings::btnOk_clicked()

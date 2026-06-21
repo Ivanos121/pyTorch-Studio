@@ -1,0 +1,8 @@
+2026-06-18 00:29:51.423 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:143)
+2026-06-18 00:29:51.501 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-18 00:29:51.501 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-18 00:29:51.639 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1454)
+2026-06-18 00:29:51.639 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-18 00:30:16.293 [DEBUG] Успешно загружено тем в комбобокс: 3 (../../../../pyTorch-Studio/settings.cpp:266)
+2026-06-18 00:30:16.295 [DEBUG] [ПРЕВЬЮ] Загрузка темы: "/home/elf/neuro_programm/neuro/build/Desktop-u041eu0442u043bu0430u0434u043au0430/themes/dark_darcula.ini" Фон: "#2b2b2b" (../../../../pyTorch-Studio/settings.cpp:153)
+2026-06-18 00:30:18.935 [DEBUG] [НАСТРОЙКИ] Нажата кнопка Применить. Файл темы: "/home/elf/neuro_programm/neuro/build/desktop-u041eu0442u043bu0430u0434u043au0430/themes/dark_darcula.ini" (../../../../pyTorch-Studio/settings.cpp:286)

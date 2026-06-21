@@ -2,6 +2,7 @@
 #define ABOUT_PROGRAM_H
 
 #include <QDialog>
+#include <QProcess>
 
 namespace Ui {
 class About_program;
@@ -17,8 +18,17 @@ public:
 
 protected slots:
     void close_window();
+
+private slots:
+    void onAiStackCheckFinished();
+    void startAsyncAiStackCheck();
+    void onCopyButtonClicked();
+
 private:
     Ui::About_program *ui;
+    QProcess *aiStackProcess = nullptr;
+    QString gatherOllamaVersion() const;
+    QString gatherAiStackInfo() const;
 };
 
 #endif // ABOUT_PROGRAM_H
