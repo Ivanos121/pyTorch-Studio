@@ -30,58 +30,177 @@
     <property name="spacing">
      <number>0</number>
     </property>
-    <item row="2" column="0">
-     <widget class="QListWidget" name="quickActionsList">
+    <item row="1" column="0" colspan="2">
+     <widget class="QWidget" name="widget_3" native="true">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
       <property name="minimumSize">
        <size>
-        <width>250</width>
-        <height>0</height>
+        <width>25</width>
+        <height>29</height>
        </size>
       </property>
       <property name="maximumSize">
        <size>
-        <width>250</width>
-        <height>16777215</height>
+        <width>16777215</width>
+        <height>29</height>
        </size>
       </property>
       <property name="styleSheet">
-       <string notr="true">QListWidget#quickActionsList {
-    background-color: #f8f9fa;
-    border: 1px solid #cbd5e1;
-    border-radius: 6px;
-    color: #333333;
-    padding: 5px;
+       <string notr="true"/>
+      </property>
+      <layout class="QHBoxLayout" name="horizontalLayout">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QComboBox" name="fileComboBox">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>90</width>
+           <height>0</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btnCloseFile">
+         <property name="maximumSize">
+          <size>
+           <width>29</width>
+           <height>29</height>
+          </size>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">QPushButton {
+    border: none;                  /* Полностью убираем рамку */
+    background-color: transparent; /* Делаем фон прозрачным */
+    color: #1a1a1a;                /* Цвет текста (темно-серый) */
+    padding: 5px 12px;             /* Свободные внутренние отступы */
+    font-family: &quot;Monospace&quot;;
+    font-size: 13px;
+    border-radius: 2px;            /* Едва заметное строгое скругление */
 }
-QListWidget#quickActionsList::item {
-    padding: 8px 12px;
-    border-bottom: 1px solid #e2e8f0;
+QPushButton {
+    /* solid означает сплошную линию, 1px — толщину, #b0b0b0 — серый цвет рамки */
+    border: 1px solid #b0b0b0;    
+    background-color: #ffffff;    /* Белый фон внутри кнопки */
+    color: #1a1a1a;
+    padding: 5px 12px;
+    border-radius: 2px;           /* Минимальное строгое скругление углов */
 }
-QListWidget#quickActionsList::item:hover {
-    background-color: #eaedf1;
-    border-radius: 4px;
+
+/* При наведении мыши рамка красиво подсвечивается синим цветом Breeze */
+QPushButton:hover {
+    border: 1px solid #3daee9;    /* Синий цвет рамки при наведении */
+    background-color: #f7fcfe;    /* Едва заметный синеватый фон */
 }
-QListWidget#quickActionsList::item:selected {
-    background-color: #0056b3;
-    color: white;
-    border-radius: 4px;
+
+/* При нажатии рамка и фон становятся более насыщенными */
+QPushButton:pressed {
+    border: 1px solid #1b75a6;
+    background-color: #cce4f7;
+    color: #0056b3;
+}
+
+/* Эффект при наведении мыши (Hover) */
+QPushButton:hover {
+    background-color: #e0e0e0;     /* Светло-серый аккуратный фон */
+}
+
+/* Эффект при физическом клике (Pressed) */
+QPushButton:pressed {
+    background-color: #cce4f7;     /* Нежно-синяя подсветка нажатия */
+    color: #0056b3;                /* Текст становится синим */
+}
+
+/* Если кнопка заблокирована (Disabled) */
+QPushButton:disabled {
+    color: #aaaaaa;                /* Серый блеклый текст */
+    background-color: transparent;
 }
 </string>
+         </property>
+         <property name="text">
+          <string/>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QComboBox" name="comboDevice">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>90</width>
+           <height>0</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="horizontalSpacer">
+         <property name="orientation">
+          <enum>Qt::Orientation::Horizontal</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>40</width>
+           <height>20</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item row="4" column="1">
+     <widget class="panel_other" name="panelOther" native="true">
+      <property name="maximumSize">
+       <size>
+        <width>16777215</width>
+        <height>0</height>
+       </size>
       </property>
-      <item>
-       <property name="text">
-        <string>📝 Документировать код</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>🔍 Найти баги</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>🚀 Оптимизировать код</string>
-       </property>
-      </item>
+     </widget>
+    </item>
+    <item row="0" column="0" colspan="2">
+     <widget class="QWidget" name="customTitleBarPanel" native="true">
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
+        <height>30</height>
+       </size>
+      </property>
+      <property name="mouseTracking">
+       <bool>false</bool>
+      </property>
      </widget>
     </item>
     <item row="2" column="1">
@@ -599,178 +718,62 @@ QTextEdit#inputChatText:focus {
       </widget>
      </widget>
     </item>
-    <item row="3" column="1">
-     <widget class="panel_other" name="panelOther" native="true">
-      <property name="maximumSize">
+    <item row="2" column="0">
+     <widget class="QListWidget" name="quickActionsList">
+      <property name="minimumSize">
        <size>
-        <width>16777215</width>
+        <width>250</width>
         <height>0</height>
        </size>
       </property>
-     </widget>
-    </item>
-    <item row="1" column="0" colspan="2">
-     <widget class="QWidget" name="widget_3" native="true">
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-        <horstretch>0</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
-      <property name="minimumSize">
-       <size>
-        <width>25</width>
-        <height>29</height>
-       </size>
-      </property>
       <property name="maximumSize">
        <size>
-        <width>16777215</width>
-        <height>29</height>
+        <width>250</width>
+        <height>16777215</height>
        </size>
       </property>
       <property name="styleSheet">
-       <string notr="true"/>
-      </property>
-      <layout class="QHBoxLayout" name="horizontalLayout">
-       <property name="spacing">
-        <number>0</number>
-       </property>
-       <property name="leftMargin">
-        <number>0</number>
-       </property>
-       <property name="topMargin">
-        <number>0</number>
-       </property>
-       <property name="rightMargin">
-        <number>0</number>
-       </property>
-       <property name="bottomMargin">
-        <number>0</number>
-       </property>
-       <item>
-        <widget class="QComboBox" name="fileComboBox">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="minimumSize">
-          <size>
-           <width>90</width>
-           <height>0</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="btnCloseFile">
-         <property name="maximumSize">
-          <size>
-           <width>29</width>
-           <height>29</height>
-          </size>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">QPushButton {
-    border: none;                  /* Полностью убираем рамку */
-    background-color: transparent; /* Делаем фон прозрачным */
-    color: #1a1a1a;                /* Цвет текста (темно-серый) */
-    padding: 5px 12px;             /* Свободные внутренние отступы */
-    font-family: &quot;Monospace&quot;;
-    font-size: 13px;
-    border-radius: 2px;            /* Едва заметное строгое скругление */
+       <string notr="true">QListWidget#quickActionsList {
+    background-color: #f8f9fa;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #333333;
+    padding: 5px;
 }
-QPushButton {
-    /* solid означает сплошную линию, 1px — толщину, #b0b0b0 — серый цвет рамки */
-    border: 1px solid #b0b0b0;    
-    background-color: #ffffff;    /* Белый фон внутри кнопки */
-    color: #1a1a1a;
-    padding: 5px 12px;
-    border-radius: 2px;           /* Минимальное строгое скругление углов */
+QListWidget#quickActionsList::item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #e2e8f0;
 }
-
-/* При наведении мыши рамка красиво подсвечивается синим цветом Breeze */
-QPushButton:hover {
-    border: 1px solid #3daee9;    /* Синий цвет рамки при наведении */
-    background-color: #f7fcfe;    /* Едва заметный синеватый фон */
+QListWidget#quickActionsList::item:hover {
+    background-color: #eaedf1;
+    border-radius: 4px;
 }
-
-/* При нажатии рамка и фон становятся более насыщенными */
-QPushButton:pressed {
-    border: 1px solid #1b75a6;
-    background-color: #cce4f7;
-    color: #0056b3;
-}
-
-/* Эффект при наведении мыши (Hover) */
-QPushButton:hover {
-    background-color: #e0e0e0;     /* Светло-серый аккуратный фон */
-}
-
-/* Эффект при физическом клике (Pressed) */
-QPushButton:pressed {
-    background-color: #cce4f7;     /* Нежно-синяя подсветка нажатия */
-    color: #0056b3;                /* Текст становится синим */
-}
-
-/* Если кнопка заблокирована (Disabled) */
-QPushButton:disabled {
-    color: #aaaaaa;                /* Серый блеклый текст */
-    background-color: transparent;
+QListWidget#quickActionsList::item:selected {
+    background-color: #0056b3;
+    color: white;
+    border-radius: 4px;
 }
 </string>
-         </property>
-         <property name="text">
-          <string/>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QComboBox" name="comboDevice">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="minimumSize">
-          <size>
-           <width>90</width>
-           <height>0</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <spacer name="horizontalSpacer">
-         <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>40</width>
-           <height>20</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-      </layout>
+      </property>
+      <item>
+       <property name="text">
+        <string>📝 Документировать код</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>🔍 Найти баги</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>🚀 Оптимизировать код</string>
+       </property>
+      </item>
      </widget>
     </item>
-    <item row="0" column="0" colspan="2">
-     <widget class="QWidget" name="customTitleBarPanel" native="true">
-      <property name="minimumSize">
-       <size>
-        <width>0</width>
-        <height>30</height>
-       </size>
-      </property>
-      <property name="mouseTracking">
-       <bool>false</bool>
-      </property>
-     </widget>
+    <item row="3" column="1">
+     <widget class="Search" name="search_panel" native="true"/>
     </item>
    </layout>
   </widget>
@@ -977,6 +980,12 @@ QPushButton:disabled {
    <class>QChartView</class>
    <extends>QGraphicsView</extends>
    <header>qchartview.h</header>
+  </customwidget>
+  <customwidget>
+   <class>Search</class>
+   <extends>QWidget</extends>
+   <header>search.h</header>
+   <container>1</container>
   </customwidget>
  </customwidgets>
  <resources/>

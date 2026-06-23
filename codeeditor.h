@@ -135,6 +135,11 @@ private slots:
     void sendLspDidChange();
     void applySelectionsFromLsp(const QList<QTextEdit::ExtraSelection> &selections);
     void matchBrackets();
+    void showEditorContextMenu(const QPoint &pos);
+    void onToggleCommentRequested();
+    void onAutoIndentRequested();
+    void onRunCurrentFileRequested();
+    void onCheckSyntaxRequested();
 
 private:
     QWidget *lineNumberArea;

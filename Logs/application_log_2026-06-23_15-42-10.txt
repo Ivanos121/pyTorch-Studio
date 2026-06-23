@@ -1,0 +1,38 @@
+2026-06-23 15:42:10.011 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:151)
+2026-06-23 15:42:10.587 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
+2026-06-23 15:42:10.587 [WARN]  No physical devices
+2026-06-23 15:42:11.362 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-23 15:42:11.362 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-23 15:42:11.581 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1462)
+2026-06-23 15:42:11.581 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-23 15:42:18.520 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/zz1/z1/z1.pystudio" (../../../../pyTorch-Studio/neuro_programm.cpp:2988)
+2026-06-23 15:42:20.561 [WARN]  QProcess: Destroyed while process ("nvidia-smi") is still running.
+2026-06-23 15:42:23.544 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/zz1/z1/venv/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3313)
+2026-06-23 15:42:26.051 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../../../../pyTorch-Studio/codeeditor.cpp:1419)
+2026-06-23 15:42:26.054 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/zz1/z1/venv/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3313)
+2026-06-23 15:42:26.725 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-23 15:42:27.343 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../../../../pyTorch-Studio/codeeditor.cpp:1356)
+2026-06-23 15:43:24.037 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../../../../pyTorch-Studio/codeeditor.cpp:1419)
+2026-06-23 15:43:24.039 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/zz1/z1/venv/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3313)
+2026-06-23 15:43:25.144 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 3 (../../../../pyTorch-Studio/codeeditor.cpp:1356)
+2026-06-23 15:43:38.243 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../../../../pyTorch-Studio/codeeditor.cpp:1356)
+2026-06-23 15:43:48.043 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 3 (../../../../pyTorch-Studio/codeeditor.cpp:1356)
+2026-06-23 15:43:56.486 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 4 (../../../../pyTorch-Studio/codeeditor.cpp:1356)
+2026-06-23 15:44:03.450 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 5 (../../../../pyTorch-Studio/codeeditor.cpp:1356)
+2026-06-23 15:44:07.992 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:08.829 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:08.918 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.095 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.268 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.289 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.320 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.342 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.372 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.393 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.422 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.452 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.473 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.540 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.562 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.592 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-23 15:44:09.636 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 23 (../../../../pyTorch-Studio/codeeditor.cpp:1640)

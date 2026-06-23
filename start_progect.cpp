@@ -1,5 +1,7 @@
 #include "start_progect.h"
 #include "ui_start_progect.h"
+#include "neuro_programm.h"
+
 #include <QFileDialog>
 #include <QDir>
 #include <QFile>
@@ -7,12 +9,21 @@
 #include <QRegularExpression>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
+#include <QSettings>
 
 Start_progect::Start_progect(QWidget *parent)
     : QDialog(parent)
     , ui(new Ui::Start_progect)
 {
     ui->setupUi(this);
+    // Инициализируем наш классовый указатель напрямую через parent
+    mainWin = qobject_cast<Neuro_programm*>(parent);
+
+    // Если по какой-то причине parent не Neuro_programm, подстрахуемся через wf (чуть позже при exec)
+    if (!mainWin && wf) {
+        mainWin = qobject_cast<Neuro_programm*>(wf);
+    }
 
     // --- 1. СТАРТОВАЯ ИНИЦИАЛИЗАЦИЯ ИНТЕРФЕЙСА ---
     ui->stackedWidget->setCurrentIndex(0);
@@ -55,7 +66,9 @@ Start_progect::Start_progect(QWidget *parent)
     ui->rbExistingVenv->setAutoExclusive(true);
 
     ui->dir_folder_venve->setEnabled(false);
+    ui->dir_folder_venve2->setEnabled(false);
     ui->btn_dyr->setEnabled(false);
+    ui->btn_dyr2->setEnabled(false);
 
     // Сброс нижней группы (Выборочная установка PyTorch)
     ui->rbCpuVersion->setAutoExclusive(false);
@@ -84,6 +97,7 @@ Start_progect::Start_progect(QWidget *parent)
     connect(ui->btnBack, &QPushButton::clicked, this, &Start_progect::onBackClicked);
     connect(ui->btnexit, &QPushButton::clicked, this, &Start_progect::onexitlicked);
     connect(ui->btn_dyr, &QPushButton::clicked, this, &Start_progect::open_dyr);
+    connect(ui->btn_dyr2, &QPushButton::clicked, this, &Start_progect::open_dyr);
     connect(ui->btn_dyr_folder, &QPushButton::clicked, this, &Start_progect::open_dyr);
     connect(ui->btnNext, &QPushButton::clicked, this, &Start_progect::create_progect);
 
@@ -91,6 +105,7 @@ Start_progect::Start_progect(QWidget *parent)
     connect(ui->name_progect, &QLineEdit::textChanged, this, &Start_progect::validateFields);
     connect(ui->dir_root_folder, &QLineEdit::textChanged, this, &Start_progect::validateFields);
     connect(ui->dir_folder_venve, &QLineEdit::textChanged, this, &Start_progect::validateFields);
+    connect(ui->dir_folder_venve2, &QLineEdit::textChanged, this, &Start_progect::validateFields);
     connect(ui->dyr_dataset, &QLineEdit::textChanged, this, &Start_progect::validateFields);
 
     // Валидация по физическому клику на любую из четырех радиокнопок
@@ -127,6 +142,7 @@ Start_progect::Start_progect(QWidget *parent)
         ui->rbCreateVenv->setAutoExclusive(true);
         ui->rbExistingVenv->setAutoExclusive(true);
     });
+
     connect(ui->rbCudaVersion, &QRadioButton::clicked, this, [this]() {
         ui->rbCreateVenv->setAutoExclusive(false);
         ui->rbExistingVenv->setAutoExclusive(false);
@@ -140,6 +156,12 @@ Start_progect::Start_progect(QWidget *parent)
     connect(ui->rbExistingVenv, &QRadioButton::toggled, this, [this](bool checked) {
         ui->dir_folder_venve->setEnabled(checked);
         ui->btn_dyr->setEnabled(checked);
+    });
+
+    // Управление доступностью поля lineEdit при переключении верхних кнопок
+    connect(ui->rbCreateVenv, &QRadioButton::toggled, this, [this](bool checked) {
+        ui->dir_folder_venve2->setEnabled(checked);
+        ui->btn_dyr2->setEnabled(checked);
     });
 
     // Пересчет кнопки при смене страниц мастера
@@ -206,6 +228,8 @@ void Start_progect::onexitlicked()
 void Start_progect::open_dyr()
 {
     int currentIndex = ui->stackedWidget->currentIndex();
+    QObject *senderButton = sender(); // Получаем указатель на нажатую кнопку
+
     QString selectedPath = QFileDialog::getExistingDirectory(
         this,
         "Выберите директорию",
@@ -215,11 +239,21 @@ void Start_progect::open_dyr()
 
     if (selectedPath.isEmpty()) return;
 
-    if (currentIndex == 0)      ui->dir_root_folder->setText(selectedPath);
-    else if (currentIndex == 1) ui->dir_folder_venve->setText(selectedPath);
-    else if (currentIndex == 2) ui->dyr_dataset->setText(selectedPath);
+    if (currentIndex == 0) {
+        ui->dir_root_folder->setText(selectedPath);
+    }
+    else if (currentIndex == 1) {
+        // Умное разделение полей Шага 2 на основе физического клика по кнопке
+        if (senderButton == ui->btn_dyr2) {
+            ui->dir_folder_venve2->setText(selectedPath);
+        } else {
+            ui->dir_folder_venve->setText(selectedPath);
+        }
+    }
+    else if (currentIndex == 2) {
+        ui->dyr_dataset->setText(selectedPath); // Исправлено: пишем строго в поле датасета!
+    }
 
-    // ВАЖНО: После записи пути принудительно запускаем пересчет кнопки!
     validateFields();
 }
 
@@ -229,20 +263,18 @@ void Start_progect::create_progect()
     int pageCount = ui->stackedWidget->count();
 
     // =========================================================================
-    // СЦЕНАРИЙ А: Мы на ПОСЛЕДНЕЙ странице (индекс 2) — ФИНАЛЬНЫЙ КЛИК "Создать проект"
+    // СЦЕНАРИЙ А: Мы на ПОСЛЕДНЕЙ странице (Шаг 3) — КЛИК "Создать проект"
     // =========================================================================
     if (currentIndex == pageCount - 1)
     {
         QString projRoot = ui->dir_root_folder->text().trimmed();
         QString projName = ui->name_progect->text().trimmed();
         if (projName.isEmpty()) projName = "New_PyTorch_Project";
-
         QString fullProjectPath = projRoot + "/" + projName;
-        QDir dir;
 
-        // 1. Физически разворачиваем структуру ИИ-папок на жестком диске Arch Linux
-        if (dir.mkpath(fullProjectPath + "/datasets/train") &&
-            dir.mkpath(fullProjectPath + "/datasets/val") &&
+        QDir dir; //
+        // 1. Физически разворачиваем базовую структуру ИИ-папок
+        if (dir.mkpath(fullProjectPath + "/datasets") &&
             dir.mkpath(fullProjectPath + "/models") &&
             dir.mkpath(fullProjectPath + "/weights"))
         {
@@ -261,101 +293,148 @@ void Start_progect::create_progect()
             }
 
             // =========================================================================
-            // 2. ДИНАМИЧЕСКАЯ СБОРКА REQUIREMENTS.TXT НА ОСНОВЕ ВАШИХ РАДИОБАТТОНОВ
+            // ДИНАМИЧЕСКАЯ СБОРКА REQUIREMENTS.TXT НА ОСНОВЕ АВТООПРЕДЕЛЕНИЯ ЖЕЛЕЗА (Шаг 2)
             // =========================================================================
             QFile reqFile(fullProjectPath + "/requirements.txt");
             if (reqFile.open(QIODevice::WriteOnly | QIODevice::Text))
             {
                 QTextStream out(&reqFile);
-
-                // ВАРИАНТ 1: Выбран радиобаттон облегченной CPU-версии
                 if (ui->rbCpuVersion->isChecked())
                 {
-                    // ИСПРАВЛЕНИЕ: Используем официальноеwhl-зеркало CPU-сборок PyTorch
+                    // Профиль CPU: используем облегченное официальное whl-зеркало
                     out << "--index-url https://pytorch.org\n";
-
                     out << "torch\n";
                     out << "torchvision\n";
                     out << "torchaudio\n";
                 }
-                // ВАРИАНТ 2: Выбран радиобаттон полной CUDA-версии (или остальные варианты)
                 else
                 {
-                    // Для CUDA/GPU-сборок в Arch Linux пишем стандартный набор.
+                    // Профиль GPU / CUDA / Автовыбор: стандартная сборка под Arch Linux / Windows
                     out << "torch\n";
                     out << "torchvision\n";
                     out << "torchaudio\n";
                 }
-
                 reqFile.close();
             }
 
             // =========================================================================
-            // 3. НОВОЕ: ГЕНЕРАЦИЯ КОНТРОЛЬНОГО ФАЙЛА ПРОЕКТА (*.pystudio) В JSON
+            // РЕАЛИЗАЦИЯ ШАГА 3: РЕЖИМ ИМПОРТА ДАТАСЕТА (Copy или Symlink)
             // =========================================================================
-            QFile configFile(fullProjectPath + "/" + projName + ".pystudio");
-            if (configFile.open(QIODevice::WriteOnly | QIODevice::Text))
+            QString sourceDataset = ui->dyr_dataset->text().trimmed();
+            QString targetDatasetDir = fullProjectPath + "/datasets/source_data";
+            QString importMode = "None";
+
+            if (ui->rbDatasetPath->isChecked() && !sourceDataset.isEmpty() &&
+                QDir(sourceDataset).exists()) //
             {
-                QJsonObject configObject;
-
-                // Записываем базовые метаданные создаваемого ИИ-проекта
-                configObject["project_name"] = projName;
-                configObject["architecture"] = ui->rbCpuVersion->isChecked() ? "CPU" : "CUDA";
-                configObject["dataset_path"] = ui->dyr_dataset->text().trimmed();
-
-                // Бронируем дефолтные гиперпараметры под будущую центральную панель обучения
-                configObject["epochs"] = 10;
-                configObject["batch_size"] = 32;
-                configObject["learning_rate"] = 0.001;
-                configObject["device"] = ui->rbCpuVersion->isChecked() ? "cpu" : "cuda:0";
-
-                // Упаковываем JSON-документ со стандартными отступами для красивого сохранения
-                QJsonDocument jsonDoc(configObject);
-                configFile.write(jsonDoc.toJson(QJsonDocument::Indented));
-                configFile.close();
+                // ВАРИАНТ 1: Физическое копирование (Copy)
+                if (ui->rbDatasetOption1->isChecked()) //
+                {
+                    importMode = "Copy"; //
+                    if (mainWin && mainWin->panelOther) //
+                    {
+                        mainWin->panelOther->appendLogText(" Запуск фонового копирования файлов датасета..."); //
+                    }
+#if defined(Q_OS_WIN) //
+                    QProcess::startDetached("xcopy", QStringList() << sourceDataset << targetDatasetDir << "/E" << "/I" << "/Y"); //
+#else //
+                    QProcess::startDetached("cp", QStringList() << "-r" << sourceDataset << targetDatasetDir); //
+#endif //
+                }
+                // ВАРИАНТ 2: Символическая ссылка (Symlink) — мгновенно и без затрат памяти
+                else if (ui->rbDatasetOption2->isChecked()) //
+                {
+                    importMode = "Symlink"; //
+                    bool linkSuccess = QFile::link(sourceDataset, targetDatasetDir); //
+                    if (linkSuccess) { //
+                        if (mainWin && mainWin->panelOther) { //
+                            mainWin->panelOther->appendLogText(" Мгновенно создан Symlink-указатель на оригинальный датасет."); //
+                        }
+                    } else { //
+                        if (mainWin && mainWin->panelOther) { //
+                            mainWin->panelOther->appendLogText(" Ошибка создания символической ссылки. Переключение в режим прямой адресации."); //
+                        }
+                        targetDatasetDir = sourceDataset; //
+                    }
+                }
             }
 
-            // Закрываем модальное окно и передаем управление в главное окно Neuro_programm
-            this->accept();
+            // =========================================================================
+            // ВЫЧИСЛЕНИЕ АКТИВНОГО ПУТИ VENV (Новая логика двух полей)
+            // =========================================================================
+            QString chosenVenvPath = ui->rbCreateVenv->isChecked() ?
+                                         ui->dir_folder_venve2->text().trimmed() :
+                                         ui->dir_folder_venve->text().trimmed();
+
+            // =========================================================================
+            // ГЕНЕРАЦИЯ КОНТРОЛЬНОГО ФАЙЛА ПРОЕКТА (*.pystudio) В JSON
+            // =========================================================================
+            QFile configFile(fullProjectPath + "/" + projName + ".pystudio"); //
+            if (configFile.open(QIODevice::WriteOnly | QIODevice::Text)) //
+            {
+                QJsonObject configObject; //
+                configObject["project_name"] = projName; //
+
+                // Конфигурация Шага 2 (Железо и вычисленный кастомный venv)
+                configObject["architecture"] = ui->rbCpuVersion->isChecked() ? "CPU" : "CUDA"; //
+                configObject["device"] = ui->rbCpuVersion->isChecked() ? "cpu" : "cuda:0"; //
+                configObject["custom_venv_path"] = chosenVenvPath; // Исправлено: пишем актуальный путь
+
+                // Конфигурация Шага 3 (Структура данных)
+                configObject["dataset_source_path"] = sourceDataset; //
+                configObject["dataset_import_mode"] = importMode; //
+                configObject["dataset_internal_path"] = targetDatasetDir; //
+
+                // Базовые дефолты для будущей панели обучения PyTorch
+                configObject["epochs"] = 10; //
+                configObject["batch_size"] = 32; //
+                configObject["learning_rate"] = 0.001; //
+
+                QJsonDocument jsonDoc(configObject); //
+                configFile.write(jsonDoc.toJson(QJsonDocument::Indented)); //
+                configFile.close(); //
+            }
+
+            // Сохраняем путь к venv в QSettings приложения как глобальный,
+            // чтобы open_project() подхватил его автоматически при следующем старте
+            QSettings settings("PyTorchStudio", "IDE"); //
+            settings.setValue("python/global_venv_path", chosenVenvPath); // Исправлено: пишем актуальный путь
+
+            this->accept(); // Закрываем мастер, возвращаем QDialog::Accepted
         }
-        return;
+        else { //
+            if (mainWin && mainWin->panelOther) { //
+                mainWin->panelOther->appendLogText(" Ошибка: Не удалось создать директорию проекта на диске."); //
+            }
+        }
+        return; //
     }
 
     // =========================================================================
     // СЦЕНАРИЙ Б: Промежуточные шаги (0 или 1) — КНОПКА РАБОТАЕТ КАК "Далее"
     // =========================================================================
     ui->btnBack->setVisible(true);
-
     QListWidgetItem *currentItem = ui->listWidget->item(currentIndex);
     if (currentItem) {
-        if (currentIndex == 0)      currentItem->setText("  Размещение");
-        else if (currentIndex == 1) currentItem->setText("  Конфигурация");
-
+        if (currentIndex == 0) currentItem->setText(" Размещение");
+        else if (currentIndex == 1) currentItem->setText(" Конфигурация");
         QFont normalFont = currentItem->font();
         normalFont.setBold(false);
         currentItem->setFont(normalFont);
     }
 
     int nextIndex = currentIndex + 1;
-
     QListWidgetItem *nextItem = ui->listWidget->item(nextIndex);
-    if (nextItem) {
-        if (nextIndex == 1)      nextItem->setText("> Конфигурация");
-        else if (nextIndex == 2) nextItem->setText("> Структура данных");
-
+    if (nextItem) { //
+        if (nextIndex == 1) nextItem->setText("> Конфигурация");
+        else if (nextIndex == 2)
+            nextItem->setText("> Структура данных");
         QFont boldFont = nextItem->font();
         boldFont.setBold(true);
         nextItem->setFont(boldFont);
-    }
-
-    ui->stackedWidget->setCurrentIndex(nextIndex);
+    }ui->stackedWidget->setCurrentIndex(nextIndex);
     ui->listWidget->clearSelection();
-
-    if (nextIndex == pageCount - 1) {
-        ui->btnNext->setText("Создать проект");
-    }
 }
-
 
 QString Start_progect::getProjectName() const
 {
@@ -391,22 +470,21 @@ void Start_progect::validateFields()
 
     case 1: // ШАГ 2: Конфигурация venv и архитектуры PyTorch
     {
-        // Вариант 1: Полная автоустановка venv
+        bool isFolderSectionValid = false;
+
         if (ui->rbCreateVenv->isChecked()) {
-            isValid = true;
+            // Проверяем поле создания новой папки
+            isFolderSectionValid = !ui->dir_folder_venve2->text().trimmed().isEmpty();
         }
-        // Вариант 2: Существующий venv (требует заполненный путь)
         else if (ui->rbExistingVenv->isChecked()) {
-            isValid = !ui->dir_folder_venve->text().trimmed().isEmpty();
+            // Проверяем поле существующей папки
+            isFolderSectionValid = !ui->dir_folder_venve->text().trimmed().isEmpty();
         }
-        // Вариант 3: Выборочная CPU-установка
-        else if (ui->rbCpuVersion->isChecked()) {
-            isValid = true;
-        }
-        // Вариант 4: Выборочная CUDA-установка
-        else if (ui->rbCudaVersion->isChecked()) {
-            isValid = true;
-        }
+
+        // Проверяем нижнюю группу (Выбор архитектуры сборки)
+        bool isArchitectureSectionValid = ui->rbCpuVersion->isChecked() || ui->rbCudaVersion->isChecked();
+
+        isValid = isFolderSectionValid && isArchitectureSectionValid;
         break;
     }
 

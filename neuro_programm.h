@@ -1,5 +1,13 @@
 #ifndef NEURO_PROGRAMM_H
 #define NEURO_PROGRAMM_H
+#include "settings.h"
+#include "statusbuttonstyle.h"
+#include "aiprojectmodel.h"
+#include "about_program.h"
+#include "projectrootproxymodel.h"
+#include "start_progect.h"
+#include "panel_other.h"
+#include "search.h"
 
 #include <QMainWindow>
 #include <QCompleter>
@@ -10,13 +18,7 @@
 #include <QNetworkAccessManager>
 #include <QSplitter>
 #include <QStringListModel>
-#include "start_progect.h"
-#include "panel_other.h"
 #include <QTcpSocket>
-#include "settings.h"
-#include "statusbuttonstyle.h"
-
-#include "about_program.h"
 #include <QIODevice>
 #include <QtCharts/QChartView>
 #include <QtCharts/QChart>
@@ -39,6 +41,9 @@ public:
     void sync();
     void open_project(const QString &path = "");
     void forceOpenConsoleWithError(const QString &errorMessage);
+    void processEnvironmentAndSync(const QString &projectPath, const QString &architecture = "AUTO");
+    QString calculateFileMd5(const QString &filePath);
+    void syncVenvToRequirements();
     static Neuro_programm* self;
     QString getCurrentOpenFilePath() const;
     void sendLspRequest(const QString &method, const QJsonObject &params, int id = 0);
@@ -64,6 +69,8 @@ public:
     static QList<LspErrorData> globalLspErrors;
     QProcess *lspProcess = nullptr;
     QProcess *tensorboardProcess = nullptr;
+    panel_other *panelOther;
+
 
 
 signals:
@@ -91,8 +98,10 @@ protected slots:
     void open_about_program();
     void close_program();
     void saveProjectAs();
-
     void btnStartDebug_clicked();
+    void onFindNext();
+    void onFindPrev();
+    void onSelectAll();
 
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
@@ -139,13 +148,27 @@ private slots:
     void onInstallSinglePackageTriggered();
     void install_from_requirements();
     void onTorchCacheProcessFinished();
+    void showTreeViewContextMenu(const QPoint &pos);
+    void onCreateFileRequested(const QString &parentPath);
+    void onCreateFolderRequested(const QString &parentPath);
+    void onExecuteScriptRequested(const QString &scriptPath);
+    void onGitStatusRequested();
+    void onGitCommitRequested();
+    void onGitPushRequested();
+    void updateCodeSearch();
+    void onReplaceCurrent();
+    void onReplaceAndFindNext();
+    void onReplaceAll();
 
 private:
     Start_progect *rsc;
     Settings    *rsc2;
     About_program *rsc3;
-    QWidget *rsc4; 
-    panel_other *panelOther;
+    QWidget *rsc4;
+    Search *search;
+    //ProjectRootProxyModel *projectProxyModel;
+    QFileSystemModel *projectModel = nullptr;
+    ProjectRootProxyModel *projectProxyModel = nullptr;
     QSplitter   *mainVerticalSplitter;
     QPushButton *btnTerminal;
     QPushButton *btnSearch;
@@ -153,7 +176,7 @@ private:
     QPushButton *btnTogglePip;
     QPushButton *btnAIChat;
     QPushButton *btnStartDebug;
-    QFileSystemModel *projectModel;
+    //QFileSystemModel *projectModel;
     QProcess *trainingProcess;
     QChart      *lossChart;
     QLineSeries *lossSeries;
@@ -200,5 +223,7 @@ private:
     void updateAiStackCache();
     QString cachedOllamaVersion;
     QProcess *torchCacheProc = nullptr;
+    CodeEditor* getCurrentEditor();
+    void highlightCurrentMatch(QTextCursor symbolCursor);
 };
 #endif // NEURO_PROGRAMM_H

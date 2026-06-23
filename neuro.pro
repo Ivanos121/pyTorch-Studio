@@ -9,13 +9,16 @@ CONFIG += c++17
 SOURCES += \
     about_program.cpp \
     advancedclosedialog.cpp \
+    aiprojectmodel.cpp \
     breezeflatstyle.cpp \
     codeeditor.cpp \
     help_window.cpp \
     main.cpp \
     neuro_programm.cpp \
     panel_other.cpp \
+    projectrootproxymodel.cpp \
     replwidget.cpp \
+    search.cpp \
     settings.cpp \
     start_progect.cpp \
     statusbuttonstyle.cpp \
@@ -25,12 +28,15 @@ HEADERS += \
     FolderBlockData.h \
     about_program.h \
     advancedclosedialog.h \
+    aiprojectmodel.h \
     breezeflatstyle.h \
     codeeditor.h \
     help_window.h \
     neuro_programm.h \
     panel_other.h \
+    projectrootproxymodel.h \
     replwidget.h \
+    search.h \
     settings.h \
     start_progect.h \
     statusbuttonstyle.h \
@@ -41,6 +47,7 @@ FORMS += \
     help_window.ui \
     neuro_programm.ui \
     panel_other.ui \
+    search.ui \
     settings.ui \
     start_progect.ui
 

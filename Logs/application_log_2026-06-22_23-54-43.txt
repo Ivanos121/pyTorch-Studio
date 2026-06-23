@@ -1,0 +1,10 @@
+2026-06-22 23:54:43.338 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:151)
+2026-06-22 23:54:43.809 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
+2026-06-22 23:54:43.810 [WARN]  No physical devices
+2026-06-22 23:54:44.260 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-22 23:54:44.260 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-22 23:54:44.510 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1459)
+2026-06-22 23:54:44.510 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-22 23:55:07.686 [WARN]  [LSP_INIT] Локальный venv не найден. Временно подменяем системным интерпретатором: "/usr/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3281)
+2026-06-22 23:58:31.275 [WARN]  [LSP_INIT] Локальный venv не найден. Временно подменяем системным интерпретатором: "/usr/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3281)
+2026-06-23 00:35:09.344 [WARN]  [LSP_INIT] Локальный venv не найден. Временно подменяем системным интерпретатором: "/usr/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3281)

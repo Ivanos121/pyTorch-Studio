@@ -284,6 +284,11 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
 
     // Создаем объект подсветки синтаксиса, передавая ему указатель на документ
     m_highlighter = new PythonHighlighter(this->document()); //
+
+    // Вставить в конструктор вашего текстового редактора CodeEditor:
+    this->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(this, &CodeEditor::customContextMenuRequested, this, &CodeEditor::showEditorContextMenu);
+
 }
 
 CodeEditor::~CodeEditor()
@@ -1808,4 +1813,185 @@ void CodeEditor::wheelEvent(QWheelEvent *e)
     // Если Ctrl НЕ зажат — передаем событие базовому классу,
     // чтобы стандартная вертикальная прокрутка длинного кода работала как обычно
     QPlainTextEdit::wheelEvent(e);
+}
+
+#include "codeeditor.h"
+#include <QMenu>
+#include <QAction>
+#include <QTextCursor>
+#include <QApplication>
+#include <QClipboard>
+
+void CodeEditor::showEditorContextMenu(const QPoint &pos)
+{
+    QMenu contextMenu(this);
+    contextMenu.setStyleSheet(
+        "QMenu { background-color: #252526; color: #CCCCCC; border: 1px solid #3C3C3C; padding: 4px; }"
+        "QMenu::item { padding: 4px 24px 4px 28px; }"
+        "QMenu::item:selected { background-color: #094771; color: #FFFFFF; }"
+        "QMenu::separator { height: 1px; background-color: #3C3C3C; margin: 4px 0px; }"
+        );
+
+    // Получаем доступ к базовым проверкам текста
+    QTextCursor cursor = textCursor();
+    bool hasSelection = cursor.hasSelection();
+
+    // =========================================================================
+    // БЛОК 1: ТИПОВЫЕ ОПЕРАЦИИ С PYTHON (Связка с venv Студии)
+    // =========================================================================
+    QAction *actRunFile = new QAction("▶ Запустить текущий файл в venv", &contextMenu);
+    QAction *actCheckSyntax = new QAction("🔍 Проверить синтаксис (Flake8/Pylint)", &contextMenu);
+
+    // Выделяем запуск жирным шрифтом как главное действие
+    actRunFile->setFont(QFont(actRunFile->font().family(), -1, QFont::Bold));
+    actRunFile->setShortcut(QKeySequence(Qt::Key_F5));
+
+    contextMenu.addAction(actRunFile);
+    contextMenu.addAction(actCheckSyntax);
+    contextMenu.addSeparator();
+
+    // =========================================================================
+    // БЛОК 2: КОММЕНТИРОВАНИЕ КОДА И АВТООТСТУП (Рефакторинг текста)
+    // =========================================================================
+    QAction *actToggleComment = new QAction("# Закомментировать / Раскомментировать", &contextMenu);
+    QAction *actAutoIndent = new QAction("📐 Исправить автоотступы (Форматировать код)", &contextMenu);
+
+    actToggleComment->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Slash)); // Традиционный Ctrl + /
+    actAutoIndent->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_I));
+
+    contextMenu.addAction(actToggleComment);
+    contextMenu.addAction(actAutoIndent);
+    contextMenu.addSeparator();
+
+    // =========================================================================
+    // БЛОК 3: ТИПОВОЕ СОДЕРЖИМОЕ МЕНЮ «ПРАВКА» (Стандартные буферы)
+    // =========================================================================
+    QAction *actUndo = new QAction("Отменить", &contextMenu);
+    QAction *actRedo = new QAction("Повторить", &contextMenu);
+    actUndo->setShortcut(QKeySequence::Undo);
+    actRedo->setShortcut(QKeySequence::Redo);
+
+    // Блокируем отмену/повтор, если история правок чиста
+    actUndo->setEnabled(document()->isUndoAvailable());
+    actRedo->setEnabled(document()->isRedoAvailable());
+
+    contextMenu.addAction(actUndo);
+    contextMenu.addAction(actRedo);
+    contextMenu.addSeparator();
+
+    QAction *actCut = new QAction("Cut (Вырезать)", &contextMenu);
+    QAction *actCopy = new QAction("Copy (Копировать)", &contextMenu);
+    QAction *actPaste = new QAction("Paste (Вставить)", &contextMenu);
+
+    actCut->setShortcut(QKeySequence::Cut);
+    actCopy->setShortcut(QKeySequence::Copy);
+    actPaste->setShortcut(QKeySequence::Paste);
+
+    // Блокируем вырезание/копирование, если текст не выделен курсором
+    actCut->setEnabled(hasSelection);
+    actCopy->setEnabled(hasSelection);
+    actPaste->setEnabled(canPaste()); // Проверка Qt, есть ли текст в буфере обмена ОС
+
+    contextMenu.addAction(actCut);
+    contextMenu.addAction(actCopy);
+    contextMenu.addAction(actPaste);
+
+    contextMenu.addSeparator();
+    QAction *actSelectAll = new QAction("Выделить всё", &contextMenu);
+    actSelectAll->setShortcut(QKeySequence::SelectAll);
+    contextMenu.addAction(actSelectAll);
+
+    // =========================================================================
+    // ПРИВЯЗКА ЛОГИКИ К СИГНАЛАМ (Лямбда-коннекты)
+    // =========================================================================
+    connect(actRunFile, &QAction::triggered, this, &CodeEditor::onRunCurrentFileRequested);
+    connect(actCheckSyntax, &QAction::triggered, this, &CodeEditor::onCheckSyntaxRequested);
+    connect(actToggleComment, &QAction::triggered, this, &CodeEditor::onToggleCommentRequested);
+    connect(actAutoIndent, &QAction::triggered, this, &CodeEditor::onAutoIndentRequested);
+
+    // Прямая адресация на встроенные слоты QPlainTextEdit для блока Правка
+    connect(actUndo, &QAction::triggered, this, &CodeEditor::undo);
+    connect(actRedo, &QAction::triggered, this, &CodeEditor::redo);
+    connect(actCut, &QAction::triggered, this, &CodeEditor::cut);
+    connect(actCopy, &QAction::triggered, this, &CodeEditor::copy);
+    connect(actPaste, &QAction::triggered, this, &CodeEditor::paste);
+    connect(actSelectAll, &QAction::triggered, this, &CodeEditor::selectAll);
+
+    // Выводим меню на экран
+    contextMenu.exec(mapToGlobal(pos));
+}
+
+// БЛОК 2: Умное комментирование выделенных строк (Ctrl + /)
+void CodeEditor::onToggleCommentRequested()
+{
+    QTextCursor cursor = textCursor();
+    if (!cursor.hasSelection()) {
+        // Если ничего не выделено — комментируем текущую одиночную строку, где стоит курсор
+        cursor.select(QTextCursor::LineUnderCursor);
+    }
+
+    int start = cursor.selectionStart();
+    int end = cursor.selectionEnd();
+
+    // Перемещаем курсор к началу выделения
+    QTextCursor editCursor(document());
+    editCursor.setPosition(start);
+    editCursor.movePosition(QTextCursor::StartOfLine);
+
+    // Открываем транзакцию отмены (чтобы Ctrl+Z отменял коммит сразу всей группы строк)
+    editCursor.beginEditBlock();
+
+    while (editCursor.position() < end) {
+        editCursor.movePosition(QTextCursor::StartOfLine);
+        QString lineText = editCursor.block().text();
+
+        if (lineText.trimmed().startsWith("#")) {
+            // Если строка уже закомментирована — снимаем комментарий
+            int commentIdx = lineText.indexOf("#");
+            editCursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, commentIdx);
+            editCursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+            editCursor.removeSelectedText();
+        } else {
+            // Если комментария нет — вставляем символ решетки в начало строки
+            editCursor.insertText("#");
+        }
+
+        // Переходим на следующую строчку
+        if (!editCursor.movePosition(QTextCursor::NextBlock)) break;
+    }
+
+    editCursor.endEditBlock();
+    setTextCursor(cursor); // Возвращаем выделение пользователя обратно
+}
+
+// БЛОК 2: Форматирование автоотступов (Замена табуляций на 4 пробела по PEP8)
+void CodeEditor::onAutoIndentRequested()
+{
+    QTextCursor cursor = textCursor();
+    cursor.beginEditBlock();
+
+    // Полное форматирование документа по стандарту Python PEP8
+    QString currentText = toPlainText();
+    currentText.replace("\t", "    "); // Заменяем жесткие табы на мягкие 4 пробела
+    setPlainText(currentText);
+
+    cursor.endEditBlock();
+}
+
+// БЛОК 1: Быстрый вызов Python-кода из редактора
+void CodeEditor::onRunCurrentFileRequested()
+{
+    // Запрашиваем у главного окна через механизм инклюдов или сигналов
+    // В данном случае, так как у вас есть переменная пути к открытому файлу:
+    if (!this->currentFilePath.isEmpty()) {
+        // Излучаем или вызываем метод запуска процесса, разработанный ранее
+        // Предполагаем, что у вас настроен вызов глобальной функции Neuro_programm через родителя:
+        // mainWin->onExecuteScriptRequested(this->currentFilePath);
+    }
+}
+
+void CodeEditor::onCheckSyntaxRequested()
+{
+    // Здесь будет вызываться скрытый QProcess для "flake8 <currentFilePath>"
+    // с выводом синтаксических предупреждений прямо на вашу панель panelOther
 }

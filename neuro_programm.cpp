@@ -9,6 +9,7 @@
 #include "codeeditor.h"
 #include "replwidget.h"
 #include "advancedclosedialog.h"
+#include "projectrootproxymodel.h"
 
 #include <QFileSystemModel>
 #include <QInputDialog>
@@ -84,6 +85,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     debuggedScriptProcess = new QProcess(this);
 
+    projectModel = nullptr;
+    projectProxyModel = nullptr;
 
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
 
@@ -312,15 +315,12 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     this->setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
     this->setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
 
-
     // 4. Внутренний вертикальный макет, который жестко зафиксирует порядок элементов
     QWidget *topWrapper = new QWidget(topContainerBar);
     QVBoxLayout *topLayout = new QVBoxLayout(topWrapper);
     topLayout->setContentsMargins(0, 0, 0, 0);
     topLayout->setSpacing(0);
     topContainerBar->addWidget(topWrapper);
-
-
 
     // 5. Создаем новый ручной QMenuBar, который будет вести себя как послушный виджет
     QMenuBar *customMenuBar = new QMenuBar(topWrapper);
@@ -454,7 +454,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     // 3. ДОБАВЛЯЕМ ПОДМЕНЮ В ГЛАВНОЕ МЕНЮ
     toolsMenu->addMenu(pipSubMenu);
-
 
     QMenu *helpMenu = customMenuBar->addMenu("Справка");
     helpMenu->addAction(ui->action_help);
@@ -692,6 +691,8 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         mainVerticalSplitter->layout()->setContentsMargins(0, 0, 0, 0);
     }
 
+    ui->search_panel->hide(); // Альтернатива: search->setVisible(false);
+
     // 1. Инициализируем глобальную переменную класса (без QPushButton* в начале!)
     btnTerminal = new QPushButton("💻 Терминал", this);
     btnSearch = new QPushButton("🔍 Поиск по коду", this);
@@ -700,7 +701,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     btnAIChat = new QPushButton("💬 ИИ-Ассистент", this);
     btnStartDebug = new QPushButton("Запуск Debug", this);
 
-
     // Настраиваем окно вывода чата
     ui->chatLogWidget->setReadOnly(true);
     ui->chatLogWidget->setOpenLinks(false); // Чтобы клики обрабатывались программно
@@ -708,7 +708,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // Привязываем кнопку отправки и клики по ссылкам-кнопкам
     connect(ui->btnSendChat, &QPushButton::clicked, this, &Neuro_programm::sendChatMessageToAI);
     connect(ui->chatLogWidget, &QTextBrowser::anchorClicked, this, &Neuro_programm::onChatAnchorClicked);
-
 
     QWidget *leftSpacer = new QWidget(this);
     leftSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -793,7 +792,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         });
     });
 
-
     connect(btnTogglePip, &QPushButton::clicked, this, [this](bool checked) {
         if (checked) {
             // Гасим остальные кнопки статусбара
@@ -811,6 +809,21 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         }
     });
 
+    connect(btnSearch, &QPushButton::clicked, this, [this](bool checked) {
+        if (checked) {
+            // Гасим остальные кнопки статусбара
+            btnTerminal->setChecked(false);
+            btnLogs->setChecked(false);
+
+            if (ui->search_panel) {
+                ui->search_panel->setVisible(true);
+                // Открываем третью страницу — Таблицу пакетов
+               // panelOther->setActivePage(panel_other::PagePipTable);
+            }
+        } else {
+            if (ui->search_panel) ui->search_panel->setVisible(false);
+        }
+    });
 
     connect(btnAIChat, &QPushButton::clicked, this, [this](bool checked) {
         if (checked) {
@@ -1618,7 +1631,23 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         createdTitleLabel->installEventFilter(this);
     }
 
+    ui->treeView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui->treeView, &QTreeView::customContextMenuRequested,
+            this, &Neuro_programm::showTreeViewContextMenu);
     onTorchCacheProcessFinished();
+    connect(ui->search_panel, &Search::searchParametersChanged, this, &Neuro_programm::updateCodeSearch);
+
+    // Внутри конструктора neuro_program::neuro_program
+    connect(ui->search_panel, &Search::findNextRequested, this, &Neuro_programm::onFindNext);
+    connect(ui->search_panel, &Search::findPrevRequested, this, &Neuro_programm::onFindPrev);
+    connect(ui->search_panel, &Search::selectAllRequested, this, &Neuro_programm::onSelectAll);
+
+    // Добавить в конструктор Neuro_programm (neuro_programm.cpp)
+    connect(ui->search_panel, &Search::replaceCurrentRequested, this, &Neuro_programm::onReplaceCurrent);
+    connect(ui->search_panel, &Search::replaceAndFindNextRequested, this, &Neuro_programm::onReplaceAndFindNext);
+    connect(ui->search_panel, &Search::replaceAllRequested, this, &Neuro_programm::onReplaceAll);
+
+
 
 } // <--- ВОТ ТУТ ОФИЦИАЛЬНО ЗАКАНЧИВАЕТСЯ ВАШ КОНСТРУКТОР
 
@@ -1965,8 +1994,30 @@ void Neuro_programm::sendLspDidOpenForFile(const QString &filePath, const QStrin
 
 void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
 {
-    // 1. ИЗВЛЕКАЕМ АБСОЛЮТНЫЙ ПУТЬ К ФАЙЛУ ИЗ МОДЕЛИ ДЕРЕВА (Ваш рабочий код)
-    QString filePath = projectModel->fileInfo(index).absoluteFilePath();
+    // 1. ИЗВЛЕКАЕМ АБСОЛЮТНЫЙ ПУТЬ К ФАЙЛУ ИЗ МОДЕЛИ ДЕРЕВА
+    if (!index.isValid()) return; // Страховка от пустых кликов
+
+    QModelIndex sourceIndex;
+    // ИСПРАВЛЕНИЕ: Опрашиваем прокси-модель строго по входящему аргументу 'index' вместо 'proxyIndex'
+    if (this->projectProxyModel != nullptr) {
+        sourceIndex = this->projectProxyModel->mapToSource(index);
+    } else {
+        sourceIndex = index; // Фолбэк, если прокси-модель еще не успела создаться
+    }
+
+    // 2. ИСПРАВЛЕНИЕ: Опрашиваем projectModel строго по дисковому sourceIndex!
+    QString filePath;
+    if (sourceIndex.isValid() && projectModel != nullptr) {
+        filePath = projectModel->fileInfo(sourceIndex).absoluteFilePath();
+    } else {
+        // Фолбэк: если кликнули мимо файлов, берем корень проекта
+        filePath = currentOpenProjectPath;
+    }
+
+    // Проверяем, существует ли файл физически (не даем открывать папки как текст)
+    QFileInfo checkInfo(filePath);
+    if (!checkInfo.exists() || checkInfo.isDir()) return;
+
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         qCritical() << " [ОШИБКА] Не удалось физически прочитать файл с диска:" << filePath;
@@ -1977,12 +2028,11 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
     QString fileContent = QString::fromUtf8(file.readAll());
     file.close();
 
-    // 2. ПРОВЕРЯЕМ, НЕ ОТКРЫТ ЛИ ЭТОТ ДОКУМЕНТ УЖЕ В СОСЕДНЕЙ ВКЛАДКЕ
+    // 3. ПРОВЕРЯЕМ, НЕ ОТКРЫТ ЛИ ЭТОТ ДОКУМЕНТ УЖЕ В СОСЕДНЕЙ ВКЛАДКЕ
     for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
         QWidget *page = ui->centralStackedWidget->widget(i);
         if (page && page->objectName() == filePath) {
             ui->centralStackedWidget->setCurrentWidget(page);
-
             // Если в комбобоксе файлов есть этот документ — принудительно синхронизируем индекс
             if (ui->fileComboBox) {
                 int comboIdx = ui->fileComboBox->findData(filePath);
@@ -1992,21 +2042,18 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         }
     }
 
-    // 3. СОЗДАЕМ НОВУЮ ГРАФИЧЕСКУЮ СТРАНИЦУ-КОНТЕЙНЕР ВНУТРИ STACKED-ПАНЕЛИ
-    // !!! СТРОКА 950 (Ориентировочно, страница 26 вашего файла, Шаг 3) !!!
+    // 4. СОЗДАЕМ НОВУЮ ГРАФИЧЕСКУЮ СТРАНИЦУ-КОНТЕЙНЕР ВНУТРИ STACKED-ПАНЕЛИ
     QWidget *newPage = new QWidget(ui->centralStackedWidget);
     QVBoxLayout *layout = new QVBoxLayout(newPage);
     layout->setContentsMargins(0, 0, 0, 0);
-
     CodeEditor *editor = new CodeEditor(newPage);
 
     // КРИТИЧЕСКИЙ ФИКС: Передаем реальный путь к файлу прямо в созданный объект редактора!
-    // (Замените 'fullFilePath' на имя вашей переменной, которая хранит путь к открываемому файлу скрипта)
     editor->currentFilePath = filePath;
     editor->isLspFreeze = false;
     editor->sendLspDidOpen();
 
-    // Здесь же связываем сигнал логирования с вашей нижней консолью отладки приложения
+    // Связываем сигнал логирования с вашей нижней консолью отладки приложения
     connect(editor, &CodeEditor::logMessage, this, [this](const QString &message) {
         QTextEdit *console = panelOther->findChild<QTextEdit*>("consoleOutput");
         if (console) console->append(message);
@@ -2015,32 +2062,30 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
     // ВАЖНО: objectName должен быть задан ДО загрузки текста!
     editor->setObjectName(filePath);
     newPage->setObjectName(filePath);
-
     editor->setLineWrapMode(QPlainTextEdit::NoWrap);
 
     // БЛОКИРУЕМ СИГНАЛЫ НА ВРЕМЯ ПЕРВОНАЧАЛЬНОЙ ВСТАВКИ КОДА
     editor->blockSignals(true);
     if (editor->document()) {
-        editor->document()->blockSignals(true);
+        editor->document()->blockSignals(true); //
     }
-    editor->setPlainText(fileContent);
-    layout->addWidget(editor);
 
+    editor->setPlainText(fileContent); //
+    layout->addWidget(editor);
     ui->centralStackedWidget->addWidget(newPage);
     ui->centralStackedWidget->setCurrentWidget(newPage);
 
-    editor->blockSignals(false);
+    editor->blockSignals(false); //
     if (editor->document()) {
-        editor->document()->blockSignals(false);
+        editor->document()->blockSignals(false); //
     }
 
     // Загружаем в редактор считанный код Python-файла
     this->sendLspDidOpenForFile(filePath, fileContent);
     editor->setFocus();
 
-    // 4. ИНИЦИАЛИЗИРУЕМ СЕРВЕР JEDI И ОТПРАВЛЯЕМ DIDOPEN ЗАПРОС
+    // 5. ИНИЦИАЛИЗИРУЕМ СЕРВЕР JEDI И ОТПРАВЛЯЕМ DIDOPEN ЗАПРОС
     this->initLspServer();
-
     if (this->lspProcess && this->lspProcess->state() == QProcess::Running)
     {
         QJsonObject openParams;
@@ -2063,13 +2108,12 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
     }
 
     // =========================================================================
-    // 5. НАПОЛНЕНИЕ СПИСКОВ И ЖЕСТКАЯ АКТИВАЦИЯ КОНТЕЙНЕРА НА ЭКРАНЕ
+    // 6. НАПОЛНЕНИЕ СПИСКОВ И ЖЕСТКАЯ АКТИВАЦИЯ КОНТЕЙНЕРА НА ЭКРАНЕ
     // =========================================================================
     QFileInfo info(filePath);
 
     // Шаг А: Добавляем имя файла в нижний боковой список документов, если он есть
     if (ui->openFilesListWidget) {
-        // Проверяем, нет ли уже такого файла в списке, чтобы не дублировать строки
         bool exists = false;
         for (int i = 0; i < ui->openFilesListWidget->count(); ++i) {
             if (ui->openFilesListWidget->item(i)->data(Qt::UserRole).toString() == filePath) {
@@ -2078,7 +2122,7 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
             }
         }
         if (!exists) {
-            QListWidgetItem *newDocItem = new QListWidgetItem(info.fileName(), ui->openFilesListWidget);
+            QListWidgetItem *newDocItem = new QListWidgetItem(info.fileName(), ui->openFilesListWidget); //
             newDocItem->setData(Qt::UserRole, filePath);
         }
     }
@@ -2091,57 +2135,42 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
 
     // ШАГ В (ГЛАВНЫЙ СУПЕР-ФИКС ГЕОМЕТРИИ):
     // Принудительно разворачиваем нижний контейнер, ломая любые запреты из Qt Designer
-    if (ui->openFilesContainer && ui->leftVerticalSplitter)
+    if (ui->openFilesContainer && ui->leftVerticalSplitter) //
     {
-        // 1. Делаем контейнер видимым
-        ui->openFilesContainer->setVisible(true);
+        ui->openFilesContainer->setVisible(true); //
+        ui->openFilesContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored); //
+        ui->openFilesContainer->setMaximumHeight(10000); //
 
-        // 2. ЖЕСТКО СТИРАЕМ ОГРАНИЧЕНИЯ ДИЗАЙНЕРА:
-        // Переключаем политику размеров нижнего контейнера на Ignored по вертикали.
-        // Это заставит сплиттер беспрекословно принять те размеры, которые мы укажем в коде!
-        ui->openFilesContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);
-        ui->openFilesContainer->setMaximumHeight(10000); // Сбрасываем жесткий лимит высоты, если он был
-
-        // 3. Расчет высоты
         int totalHeight = ui->leftVerticalSplitter->height();
-        if (totalHeight <= 0) totalHeight = this->height() - 150; // Страховка на основе высоты главного окна
+        if (totalHeight <= 0) totalHeight = this->height() - 150; //
 
-        // Выделяем под дерево проекта верхнюю часть, а нижнему списку документов отдаем 180 пикселей
         int topSize = totalHeight - 180;
-        if (topSize < 100) topSize = 350; // Защита от ухода в отрицательные пиксели
+        if (topSize < 100) topSize = 350; //
 
-        // Принудительно заталкиваем массив размеров в сплиттер
-        ui->leftVerticalSplitter->setSizes(QList<int>({topSize, 180}));
-
-        // ИСПРАВЛЕННЫЙ ФИКС ОБНОВЛЕНИЯ: Принудительно пересчитываем сетку виджета
-        ui->leftVerticalSplitter->updateGeometry();
-        ui->leftVerticalSplitter->refresh();
-        ui->leftVerticalSplitter->update();
+        ui->leftVerticalSplitter->setSizes(QList<int>({topSize, 180})); //
+        ui->leftVerticalSplitter->updateGeometry(); //
     }
 
     // Обновляем шрифты интерфейса
     this->applyGlobalFonts();
 
-    // Ждём 50мс, пока отработает DidOpen и первичный проход подсветки синтаксиса,
-       // после чего принудительно зануляем ложные маркеры
-       QTimer::singleShot(50, this, [this, editor, filePath]() {
-           if (editor) {
-               editor->document()->setModified(false);
-           }
-           this->setWindowModified(false);
-
-           QFileInfo info(filePath);
-           int currentIndex = ui->fileComboBox->currentIndex();
-           if (currentIndex >= 2) {
-               ui->fileComboBox->setItemText(currentIndex, info.fileName());
-               if (ui->openFilesListWidget->item(currentIndex)) {
-                   ui->openFilesListWidget->item(currentIndex)->setText(info.fileName());
-               }
-           }
-           updateTabName();
-       });
+    // Ждём 50мс, пока отработает DidOpen и первичный проход подсветки синтаксиса
+    QTimer::singleShot(50, this, [this, editor, filePath]() {
+        if (editor) {
+            editor->document()->setModified(false);
+        }
+        this->setWindowModified(false);
+        QFileInfo info(filePath);
+        int currentIndex = ui->fileComboBox->currentIndex();
+        if (currentIndex >= 2) {
+            ui->fileComboBox->setItemText(currentIndex, info.fileName());
+            if (ui->openFilesListWidget->item(currentIndex)) {
+                ui->openFilesListWidget->item(currentIndex)->setText(info.fileName());
+            }
+        }
+        updateTabName();
+    }); //
 }
-
 
 void Neuro_programm::onCloseCurrentFileClicked()
 {
@@ -2329,28 +2358,60 @@ void Neuro_programm::sendSystemNotification(const QString &title, const QString 
 void Neuro_programm::initProjectTreeModel(QString path)
 {
     QString safePath = path.trimmed();
-    if (safePath.isEmpty() || safePath == "") {
+    if (safePath.isEmpty()) {
         qWarning() << " [LSP ПРЕДУПРЕЖДЕНИЕ] Вызван initProjectTreeModel с пустым путем. Пропуск.";
         return;
     }
 
+    // 1. Безопасное уничтожение старых моделей в правильном порядке
+    if (projectProxyModel) {
+        projectProxyModel->deleteLater();
+        projectProxyModel = nullptr;
+    }
     if (projectModel) {
         projectModel->deleteLater();
         projectModel = nullptr;
     }
 
+    // Извлекаем чистое имя папки проекта (например, "z1")
+    QString projName = QDir(safePath).dirName();
+
+    // Находим родительскую папку, где лежит папка проекта, чтобы сделать сам проект узлом дерева
+    QDir projectDir(safePath);
+    projectDir.cdUp();
+    QString rootContainerPath = projectDir.absolutePath();
+
+    // 2. Инициализация и настройка базовой дисковой модели файловой системы
     projectModel = new QFileSystemModel(this);
     projectModel->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::AllDirs);
     projectModel->setNameFilters(QStringList() << "[^v]*" << "v[^e]*" << "ve[^n]*" << "ven[^v]*" << "venv?*");
     projectModel->setNameFilterDisables(false);
-    projectModel->setRootPath(safePath);
 
-    ui->treeView->setModel(projectModel);
+    // Переводим фокус сканирования диска на уровень выше папки проекта
+    projectModel->setRootPath(rootContainerPath);
 
-    QModelIndex rootIndex = projectModel->index(safePath);
-    ui->treeView->setRootIndex(rootIndex);
-    ui->treeView->expand(rootIndex);
+    // 3. Создаем прокси-модель подмены имени и фильтрации соседей
+    projectProxyModel = new ProjectRootProxyModel(this);
+    projectProxyModel->setSourceModel(projectModel);
+    projectProxyModel->setProjectInfo(safePath, projName); // Передаем данные проекта для переименования папки
 
+    // 4. Назначаем представлению (TreeView) именно ПРОКСИ-модель
+    ui->treeView->setModel(projectProxyModel);
+
+    // 5. Вычисление индексов (Перевод из исходной модели диска в прокси)
+    QModelIndex sourceContainerIndex = projectModel->index(rootContainerPath);
+    QModelIndex sourceProjectIndex = projectModel->index(safePath);
+
+    QModelIndex proxyContainerIndex = projectProxyModel->mapFromSource(sourceContainerIndex);
+    QModelIndex proxyProjectIndex = projectProxyModel->mapFromSource(sourceProjectIndex);
+
+    // Устанавливаем отображаемый корень дерева на родительскую папку ОС
+    ui->treeView->setRootIndex(proxyContainerIndex);
+
+    // ФИЗИЧЕСКИ РАСКРЫВАЕМ наш переименованный узел проекта (появится стрелочка и все файлы внутри)
+    ui->treeView->expand(proxyProjectIndex);
+
+    // 6. Скрываем лишние колонки (Размер, Тип, Дата изменения), оставляя только Имя
     if (projectModel != nullptr && ui->treeView->model() != nullptr)
     {
         for (int i = 1; i < projectModel->columnCount(); ++i) {
@@ -2363,20 +2424,27 @@ void Neuro_programm::initProjectTreeModel(QString path)
     // =========================================================================
     if (ui->treeView->header())
     {
-        // 1. Скрываем текстовое поле заголовка ("Имя")
         ui->treeView->setHeaderHidden(true);
-
-        // 2. Схлопываем высоту скрытого заголовка в 0 пикселей,
-        // чтобы он физически больше не расталкивал пустое пространство!
         ui->treeView->header()->setMaximumHeight(0);
         ui->treeView->header()->setMinimumSectionSize(0);
         ui->treeView->header()->resizeSections(QHeaderView::Fixed);
-
-        // 3. Отключаем любые отступы рамки заголовка
         ui->treeView->header()->setStyleSheet("QHeaderView { margin: 0px; padding: 0px; height: 0px; border: none; }");
     }
-}
 
+    // 1. Принудительно включаем отрисовку линий ветвей (бранчей)
+    ui->treeView->setItemsExpandable(true);
+
+    // 2. Задаем CSS-стиль для отображения пунктирных линий веток в темной/светлой теме
+    ui->treeView->setStyleSheet(
+        "QTreeView::branch:has-siblings:!adjoins-item {"
+        "    border-image: url(:/icons/vline.png) 0;" /* Нужна будет иконка вертикальной линии или стандарт */
+        "}"
+        "QTreeView {"
+        "    paint-alternating-row-colors-for-empty-area: true;"
+        "    show-decoration-selected: 1;"
+        "}"
+    );
+}
 
 void Neuro_programm::sendChatMessageToAI()
 {
@@ -6816,6 +6884,862 @@ void Neuro_programm::onTorchCacheProcessFinished() {
 
     torchCacheProc->deleteLater();
     torchCacheProc = nullptr;
+}
+
+void Neuro_programm::showTreeViewContextMenu(const QPoint &pos)
+{
+    // 1. Получаем индекс элемента, по которому кликнули
+    QModelIndex proxyIndex = ui->treeView->indexAt(pos);
+    QModelIndex sourceIndex;
+
+    if (proxyIndex.isValid() && this->projectProxyModel != nullptr) {
+        sourceIndex = this->projectProxyModel->mapToSource(proxyIndex);
+    }
+
+    // Вычисляем путь к элементу на диске
+    QString clickedPath = (sourceIndex.isValid() && projectModel != nullptr) ?
+                projectModel->filePath(sourceIndex) : currentOpenProjectPath;
+    QFileInfo clickedInfo(clickedPath);
+    QString parentDir = clickedInfo.isDir() ? clickedPath : clickedInfo.absolutePath();
+
+    // Создаем и стилизуем современное меню IDE
+    QMenu contextMenu(this);
+    contextMenu.setStyleSheet(
+                "QMenu { background-color: #252526; color: #CCCCCC; border: 1px solid #3C3C3C; padding: 4px; }"
+                "QMenu::item { padding: 4px 24px 4px 28px; }"
+                "QMenu::item:selected { background-color: #094771; color: #FFFFFF; }"
+                "QMenu::separator { height: 1px; background-color: #3C3C3C; margin: 4px 0px; }"
+                );
+
+    // Считываем текущую конфигурацию venv из QSettings системы
+    QSettings settings("PyTorchStudio", "IDE");
+    QString globalVenvPath = settings.value("python/global_venv_path", "").toString();
+
+    // ПРОВЕРКА: Кликнули по главному корневому узлу ИЛИ по файлу .pystudio
+    bool isMainProjectNode = (clickedPath == currentOpenProjectPath ||
+                              clickedInfo.suffix() == "pystudio" ||
+                              !proxyIndex.isValid());
+
+    if (isMainProjectNode)
+    {
+        // =========================================================================
+        // БЛОК 1: РАБОТА С VENV
+        // =========================================================================
+        QAction *actSync = new QAction("🔄 Синхронизировать зависимости venv", &contextMenu);
+        QAction *actRunTrain = new QAction("🚀 Запустить обучение (train.py)", &contextMenu);
+        actRunTrain->setFont(QFont(actRunTrain->font().family(), -1, QFont::Bold)); // Выделяем жирным
+        QAction *actTerminal = new QAction("🖥 Открыть терминал в среде venv", &contextMenu);
+
+        contextMenu.addAction(actSync);
+        contextMenu.addAction(actRunTrain);
+        contextMenu.addAction(actTerminal);
+        contextMenu.addSeparator();
+
+        // =========================================================================
+        // БЛОК 2: ADD NEW (Файлы, Папки, Шаблоны ИИ-модулей)
+        // =========================================================================
+        QMenu *menuAddNew = contextMenu.addMenu("📄 Add New...");
+        QAction *actNewFile = menuAddNew->addAction("Новый файл...");
+        QAction *actNewFolder = menuAddNew->addAction("Новая папка...");
+        menuAddNew->addSeparator();
+        QAction *actTemplateTrain = menuAddNew->addAction("Создать train.py по шаблону");
+        QAction *actTemplateModel = menuAddNew->addAction("Создать модуль Python (Сеть PyTorch)");
+        QAction *actTemplateClass = menuAddNew->addAction("Создать базовый Python класс");
+
+        contextMenu.addSeparator();
+
+        // =========================================================================
+        // ЗАКРЫТЬ ПРОЕКТ (Изолированный пункт между блоками)
+        // =========================================================================
+        QAction *actCloseProject = new QAction(QString("❌ Закрыть проект «%1»").arg(QDir(currentOpenProjectPath).dirName()), &contextMenu);
+        contextMenu.addAction(actCloseProject);
+        contextMenu.addSeparator();
+
+        // =========================================================================
+        // БЛОК 3: УПРАВЛЕНИЕ ДЕРЕВОМ (Развернуть/Свернуть)
+        // =========================================================================
+        QAction *actExpandNode = new QAction("🔍 Развернуть узел", &contextMenu);
+        QAction *actExpandAll  = new QAction("↕ Развернуть все", &contextMenu);
+        QAction *actCollapseAll = new QAction("🧱 Свернуть все", &contextMenu);
+
+        contextMenu.addAction(actExpandNode);
+        contextMenu.addAction(actExpandAll);
+        contextMenu.addAction(actCollapseAll);
+        contextMenu.addSeparator();
+
+        // =========================================================================
+        // БЛОК 4: GIT
+        // =========================================================================
+        QMenu *menuGit = contextMenu.addMenu("📁 Git");
+        QAction *actGitStatus = menuGit->addAction("Проверить статус (status)");
+        QAction *actGitCommit = menuGit->addAction("Зафиксировать изменения (Commit)...");
+        QAction *actGitPush   = menuGit->addAction("🚀 Отправить на GitHub (Push)");
+
+        // =========================================================================
+        // ПРИВЯЗКА СИГНАЛОВ ДЛЯ ГЛАВНОГО УЗЛА (Лямбда-вызовы)
+        // =========================================================================
+
+        // Блок 1
+        connect(actSync, &QAction::triggered, this, [this]() {
+            this->processEnvironmentAndSync(currentOpenProjectPath, "AUTO");
+        });
+        connect(actRunTrain, &QAction::triggered, this, [this]() {
+            onExecuteScriptRequested(currentOpenProjectPath + "/train.py");
+        });
+        connect(actTerminal, &QAction::triggered, this, [this, globalVenvPath]() {
+            if (panelOther) {
+                panelOther->setVisible(true);
+#if defined(Q_OS_WIN)
+                panelOther->appendLogText("🖥 Терминал venv: " + globalVenvPath + "/Scripts/activate.bat");
+#else
+                panelOther->appendLogText("🖥 Терминал venv: source " + globalVenvPath + "/bin/activate");
+#endif
+            }
+        });
+
+        // Блок 2 (Стандартное создание)
+        connect(actNewFile, &QAction::triggered, this, [this, parentDir]() { onCreateFileRequested(parentDir); });
+        connect(actNewFolder, &QAction::triggered, this, [this, parentDir]() { onCreateFolderRequested(parentDir); });
+
+        // Блок 2 (Генерация ИИ-шаблонов кода на диске Arch Linux)
+        connect(actTemplateTrain, &QAction::triggered, this, [this, parentDir]() {
+            QFile file(parentDir + "/train.py");
+            if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream out(&file);
+                out << "import torch\nimport torch.nn as nn\nimport torch.optim as optim\n\ndef train():\n    print('Starting PyTorch training loop...')\n\nif __name__ == '__main__':\n    train()\n";
+                file.close();
+                if (panelOther) panelOther->appendLogText("✔ Шаблон train.py успешно сгенерирован.");
+            }
+        });
+        connect(actTemplateModel, &QAction::triggered, this, [this, parentDir]() {
+            bool ok;
+            QString name = QInputDialog::getText(this, "Новая модель", "Имя модуля (например, custom_net):", QLineEdit::Normal, "", &ok);
+            if (ok && !name.trimmed().isEmpty()) {
+                QFile file(parentDir + "/" + name.trimmed() + ".py");
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&file);
+                    out << "import torch\nimport torch.nn as nn\n\nclass CustomNet(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.fc = nn.Linear(10, 2)\n\n    def forward(self, x):\n        return self.fc(x)\n";
+                    file.close();
+                }
+            }
+        });
+        connect(actTemplateClass, &QAction::triggered, this, [this, parentDir]() {
+            bool ok;
+            QString name = QInputDialog::getText(this, "Новый класс", "Имя Python-файла:", QLineEdit::Normal, "", &ok);
+            if (ok && !name.trimmed().isEmpty()) {
+                QFile file(parentDir + "/" + name.trimmed() + ".py");
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&file);
+                    out << "class BaseAgent:\n    def __init__(self):\n        pass\n\n    def step(self):\n        internal_state = {}\n";
+                    file.close();
+                }
+            }
+        });
+
+        // Закрыть проект
+        connect(actCloseProject, &QAction::triggered, this, [this]() {
+            this->syncVenvToRequirements();
+            if (projectModel) projectModel->setRootPath("");
+            ui->treeView->setModel(nullptr);
+            this->setWindowTitle("PyTorch Studio");
+        });
+
+        // Блок 3 (Дерево)
+        connect(actExpandNode, &QAction::triggered, this, [this, proxyIndex]() {
+            if (proxyIndex.isValid()) ui->treeView->expand(proxyIndex);
+        });
+        connect(actExpandAll, &QAction::triggered, this, [this]() {
+            ui->treeView->expandAll();
+        });
+        connect(actCollapseAll, &QAction::triggered, this, [this]() {
+            ui->treeView->collapseAll();
+        });
+
+        // Блок 4 (Git)
+        connect(actGitStatus, &QAction::triggered, this, [this]() { onGitStatusRequested(); });
+        connect(actGitCommit, &QAction::triggered, this, [this]() { onGitCommitRequested(); });
+        connect(actGitPush,   &QAction::triggered, this, [this]() { onGitPushRequested(); });
+
+        // Показываем меню на экране
+        contextMenu.exec(ui->treeView->viewport()->mapToGlobal(pos));
+        return;
+    }
+
+    // =========================================================================
+    // СЦЕНАРИЙ 2: Стандартный контекстный клик по внутренним файлам и папкам
+    // =========================================================================
+    QMenu *menuNew = contextMenu.addMenu("Создать...");
+    QAction *actInnerFile = menuNew->addAction("Новый файл...");
+    QAction *actInnerFolder = menuNew->addAction("Новая папка...");
+    contextMenu.addSeparator();
+
+    if (proxyIndex.isValid() && !clickedInfo.isDir() && clickedInfo.suffix() == "py")
+    {
+        QAction *actRunScript = new QAction("▶ Запустить скрипт в venv", &contextMenu);
+        // ИСПРАВЛЕНИЕ: Правильный захват clickedPath внутри [] и один указатель this
+        connect(actRunScript, &QAction::triggered, this, [this, clickedPath]() {
+            onExecuteScriptRequested(clickedPath);
+        });
+        contextMenu.addAction(actRunScript);
+        contextMenu.addSeparator();
+    }
+
+    QAction *actCopyPath = new QAction("Копировать абсолютный путь", &contextMenu);
+    QAction *actRename = new QAction("Переименовать (F2)", &contextMenu);
+    QAction *actDelete = new QAction("Удалить с диска", &contextMenu);
+    contextMenu.addAction(actCopyPath);
+    contextMenu.addAction(actRename);
+    contextMenu.addAction(actDelete);
+
+    // ИСПРАВЛЕНИЕ: Исправлены все лямбды. Переменные передаются по значению внутри []
+    connect(actInnerFile, &QAction::triggered, this, [this, parentDir]() {
+        onCreateFileRequested(parentDir);
+    });
+
+    connect(actInnerFolder, &QAction::triggered, this, [this, parentDir]() {
+        onCreateFolderRequested(parentDir);
+    });
+
+    connect(actCopyPath, &QAction::triggered, this, [clickedPath]() {
+        QGuiApplication::clipboard()->setText(QDir::toNativeSeparators(clickedPath));
+    });
+
+    connect(actRename, &QAction::triggered, this, [this, proxyIndex]() {
+        if (proxyIndex.isValid()) ui->treeView->edit(proxyIndex);
+    });
+
+    connect(actDelete, &QAction::triggered, this, [this, clickedPath]()
+    {
+        QMessageBox::StandardButton reply = QMessageBox::question(this, "Удаление",
+            QString("Удалить безвозвратно '%1'?").arg(QFileInfo(clickedPath).fileName()),
+            QMessageBox::Yes | QMessageBox::No);
+
+        if (reply == QMessageBox::Yes) {
+            if (QFileInfo(clickedPath).isDir()) {
+                QDir(clickedPath).removeRecursively();
+            } else {
+                QFile::remove(clickedPath);
+            }
+        }
+    });
+
+    // Вызываем контекстное меню строго в глобальных координатах экрана
+    contextMenu.exec(ui->treeView->viewport()->mapToGlobal(pos));
+}
+
+// Обработчик создания нового файла
+void Neuro_programm::onCreateFileRequested(const QString &parentPath)
+{
+    bool ok;
+    QString fileName = QInputDialog::getText(this, "Новый файл", "Введите имя файла:", QLineEdit::Normal, "", &ok);
+    if (!ok || fileName.trimmed().isEmpty()) return;
+
+    QFile file(parentPath + "/" + fileName.trimmed());
+    if (file.open(QIODevice::WriteOnly)) {
+        file.close();
+        if (panelOther) panelOther->appendLogText("📄 Создан файл: " + file.fileName());
+    } else {
+        QMessageBox::critical(this, "Ошибка", "Не удалось создать файл на диске.");
+    }
+}
+
+// Обработчик создания новой папки
+void Neuro_programm::onCreateFolderRequested(const QString &parentPath)
+{
+    bool ok;
+    QString folderName = QInputDialog::getText(this, "Новая папка", "Введите имя папки:", QLineEdit::Normal, "", &ok);
+    if (!ok || folderName.trimmed().isEmpty()) return;
+
+    QDir dir(parentPath);
+    if (dir.mkdir(folderName.trimmed())) {
+        if (panelOther) panelOther->appendLogText("📁 Создана директория: " + parentPath + "/" + folderName.trimmed());
+    } else {
+        QMessageBox::critical(this, "Ошибка", "Не удалось создать папку.");
+    }
+}
+
+// Обработчик асинхронного запуска Python скриптов внутри вашего venv
+void Neuro_programm::onExecuteScriptRequested(const QString &scriptPath)
+{
+    QSettings settings("PyTorchStudio", "IDE");
+    QString globalVenvPath = settings.value("python/global_venv_path", "").toString();
+    bool useSystemPython = settings.value("python/use_system", false).toBool();
+
+    QString pythonExec;
+    if (useSystemPython) {
+        pythonExec = "python";
+    } else {
+#if defined(Q_OS_WIN)
+        pythonExec = globalVenvPath + "/Scripts/python.exe";
+#else
+        pythonExec = globalVenvPath + "/bin/python";
+#endif
+    }
+
+    if (panelOther) {
+        panelOther->setVisible(true);
+        panelOther->appendLogText("\n🚀 Запуск процесса: " + pythonExec + " " + scriptPath);
+        // Здесь передаем выполнение в ваш встроенный терминал/QProcess
+        // Например: panelOther->runPythonProcess(pythonExec, scriptPath);
+    }
+}
+
+#include <QCryptographicHash>
+
+// Вспомогательная функция для расчета MD5-хэша (вставьте её перед методом)
+QString Neuro_programm::calculateFileMd5(const QString &filePath)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) return QString();
+
+    QCryptographicHash hash(QCryptographicHash::Md5);
+    if (hash.addData(&file)) {
+        return hash.result().toHex();
+    }
+    return QString();
+}
+
+// Сам метод сквозной проверки окружения и синхронизации pip
+void Neuro_programm::processEnvironmentAndSync(const QString &projectPath, const QString &architecture)
+{
+    QSettings settings("PyTorchStudio", "IDE");
+    QString globalVenvPath = settings.value("python/global_venv_path", "").toString();
+    bool useSystemPython = settings.value("python/use_system", false).toBool();
+    QString finalPythonExec;
+
+    // Формируем пути исполняемого файла Python
+    if (useSystemPython) {
+        finalPythonExec = "python";
+    } else {
+#if defined(Q_OS_WIN)
+        finalPythonExec = globalVenvPath + "/Scripts/python.exe";
+#else
+        finalPythonExec = globalVenvPath + "/bin/python";
+#endif
+        settings.setValue("python/venv_path", globalVenvPath);
+    }
+
+    // Сверка хэшей требований и Двусторонняя синхронизация пакетов
+    QString reqFilePath = projectPath + "/requirements.txt";
+    if (QFile::exists(reqFilePath))
+    {
+        QString currentHash = calculateFileMd5(reqFilePath);
+        QString savedHash = settings.value("python/last_requirements_hash", "").toString();
+
+        // Если файл изменился или это первое открытие проекта для текущего venv
+        if (currentHash.isEmpty() || currentHash != savedHash)
+        {
+            if (panelOther) panelOther->appendLogText("🔄 Обнаружены изменения в конфигурации проекта. Выравнивание окружения...");
+
+            QProcess pipInstall;
+
+            // Если в проекте жестко задана архитектура CPU, используем официальное whl-зеркало PyTorch
+            if (architecture == "CPU") {
+                pipInstall.start(finalPythonExec, QStringList() << "-m" << "pip" << "install"
+                                                               << "--index-url" << "https://pytorch.org"
+                                                               << "-r" << reqFilePath);
+            } else {
+                // Стандартная установка для CUDA систем (Arch Linux / Windows)
+                pipInstall.start(finalPythonExec, QStringList() << "-m" << "pip" << "install" << "-r" << reqFilePath);
+            }
+
+            pipInstall.waitForFinished(-1);
+
+            // Обратная фиксация имен и точных версий пакетов (pip freeze)
+            QProcess pipFreeze;
+            pipFreeze.setStandardOutputFile(reqFilePath);
+            pipFreeze.start(finalPythonExec, QStringList() << "-m" << "pip" << "freeze");
+            pipFreeze.waitForFinished(-1);
+
+            // Фиксируем новое состояние кэша requirements.txt
+            QString finalHash = calculateFileMd5(reqFilePath);
+            settings.setValue("python/last_requirements_hash", finalHash);
+            if (panelOther) panelOther->appendLogText("✔ Системный venv и requirements.txt синхронизированы под архитектуру: " + architecture);
+        }
+        else
+        {
+            if (panelOther) panelOther->appendLogText("⚡ Зависимости проекта не изменялись. Пропуск синхронизации pip.");
+        }
+    }
+
+    // Инициализируем LSP сервер, так как pip теперь гарантированно готов
+    this->initLspServer();
+}
+
+void Neuro_programm::syncVenvToRequirements()
+{
+    // Если проект не открыт, синхронизировать нечего
+    if (currentOpenProjectPath.isEmpty()) return;
+
+    QSettings settings("PyTorchStudio", "IDE");
+    bool useSystemPython = settings.value("python/use_system", false).toBool();
+    QString globalVenvPath = settings.value("python/global_venv_path", "").toString();
+    QString reqFilePath = currentOpenProjectPath + "/requirements.txt";
+
+    // Формируем путь к исполняемому файлу Python среды
+    QString pythonExec;
+    if (useSystemPython) {
+        pythonExec = "python";
+    } else {
+#if defined(Q_OS_WIN)
+        pythonExec = globalVenvPath + "/Scripts/python.exe";
+#else
+        pythonExec = globalVenvPath + "/bin/python";
+#endif
+    }
+
+    // Запускаем выгрузку установленных имен пакетов обратно в файл проекта (pip freeze)
+    QProcess pipFreeze;
+    pipFreeze.setStandardOutputFile(reqFilePath); // Перенаправляем вывод консоли прямо в файл
+    pipFreeze.start(pythonExec, QStringList() << "-m" << "pip" << "freeze");
+
+    // Даем процессу до 5 секунд на завершение, чтобы не вешать программу намертво
+    if (pipFreeze.waitForFinished(5000)) {
+        // Пересчитываем и обновляем MD5 хэш, чтобы при следующем запуске Студия знала,
+        // что venv и файл требований идеально синхронизированы, и пропустила pip install
+        QString newHash = calculateFileMd5(reqFilePath);
+        settings.setValue("python/last_requirements_hash", newHash);
+
+        if (panelOther) {
+            panelOther->appendLogText("💾 Пакеты проекта автоматически сохранены в requirements.txt перед закрытием.");
+        }
+    }
+}
+
+void Neuro_programm::onGitStatusRequested()
+{
+    // ... код проверки статуса репозитория ...
+}
+
+void Neuro_programm::onGitCommitRequested()
+{
+    // ... код ввода commit message и фиксации изменений ...
+}
+
+void Neuro_programm::onGitPushRequested()
+{
+    // ... код отправки изменений на GitHub ...
+}
+
+void Neuro_programm::updateCodeSearch()
+{
+    // 1. Получаем активный редактор кода текущей страницы stackedWidget
+    CodeEditor* editor = getCurrentEditor();
+    if (!editor) return;
+
+    // 2. Получаем текст и состояние кнопок-триггеров из панели поиска
+    QString textToFind = ui->search_panel->getSearchText();
+    bool matchCase     = ui->search_panel->isMatchCase();
+    bool wholeWords    = ui->search_panel->isWholeWords();
+    bool isRegex       = ui->search_panel->isRegex();
+
+    qDebug() << "Ищем текст:" << textToFind << "Регистр:" << matchCase << "Целое слово:" << wholeWords << "Regex:" << isRegex;
+
+    // СВЕРХВАЖНЫЙ ФИКС: Если поле пустое (пользователь очистил его крестиком),
+    // мгновенно убираем всю желтую подсветку из файла и выходим.
+    if (textToFind.isEmpty()) {
+        editor->setExtraSelections(QList<QTextEdit::ExtraSelection>());
+        return;
+    }
+
+    // 3. Создаем контейнер для хранения всех найденных фрагментов выделения
+    QList<QTextEdit::ExtraSelection> extraSelections;
+
+    // Настраиваем флаги поиска Qt
+    QTextDocument::FindFlags flags = QTextDocument::FindFlags();
+    if (matchCase)  flags |= QTextDocument::FindCaseSensitively;
+    if (wholeWords) flags |= QTextDocument::FindWholeWords;
+
+    // Настраиваем внешний вид выделения (мягкий пастельный желтый цвет)
+    QTextCharFormat format;
+    format.setBackground(QColor(255, 235, 156)); // Мягкий желтый (#FFEBB4)
+    format.setForeground(QColor(124, 77, 0));    // Темно-коричневый текст для контраста
+
+    QTextDocument *doc = editor->document();
+    QTextCursor cursor(doc);
+
+    // Блокируем отрисовку интерфейса на долю секунды, чтобы экран не мерцал при вводе букв
+    editor->setUpdatesEnabled(false);
+
+    // 4. Запускаем цикл сканирования документа
+    if (isRegex) {
+        // Режим РЕГУЛЯРНЫХ ВЫРАЖЕНИЙ
+        QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+        if (!matchCase) options |= QRegularExpression::CaseInsensitiveOption;
+
+        QRegularExpression regex(textToFind, options);
+        if (regex.isValid()) {
+            while (!cursor.isNull() && !cursor.atEnd()) {
+                cursor = doc->find(regex, cursor, flags);
+                if (!cursor.isNull()) {
+                    QTextEdit::ExtraSelection selection;
+                    selection.format = format;
+                    selection.cursor = cursor;
+                    extraSelections.append(selection);
+                }
+            }
+        }
+    } else {
+        // Режим ОБЫЧНОГО ТЕКСТА
+        while (!cursor.isNull() && !cursor.atEnd()) {
+            cursor = doc->find(textToFind, cursor, flags);
+            if (!cursor.isNull()) {
+                QTextEdit::ExtraSelection selection;
+                selection.format = format;
+                selection.cursor = cursor;
+                extraSelections.append(selection);
+            }
+        }
+    }
+
+    // 5. Накатываем сформированную желтую разметку на редактор и включаем экран обратно
+    editor->setExtraSelections(extraSelections);
+    editor->setUpdatesEnabled(true);
+}
+
+void Neuro_programm::onFindNext() {
+    CodeEditor* editor = getCurrentEditor();
+    if (!editor) return;
+
+    QString textToFind = ui->search_panel->getSearchText();
+    if (textToFind.isEmpty()) return;
+
+    QTextDocument::FindFlags flags = QTextDocument::FindFlags();
+    if (ui->search_panel->isMatchCase()) flags |= QTextDocument::FindCaseSensitively;
+    if (ui->search_panel->isWholeWords()) flags |= QTextDocument::FindWholeWords;
+
+    bool found = false;
+    QTextCursor foundCursor;
+
+    if (ui->search_panel->isRegex()) {
+        QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+        if (!ui->search_panel->isMatchCase()) options |= QRegularExpression::CaseInsensitiveOption;
+
+        QRegularExpression regex(textToFind, options);
+        if (!regex.isValid()) return;
+
+        // Ищем регулярку вперед
+        foundCursor = editor->document()->find(regex, editor->textCursor(), flags);
+        if (!foundCursor.isNull()) {
+            editor->setTextCursor(foundCursor); // Перемещаем каретку
+            found = true;
+        } else {
+            // Зацикливание: ищем с самого начала документа
+            QTextCursor startCursor(editor->document());
+            foundCursor = editor->document()->find(regex, startCursor, flags);
+            if (!foundCursor.isNull()) {
+                editor->setTextCursor(foundCursor);
+                found = true;
+            }
+        }
+    } else {
+        // Обычный поиск вперед
+        foundCursor = editor->document()->find(textToFind, editor->textCursor(), flags);
+        if (!foundCursor.isNull()) {
+            editor->setTextCursor(foundCursor);
+            found = true;
+        } else {
+            QTextCursor startCursor(editor->document());
+            foundCursor = editor->document()->find(textToFind, startCursor, flags);
+            if (!foundCursor.isNull()) {
+                editor->setTextCursor(foundCursor);
+                found = true;
+            }
+        }
+    }
+
+    // Передаем найденные координаты курсора в метод желтой подсветки
+    if (found) {
+        highlightCurrentMatch(editor->textCursor());
+    }
+}
+
+
+void Neuro_programm::onFindPrev() {
+    CodeEditor* editor = getCurrentEditor();
+    if (!editor) return;
+
+    QString textToFind = ui->search_panel->getSearchText();
+    if (textToFind.isEmpty()) return;
+
+    // Включаем флаг поиска назад
+    QTextDocument::FindFlags flags = QTextDocument::FindBackward;
+    if (ui->search_panel->isMatchCase()) flags |= QTextDocument::FindCaseSensitively;
+    if (ui->search_panel->isWholeWords()) flags |= QTextDocument::FindWholeWords;
+
+    bool found = false;
+    QTextCursor foundCursor;
+
+    if (ui->search_panel->isRegex()) {
+        QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+        if (!ui->search_panel->isMatchCase()) options |= QRegularExpression::CaseInsensitiveOption;
+
+        QRegularExpression regex(textToFind, options);
+        if (!regex.isValid()) return;
+
+        foundCursor = editor->document()->find(regex, editor->textCursor(), flags);
+        if (!foundCursor.isNull()) {
+            editor->setTextCursor(foundCursor);
+            found = true;
+        } else {
+            // Зацикливание: переносим виртуальный поиск в самый конец файла
+            QTextCursor endCursor(editor->document());
+            endCursor.movePosition(QTextCursor::End);
+            foundCursor = editor->document()->find(regex, endCursor, flags);
+            if (!foundCursor.isNull()) {
+                editor->setTextCursor(foundCursor);
+                found = true;
+            }
+        }
+    } else {
+        foundCursor = editor->document()->find(textToFind, editor->textCursor(), flags);
+        if (!foundCursor.isNull()) {
+            editor->setTextCursor(foundCursor);
+            found = true;
+        } else {
+            QTextCursor endCursor(editor->document());
+            endCursor.movePosition(QTextCursor::End);
+            foundCursor = editor->document()->find(textToFind, endCursor, flags);
+            if (!foundCursor.isNull()) {
+                editor->setTextCursor(foundCursor);
+                found = true;
+            }
+        }
+    }
+
+    if (found) {
+        highlightCurrentMatch(editor->textCursor());
+    }
+}
+
+void Neuro_programm::onSelectAll() {
+    // 1. Получаем активный редактор кода
+    QPlainTextEdit* editor = qobject_cast<QPlainTextEdit*>(getCurrentEditor());
+    if (!editor) return;
+
+    // 2. Получаем искомое словосочетание из панели поиска
+    QString textToFind = ui->search_panel->getSearchText();
+    if (textToFind.isEmpty()) return;
+
+    // 3. Создаем список для хранения выделенных фрагментов
+    QList<QTextEdit::ExtraSelection> extraSelections;
+
+    // Настраиваем правила поиска (регистр, целое слово, регулярка)
+    QTextDocument::FindFlags flags = QTextDocument::FindFlags();
+    if (ui->search_panel->isMatchCase()) flags |= QTextDocument::FindCaseSensitively;
+    if (ui->search_panel->isWholeWords()) flags |= QTextDocument::FindWholeWords;
+
+    // Настраиваем внешний вид выделения (например, желтый фон текста)
+    QTextCharFormat format;
+    format.setBackground(QColor(255, 235, 156)); // Мягкий желтый цвет (Hex: #FFEBB4)
+    format.setForeground(QColor(124, 77, 0));
+
+    // Сохраняем текущий документ для поиска
+    QTextDocument *doc = editor->document();
+    QTextCursor cursor(doc);
+
+    // 4. Цикл поиска всех вхождений в файле
+    if (ui->search_panel->isRegex()) {
+        // Поиск по регулярному выражению
+        QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+        if (!ui->search_panel->isMatchCase()) options |= QRegularExpression::CaseInsensitiveOption;
+        QRegularExpression regex(textToFind, options);
+
+        if (!regex.isValid()) return;
+
+        while (!cursor.isNull() && !cursor.atEnd()) {
+            cursor = doc->find(regex, cursor, flags);
+            if (!cursor.isNull()) {
+                QTextEdit::ExtraSelection selection;
+                selection.format = format;
+                selection.cursor = cursor;
+                extraSelections.append(selection);
+            }
+        }
+    } else {
+        // Обычный поиск слова/фразы
+        while (!cursor.isNull() && !cursor.atEnd()) {
+            cursor = doc->find(textToFind, cursor, flags);
+            if (!cursor.isNull()) {
+                QTextEdit::ExtraSelection selection;
+                selection.format = format;
+                selection.cursor = cursor;
+                extraSelections.append(selection);
+            }
+        }
+    }
+
+    // 5. Применяем множественное выделение к редактору
+    editor->setExtraSelections(extraSelections);
+    editor->setFocus();
+}
+
+CodeEditor* Neuro_programm::getCurrentEditor() {
+    if (!ui->centralStackedWidget || ui->centralStackedWidget->count() == 0) {
+        return nullptr;
+    }
+
+    // 1. Берем виджет ТЕКУЩЕЙ активной страницы, которую видит пользователь
+    QWidget* currentPage = ui->centralStackedWidget->currentWidget();
+    if (!currentPage) return nullptr;
+
+    // 2. Ищем строго ваш кастомный CodeEditor на этой странице
+    CodeEditor* editor = currentPage->findChild<CodeEditor*>();
+    return editor;
+}
+
+void Neuro_programm::highlightCurrentMatch(QTextCursor matchCursor) {
+    CodeEditor* editor = getCurrentEditor();
+    if (!editor) return;
+
+    // 1. Сначала запускаем полное фоновое сканирование (заполнит блекло-желтым цветом)
+    updateCodeSearch();
+
+    // 2. Берем список уже созданных фоновых выделений
+    QList<QTextEdit::ExtraSelection> selections = editor->extraSelections();
+
+    // 3. Создаем новое, максимально яркое выделение для ТЕКУЩЕГО слова
+    QTextEdit::ExtraSelection currentSelection;
+    currentSelection.cursor = matchCursor;
+
+    QTextCharFormat format;
+    format.setBackground(QColor(255, 210, 0));  // Насыщенный золотисто-желтый цвет
+    format.setForeground(Qt::black);            // Черный текст для контраста
+    format.setFontWeight(QFont::Bold);          // Можно сделать текст жирным, чтобы он выделялся
+    currentSelection.format = format;
+
+    // Добавляем текущее яркое слово поверх фоновых
+    selections.append(currentSelection);
+
+    // Применяем комбинированную разметку к редактору
+    editor->setExtraSelections(selections);
+}
+
+void Neuro_programm::onReplaceCurrent() {
+    CodeEditor* editor = getCurrentEditor();
+    if (!editor) return;
+
+    QString textToFind = ui->search_panel->getSearchText();
+    QString replaceText = ui->search_panel->getReplaceText();
+    if (textToFind.isEmpty()) return;
+
+    QTextCursor cursor = editor->textCursor();
+
+    // Проверяем, выделено ли что-то прямо сейчас
+    if (cursor.hasSelection()) {
+        QString selectedText = cursor.selectedText();
+        bool isMatch = false;
+
+        // Проверяем соответствие выделенного текста условиям (с учетом регулярки или регистра)
+        if (ui->search_panel->isRegex()) {
+            QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+            if (!ui->search_panel->isMatchCase()) options |= QRegularExpression::CaseInsensitiveOption;
+            QRegularExpression regex(textToFind, options);
+            isMatch = regex.match(selectedText).hasMatch();
+        } else {
+            Qt::CaseSensitivity cs = ui->search_panel->isMatchCase() ? Qt::CaseSensitive : Qt::CaseInsensitive;
+            isMatch = (selectedText.compare(textToFind, cs) == 0);
+        }
+
+        // Если выделенный текст — это то, что мы искали, заменяем его
+        if (isMatch) {
+            cursor.insertText(replaceText);
+            // Обновляем желтые маркеры на экране, так как текст изменился
+            updateCodeSearch();
+        }
+    }
+}
+
+void Neuro_programm::onReplaceAndFindNext() {
+    // 1. Сначала делаем замену текущего выделенного фрагмента
+    onReplaceCurrent();
+
+    // 2. Сразу же ищем и подсвечиваем следующее совпадение по тексту
+    onFindNext();
+}
+
+void Neuro_programm::onReplaceAll() {
+    CodeEditor* editor = getCurrentEditor();
+    if (!editor) return;
+
+    QString textToFind = ui->search_panel->getSearchText();
+    QString replaceText = ui->search_panel->getReplaceText();
+    if (textToFind.isEmpty()) return;
+
+    // Сохраняем исходную позицию курсора пользователя
+    QTextCursor originalCursor = editor->textCursor();
+
+    // Отключаем обновление экрана для моментальной скорости работы
+    editor->setUpdatesEnabled(false);
+
+    // Создаем рабочий курсор и переносим его в абсолютное начало файла
+    QTextCursor searchCursor(editor->document());
+    searchCursor.movePosition(QTextCursor::Start);
+
+    // Настраиваем базовые флаги поиска
+    QTextDocument::FindFlags flags = QTextDocument::FindFlags();
+    if (ui->search_panel->isMatchCase())  flags |= QTextDocument::FindCaseSensitively;
+    if (ui->search_panel->isWholeWords()) flags |= QTextDocument::FindWholeWords;
+
+    int replaceCount = 0;
+
+    // Объединяем все замены в одну транзакцию (чтобы работал Ctrl+Z для всей массовой замены сразу)
+    searchCursor.beginEditBlock();
+
+    if (ui->search_panel->isRegex()) {
+        // --- РЕЖИМ РЕГУЛЯРНЫХ ВЫРАЖЕНИЙ ---
+        QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+        if (!ui->search_panel->isMatchCase()) options |= QRegularExpression::CaseInsensitiveOption;
+        QRegularExpression regex(textToFind, options);
+
+        if (!regex.isValid()) {
+            searchCursor.endEditBlock();
+            editor->setUpdatesEnabled(true);
+            return;
+        }
+
+        while (true) {
+            // Ищем совпадение от текущей позиции рабочего курсора
+            searchCursor = editor->document()->find(regex, searchCursor, flags);
+            if (searchCursor.isNull()) break; // Если совпадений больше нет — выходим из цикла
+
+            // Производим замену текста
+            searchCursor.insertText(replaceText);
+            replaceCount++;
+
+            // ЖЕЛЕЗНЫЙ ФИКС ЗАЦИКЛИВАНИЯ:
+            // Если текст замены пустой или совпадает с искомым, find() может застрять.
+            // Принудительно сдвигаем позицию курсора в конец вставленного фрагмента.
+            searchCursor.setPosition(searchCursor.position());
+        }
+    } else {
+        // --- РЕЖИМ ОБЫЧНОГО ТЕКСТА ---
+        while (true) {
+            searchCursor = editor->document()->find(textToFind, searchCursor, flags);
+            if (searchCursor.isNull()) break;
+
+            searchCursor.insertText(replaceText);
+            replaceCount++;
+
+            // ЖЕЛЕЗНЫЙ ФИКС ЗАЦИКЛИВАНИЯ для обычного текста:
+            searchCursor.setPosition(searchCursor.position());
+        }
+    }
+
+    // Закрываем транзакцию правок
+    searchCursor.endEditBlock();
+
+    // Возвращаем курсор пользователя на его исходное место
+    editor->setTextCursor(originalCursor);
+
+    // Включаем отрисовку графики обратно
+    editor->setUpdatesEnabled(true);
+
+    // Перерисовываем актуальную желтую разметку для оставшихся совпадений
+    updateCodeSearch();
+
+    // Выводим отчет в статусбар
+    ui->statusbar->showMessage(QString("✔ Успешно заменено совпадений: %1").arg(replaceCount), 4000);
 }
 
 

@@ -1,0 +1,32 @@
+2026-06-24 01:05:34.763 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:151)
+2026-06-24 01:05:35.056 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
+2026-06-24 01:05:35.056 [WARN]  No physical devices
+2026-06-24 01:05:35.343 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-24 01:05:35.344 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-24 01:05:35.567 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1472)
+2026-06-24 01:05:35.567 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-24 01:05:41.507 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/zz1/z1/z1.pystudio" (../../../../pyTorch-Studio/neuro_programm.cpp:3007)
+2026-06-24 01:05:43.672 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/zz1/z1/venv/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3332)
+2026-06-24 01:05:53.388 [DEBUG] [LSP] Документ официально зарегистрирован в памяти Jedi! (../../../../pyTorch-Studio/codeeditor.cpp:1419)
+2026-06-24 01:05:53.391 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/zz1/z1/venv/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3332)
+2026-06-24 01:05:53.850 [WARN]  QWidget::setWindowModified: The window title does not contain a '[*]' placeholder
+2026-06-24 01:05:54.502 [DEBUG] [LSP CLIENT] Пакет изменения текста отправлен после паузы. Версия: 2 (../../../../pyTorch-Studio/codeeditor.cpp:1356)
+2026-06-24 01:05:57.611 [DEBUG] Ищем текст: "ш" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:05:59.775 [DEBUG] Ищем текст: "" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:01.481 [DEBUG] Ищем текст: "i" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:02.682 [DEBUG] Ищем текст: "im" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:04.423 [DEBUG] Ищем текст: "imp" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:04.707 [DEBUG] Ищем текст: "impo" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:06.165 [DEBUG] Ищем текст: "impor" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:06.391 [DEBUG] Ищем текст: "import" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:08.908 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-24 01:06:20.155 [DEBUG] Ищем текст: "" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:26.401 [DEBUG] Ищем текст: "d" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:26.609 [DEBUG] Ищем текст: "de" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:26.994 [DEBUG] Ищем текст: "def" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:31.419 [DEBUG] Ищем текст: "m" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:32.007 [DEBUG] Ищем текст: "ma" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:32.496 [DEBUG] Ищем текст: "mai" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:32.814 [DEBUG] Ищем текст: "main" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)
+2026-06-24 01:06:46.008 [DEBUG] >>> [GUI HOVER] Запрос отправлен на safe-позицию символа: 0 (../../../../pyTorch-Studio/codeeditor.cpp:1640)
+2026-06-24 01:06:51.253 [DEBUG] Ищем текст: "" Регистр: false Целое слово: false Regex: false (../../../../pyTorch-Studio/neuro_programm.cpp:7332)

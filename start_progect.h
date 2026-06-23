@@ -22,6 +22,7 @@ public:
     QString getDatasetLocation() const;
     bool shouldInstallVenv() const;
     QString getPyTorchArchitecture() const;
+    Neuro_programm* mainWin = nullptr;
 
 protected slots:
     //void onNextClicked();

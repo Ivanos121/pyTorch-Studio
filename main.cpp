@@ -81,6 +81,7 @@ int main(int argc, char *argv[])
     qputenv("XDG_CURRENT_DESKTOP", "KDE");
     QApplication a(argc, argv);
 
+    a.setDesktopFileName("pytorch-studio");
     QCoreApplication::setOrganizationName("PyTorchStudio");
     QCoreApplication::setApplicationName("IDE");
 
