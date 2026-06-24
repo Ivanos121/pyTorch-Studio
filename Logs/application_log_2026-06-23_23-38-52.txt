@@ -1,7 +1,0 @@
-2026-06-23 23:38:52.264 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:151)
-2026-06-23 23:38:52.564 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
-2026-06-23 23:38:52.564 [WARN]  No physical devices
-2026-06-23 23:38:52.885 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
-2026-06-23 23:38:52.885 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
-2026-06-23 23:38:53.207 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1472)
-2026-06-23 23:38:53.207 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining

@@ -7,3 +7,6 @@ object_script.*
 .qmake.stash
 venv/
 datasets/
+build/
+Logs/
+.qtcreator/

@@ -1,5 +1,0 @@
-/home/elf/pyTorch-Studio/build/Desktop-Debug/CMakeFiles/pytorch-studio.dir
-/home/elf/pyTorch-Studio/build/Desktop-Debug/CMakeFiles/edit_cache.dir
-/home/elf/pyTorch-Studio/build/Desktop-Debug/CMakeFiles/rebuild_cache.dir
-/home/elf/pyTorch-Studio/build/Desktop-Debug/CMakeFiles/pytorch-studio_autogen_timestamp_deps.dir
-/home/elf/pyTorch-Studio/build/Desktop-Debug/CMakeFiles/pytorch-studio_autogen.dir

@@ -12,60 +12,59 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Поиск необходимых модулей Qt (извлекаем модули на основе ваших инклудов)
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets)
 
 # Список всех исходных файлов (.cpp) вашего проекта
 set(PROJECT_SOURCES
-    about_program.cpp
-    advancedclosedialog.cpp
-    aiprojectmodel.cpp
-    breezeflatstyle.cpp
-    codeeditor.cpp
-    help_window.cpp
-    main.cpp
-    neuro_programm.cpp
-    panel_other.cpp
-    projectrootproxymodel.cpp
-    replwidget.cpp
-    search.cpp
-    settings.cpp
-    start_progect.cpp
-    statusbuttonstyle.cpp
-    terminalwidget.cpp
+    src/about_program.cpp
+    src/advancedclosedialog.cpp
+    src/aiprojectmodel.cpp
+    src/breezeflatstyle.cpp
+    src/codeeditor.cpp
+    src/help_window.cpp
+    src/main.cpp
+    src/neuro_programm.cpp
+    src/panel_other.cpp
+    src/projectrootproxymodel.cpp
+    src/replwidget.cpp
+    src/search.cpp
+    src/settings.cpp
+    src/start_progect.cpp
+    src/statusbuttonstyle.cpp
+    src/terminalwidget.cpp
 
-    FolderBlockData.h
-    about_program.h
-    advancedclosedialog.h
-    aiprojectmodel.h
-    breezeflatstyle.h
-    codeeditor.h
-    help_window.h
-    neuro_programm.h
-    panel_other.h
-    projectrootproxymodel.h
-    replwidget.h
-    search.h
-    settings.h
-    start_progect.h
-    statusbuttonstyle.h
-    terminalwidget.h
+    src/FolderBlockData.h
+    src/about_program.h
+    src/advancedclosedialog.h
+    src/aiprojectmodel.h
+    src/breezeflatstyle.h
+    src/codeeditor.h
+    src/help_window.h
+    src/neuro_programm.h
+    src/panel_other.h
+    src/projectrootproxymodel.h
+    src/replwidget.h
+    src/search.h
+    src/settings.h
+    src/start_progect.h
+    src/statusbuttonstyle.h
+    src/terminalwidget.h
 )
 
 # Список всех файлов интерфейса (.ui)
 set(PROJECT_FORMS
-    about_program.ui
-    help_window.ui
-    neuro_programm.ui
-    panel_other.ui
-    search.ui
-    settings.ui
-    start_progect.ui
+    src/about_program.ui
+    src/help_window.ui
+    src/neuro_programm.ui
+    src/panel_other.ui
+    src/search.ui
+    src/settings.ui
+    src/start_progect.ui
 )
 
 # Список файлов ресурсов (.qrc), где лежат ваши иконки и картинки
 set(PROJECT_RESOURCES
-    resources.qrc # Замените на реальное имя вашего .qrc файла
+    src/resources.qrc # Замените на реальное имя вашего .qrc файла
 )
 
 # Создаем исполняемый файл приложения Linux
@@ -78,7 +77,7 @@ add_executable(pytorch-studio
 # Указываем CMake искать заголовочные файлы в корне проекта
 # Это позволит компилятору находить <panel_other.h> и другие локальные файлы
 target_include_directories(pytorch-studio PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 # Линковка системных библиотек и модулей Qt к вашему приложению

@@ -1,7 +1,0 @@
-2026-06-17 22:59:35.841 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:143)
-2026-06-17 22:59:35.945 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
-2026-06-17 22:59:35.945 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
-2026-06-17 22:59:35.946 [WARN]  QLayout: Attempting to add QLayout "" to QWidget "customTitleBarPanel", which already has a layout
-2026-06-17 22:59:35.946 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QWidget "customTitleBarPanel", which already has a layout
-2026-06-17 22:59:36.068 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1488)
-2026-06-17 22:59:36.069 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining

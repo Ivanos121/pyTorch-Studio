@@ -1,6 +1,0 @@
-2026-06-23 23:23:21.579 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:151)
-2026-06-23 23:23:21.942 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
-2026-06-23 23:23:21.942 [WARN]  No physical devices
-2026-06-23 23:23:22.250 [WARN]  QML Debugger: Ignoring "-qmljsdebugger=port:46271,block,services:DebugMessages,QmlDebugger,V8Debugger,QmlInspector". Debugging has not been enabled.
-2026-06-23 23:23:22.307 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
-2026-06-23 23:23:22.307 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout

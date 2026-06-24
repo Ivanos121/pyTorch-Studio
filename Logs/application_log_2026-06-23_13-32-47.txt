@@ -1,9 +1,0 @@
-2026-06-23 13:32:47.480 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (../../../../pyTorch-Studio/main.cpp:151)
-2026-06-23 13:32:47.900 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
-2026-06-23 13:32:47.900 [WARN]  No physical devices
-2026-06-23 13:32:48.239 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
-2026-06-23 13:32:48.239 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
-2026-06-23 13:32:48.489 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (../../../../pyTorch-Studio/neuro_programm.cpp:1462)
-2026-06-23 13:32:48.489 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
-2026-06-23 13:32:55.857 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/zz1/z1/z1.pystudio" (../../../../pyTorch-Studio/neuro_programm.cpp:2974)
-2026-06-23 13:33:01.975 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/zz1/z1/venv/bin/python" (../../../../pyTorch-Studio/neuro_programm.cpp:3299)
