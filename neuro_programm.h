@@ -73,6 +73,7 @@ public:
 
 
 
+    void updateCustomTitle(const QString &fileName);
 signals:
     void signalSendChunkToConsole(const QString &text);
     void completionDataReceived(const QStringList &completions);
@@ -209,6 +210,7 @@ private:
     QString currentFilePath;
     QTimer *monitorTimer;
     QProcess *debuggedScriptProcess;
+    //QLabel *titleLabel;
     void updateTabName();
     void setFileModifiedState(CodeEditor *editor, bool modified);
     bool archiveProject(const QString &sourceDir, const QString &outputSavePath);

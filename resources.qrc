@@ -68,5 +68,6 @@
         <file>Data/system_icons/system-help.svg</file>
         <file>Data/system_icons/view-refresh.svg</file>
         <file>Data/system_icons/window-close1.svg</file>
+        <file>Data/Icons/pytorch-studio.svg</file>
     </qresource>
 </RCC>

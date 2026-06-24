@@ -85,6 +85,12 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("PyTorchStudio");
     QCoreApplication::setApplicationName("IDE");
 
+    a.setDesktopFileName("pytorch-studio");
+    a.setApplicationName("pytorch-studio");
+
+    QIcon appIcon(":/Data/Icons/pytorch-studio.svg");
+    a.setWindowIcon(appIcon);
+
     // Формируем строковую версию из макросов сборщика: "2026.1-LTS"
     QString appVersion = QString("%1.%2-%3")
                              .arg(APP_VERSION_MAJOR)

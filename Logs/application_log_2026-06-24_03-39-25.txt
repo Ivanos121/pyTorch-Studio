@@ -1,0 +1,10 @@
+2026-06-24 03:39:25.743 [INFO]  PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы. (/home/elf/pyTorch-Studio/main.cpp:158)
+2026-06-24 03:39:26.058 [DEBUG] vkDebug: setup_loader_term_phys_devs:  Failed to detect any valid GPUs in the current config
+2026-06-24 03:39:26.058 [WARN]  No physical devices
+2026-06-24 03:39:26.348 [WARN]  QLayout: Attempting to add QLayout "" to QToolBar "topContainerBar", which already has a layout
+2026-06-24 03:39:26.348 [WARN]  QWidget::setLayout: Attempting to set QLayout "" on QToolBar "topContainerBar", which already has a layout
+2026-06-24 03:39:26.561 [INFO]  🟢 [СИСТЕМНЫЙ ЛОГ] Кнопка btnStartTraining успешно найдена в памяти GUI! (/home/elf/pyTorch-Studio/neuro_programm.cpp:1517)
+2026-06-24 03:39:26.562 [WARN]  QObject::disconnect: wildcard call disconnects from destroyed signal of QPushButton::btnStartTraining
+2026-06-24 03:39:27.514 [WARN]  Failed to register with host portal QDBusError("org.freedesktop.portal.Error.Failed", "Could not register app ID: App info not found for 'pytorch-studio'")
+2026-06-24 03:40:00.516 [DEBUG] [RECENT_MGR] Запрос быстрого открытия файла: "/home/elf/zz1/z1/z1.pystudio" (/home/elf/pyTorch-Studio/neuro_programm.cpp:3063)
+2026-06-24 03:40:03.173 [DEBUG] [LSP_INIT] Используем изолированный venv проекта: "/home/elf/zz1/z1/venv/bin/python" (/home/elf/pyTorch-Studio/neuro_programm.cpp:3388)

@@ -1,0 +1,254 @@
+{
+	"abstract" : true,
+	"artifacts" : 
+	[
+		{
+			"path" : "/usr/lib/qt6/qml/QtQuick/VirtualKeyboard/Core/libvirtualkeyboardplugin.so"
+		}
+	],
+	"backtrace" : 35,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"include",
+			"__qt_internal_include_qml_plugin_packages",
+			"find_package",
+			"__find_dependency_common",
+			"find_dependency",
+			"_qt_internal_find_qt_dependencies"
+		],
+		"files" : 
+		[
+			"/usr/lib/cmake/Qt6Qml/QmlPlugins/Qt6VirtualKeyboardpluginTargets.cmake",
+			"/usr/lib/cmake/Qt6Qml/QmlPlugins/Qt6VirtualKeyboardpluginConfig.cmake",
+			"/usr/lib/cmake/Qt6/QtPublicPluginHelpers.cmake",
+			"/usr/lib/cmake/Qt6Qml/Qt6QmlPlugins.cmake",
+			"/usr/lib/cmake/Qt6Qml/Qt6QmlConfig.cmake",
+			"build/Desktop-Debug/.qtcreator/cmake-helper/maintenance_tool_provider.cmake",
+			"/usr/share/cmake/Modules/CMakeFindDependencyMacro.cmake",
+			"/usr/lib/cmake/Qt6/QtPublicDependencyHelpers.cmake",
+			"/usr/lib/cmake/Qt6Quick/Qt6QuickDependencies.cmake",
+			"/usr/lib/cmake/Qt6Quick/Qt6QuickConfig.cmake",
+			"/usr/lib/cmake/Qt6WebEngineCore/Qt6WebEngineCoreDependencies.cmake",
+			"/usr/lib/cmake/Qt6WebEngineCore/Qt6WebEngineCoreConfig.cmake",
+			"/usr/lib/cmake/Qt6WebEngineWidgets/Qt6WebEngineWidgetsDependencies.cmake",
+			"/usr/lib/cmake/Qt6WebEngineWidgets/Qt6WebEngineWidgetsConfig.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 14
+			},
+			{
+				"command" : 3,
+				"file" : 14,
+				"line" : 16,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 5,
+				"line" : 234,
+				"parent" : 1
+			},
+			{
+				"file" : 13,
+				"parent" : 2
+			},
+			{
+				"command" : 1,
+				"file" : 13,
+				"line" : 50,
+				"parent" : 3
+			},
+			{
+				"file" : 12,
+				"parent" : 4
+			},
+			{
+				"command" : 6,
+				"file" : 12,
+				"line" : 50,
+				"parent" : 5
+			},
+			{
+				"command" : 5,
+				"file" : 7,
+				"line" : 142,
+				"parent" : 6
+			},
+			{
+				"command" : 4,
+				"file" : 6,
+				"line" : 125,
+				"parent" : 7
+			},
+			{
+				"command" : 3,
+				"file" : 6,
+				"line" : 93,
+				"parent" : 8
+			},
+			{
+				"command" : 3,
+				"file" : 5,
+				"line" : 252,
+				"parent" : 9
+			},
+			{
+				"file" : 11,
+				"parent" : 10
+			},
+			{
+				"command" : 1,
+				"file" : 11,
+				"line" : 50,
+				"parent" : 11
+			},
+			{
+				"file" : 10,
+				"parent" : 12
+			},
+			{
+				"command" : 6,
+				"file" : 10,
+				"line" : 50,
+				"parent" : 13
+			},
+			{
+				"command" : 5,
+				"file" : 7,
+				"line" : 142,
+				"parent" : 14
+			},
+			{
+				"command" : 4,
+				"file" : 6,
+				"line" : 125,
+				"parent" : 15
+			},
+			{
+				"command" : 3,
+				"file" : 6,
+				"line" : 93,
+				"parent" : 16
+			},
+			{
+				"command" : 3,
+				"file" : 5,
+				"line" : 252,
+				"parent" : 17
+			},
+			{
+				"file" : 9,
+				"parent" : 18
+			},
+			{
+				"command" : 1,
+				"file" : 9,
+				"line" : 50,
+				"parent" : 19
+			},
+			{
+				"file" : 8,
+				"parent" : 20
+			},
+			{
+				"command" : 6,
+				"file" : 8,
+				"line" : 50,
+				"parent" : 21
+			},
+			{
+				"command" : 5,
+				"file" : 7,
+				"line" : 142,
+				"parent" : 22
+			},
+			{
+				"command" : 4,
+				"file" : 6,
+				"line" : 125,
+				"parent" : 23
+			},
+			{
+				"command" : 3,
+				"file" : 6,
+				"line" : 93,
+				"parent" : 24
+			},
+			{
+				"command" : 3,
+				"file" : 5,
+				"line" : 252,
+				"parent" : 25
+			},
+			{
+				"file" : 4,
+				"parent" : 26
+			},
+			{
+				"command" : 1,
+				"file" : 4,
+				"line" : 209,
+				"parent" : 27
+			},
+			{
+				"file" : 3,
+				"parent" : 28
+			},
+			{
+				"command" : 2,
+				"file" : 3,
+				"line" : 6,
+				"parent" : 29
+			},
+			{
+				"command" : 1,
+				"file" : 2,
+				"line" : 638,
+				"parent" : 30
+			},
+			{
+				"file" : 1,
+				"parent" : 31
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 56,
+				"parent" : 32
+			},
+			{
+				"file" : 0,
+				"parent" : 33
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 69,
+				"parent" : 34
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 10
+	},
+	"id" : "Qt6::VirtualKeyboardplugin::@6890427a1f51a3e7e1df",
+	"imported" : true,
+	"local" : true,
+	"name" : "Qt6::VirtualKeyboardplugin",
+	"nameOnDisk" : "libvirtualkeyboardplugin.so",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sources" : [],
+	"type" : "MODULE_LIBRARY"
+}

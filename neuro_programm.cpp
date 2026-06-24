@@ -579,11 +579,25 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     panelLayout->setContentsMargins(0, 0, 0, 0); // Нулевые отступы для плотного прилегания кнопок к краю
     panelLayout->setSpacing(6);
 
+    // 1. Создаем графический элемент для иконки приложения
+    QLabel *iconLabel = new QLabel(ui->customTitleBarPanel);
+
+    // Достаем SVG-иконку из встроенных ресурсов Qt (путь, который вы прописали в .qrc)
+    QIcon appIcon(":/Data/Icons/pytorch-studio.svg");
+    // Превращаем иконку в картинку (Pixmap) аккуратного размера (например, 16x16 или 18x18)
+    QPixmap iconPixmap = appIcon.pixmap(18, 18);
+
+    iconLabel->setPixmap(iconPixmap);
+    iconLabel->setFixedSize(18, 18); // Жестко фиксируем размеры значка
+
+    // 2. Добавляем иконку в самый левый край макета шапки
+    panelLayout->addWidget(iconLabel, 0, Qt::AlignVCenter);
+
     // Левая симметричная пружина
     panelLayout->addStretch();
 
     // Создаем текстовую метку программно
-    QLabel *titleLabel = new QLabel("PyTorch Studio", ui->customTitleBarPanel);
+    titleLabel = new QLabel("PyTorch Studio", ui->customTitleBarPanel);
     QFont titleFont = titleLabel->font();
     titleFont.setBold(true);
     titleLabel->setFont(titleFont);
@@ -973,45 +987,51 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // 1. Коннект двойного щелчка по дереву файлов
     connect(ui->treeView, &QTreeView::doubleClicked, this, &Neuro_programm::onFileDoubleClicked);
 
-    // 2. Коннект смены элемента в комбобоксе (переключение файлов пользователем)
-    // Используем современную сигнатуру для переключения индексов stackedWidget
-    connect(ui->fileComboBox, &QComboBox::currentIndexChanged, this, [this](int index) {
-        if (index >= 0 && index < ui->centralStackedWidget->count())
-        {
-            // Перелистываем страницу стэка
-            ui->centralStackedWidget->setCurrentIndex(index);
+    // // 2. Коннект смены элемента в комбобоксе (переключение файлов пользователем)
+    // // Используем современную сигнатуру для переключения индексов stackedWidget
+    // connect(ui->fileComboBox, &QComboBox::currentIndexChanged, this, [this](int index) {
+    //     if (index >= 0 && index < ui->centralStackedWidget->count())
+    //     {
+    //         // Перелистываем страницу стэка
+    //         ui->centralStackedWidget->setCurrentIndex(index);
 
-            // Синхронизируем выделение строки в левом боковом списке открытых документов
-            if (ui->openFilesListWidget) {
-                ui->openFilesListWidget->setCurrentRow(index);
-            }
+    //         // Синхронизируем выделение строки в левом боковом списке открытых документов
+    //         if (ui->openFilesListWidget) {
+    //             ui->openFilesListWidget->setCurrentRow(index);
+    //         }
 
-            // Умное управление док-виджетами и кнопками на основе ключа userData
-            QString currentKey = ui->fileComboBox->itemData(index).toString();
-            if (currentKey == "MAIN_SCREEN") {
-                if (btnTerminal) {
-                    btnTerminal->setChecked(true);
-                    btnTerminal->setProperty("active", true); // Добавить эту строчку!
-                    btnTerminal->style()->unpolish(btnTerminal);
-                    btnTerminal->style()->polish(btnTerminal);
-                }
-                if (btnAIChat) btnAIChat->setChecked(false);
-            }
-            else if (currentKey == "AI_CHAT_SCREEN")
-            {
-                //if (ui->rightDockWidget) ui->rightDockWidget->setVisible(false); // Прячем док
-                if (btnAIChat)   btnAIChat->setChecked(true);    // Зажигаем Чат в статусбаре
-                if (btnTerminal) btnTerminal->setChecked(false); // Тушим Терминал
-            }
-            else
-            {
-                // Если выбран любой динамический файл кода (индексы >= 2)
-                //if (ui->rightDockWidget) ui->rightDockWidget->setVisible(false);
-                if (btnTerminal) btnTerminal->setChecked(false);
-                if (btnAIChat)   btnAIChat->setChecked(false);
-            }
-        }
-    });
+    //         // Умное управление док-виджетами и кнопками на основе ключа userData
+    //         QString currentKey = ui->fileComboBox->itemData(index).toString();
+    //         if (currentKey == "MAIN_SCREEN")
+    //         {
+    //             updateCustomTitle("");
+    //             if (btnTerminal) {
+    //                 btnTerminal->setChecked(true);
+    //                 btnTerminal->setProperty("active", true); // Добавить эту строчку!
+    //                 btnTerminal->style()->unpolish(btnTerminal);
+    //                 btnTerminal->style()->polish(btnTerminal);
+    //             }
+    //             if (btnAIChat) btnAIChat->setChecked(false);
+    //         }
+    //         else if (currentKey == "AI_CHAT_SCREEN")
+    //         {
+    //             updateCustomTitle("");
+    //             //if (ui->rightDockWidget) ui->rightDockWidget->setVisible(false); // Прячем док
+    //             if (btnAIChat)   btnAIChat->setChecked(true);    // Зажигаем Чат в статусбаре
+    //             if (btnTerminal) btnTerminal->setChecked(false); // Тушим Терминал
+    //         }
+    //         else
+    //         {
+    //             QString fileName = ui->fileComboBox->itemText(index);
+    //             fileName.remove(" *"); // Убираем маркер несохраненных изменений со звездочкой
+    //             updateCustomTitle(fileName);
+    //             // Если выбран любой динамический файл кода (индексы >= 2)
+    //             //if (ui->rightDockWidget) ui->rightDockWidget->setVisible(false);
+    //             if (btnTerminal) btnTerminal->setChecked(false);
+    //             if (btnAIChat)   btnAIChat->setChecked(false);
+    //         }
+    //     }
+    // });
 
     // 3. Коннект кнопки закрытия текущего файла
     connect(ui->btnCloseFile, &QPushButton::clicked, this, &Neuro_programm::onCloseCurrentFileClicked);
@@ -1019,62 +1039,87 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // Найдите этот блок внутри конструктора Neuro_programm::Neuro_programm:
 
     // СИНХРОНИЗАЦИЯ СМЕНЫ ВКЛАДОК (КОРРЕКТНЫЙ ВАРИАНТ)
+    // =========================================================================
+    // ЕДИНАЯ СИНХРОНИЗАЦИЯ СМЕНЫ ВКЛАДОК И ОБНОВЛЕНИЯ ЗАГЛОВКА
+    // =========================================================================
     connect(ui->fileComboBox, &QComboBox::currentIndexChanged, this, [this](int index) {
-        if (index >= 0 && index < ui->centralStackedWidget->count())
+        if (index < 0 || index >= ui->centralStackedWidget->count()) return;
+
+        // 1. Перелистываем страницу главного стэка
+        ui->centralStackedWidget->setCurrentIndex(index);
+
+        // 2. Синхронизируем выделение строки в левом боковом списке открытых документов
+        if (ui->openFilesListWidget) {
+            ui->openFilesListWidget->setCurrentRow(index);
+        }
+
+        // 3. Считываем ключ userData текущей вкладки
+        QString currentKey = ui->fileComboBox->itemData(index).toString();
+
+        if (currentKey == "MAIN_SCREEN")
         {
-            // Перелистываем страницу стэка редактора кода
-            ui->centralStackedWidget->setCurrentIndex(index);
+            // Сбрасываем заголовок до уровня проекта
+            updateCustomTitle("");
 
-            // Синхронизируем выделение строки в левом боковом списке открытых документов
-            if (ui->openFilesListWidget) {
-                ui->openFilesListWidget->setCurrentRow(index);
+            // Настройка кнопок статусбара
+            if (btnTerminal) {
+                btnTerminal->setChecked(true);
+                btnTerminal->setProperty("active", true);
+                btnTerminal->style()->unpolish(btnTerminal);
+                btnTerminal->style()->polish(btnTerminal);
             }
+            if (btnAIChat) btnAIChat->setChecked(false);
 
-            QString currentKey = ui->fileComboBox->itemData(index).toString();
-
-            if (currentKey == "MAIN_SCREEN")
-            {
-                if (btnTerminal) btnTerminal->setChecked(true);
-                if (btnAIChat) btnAIChat->setChecked(false);
-
-                // На сервисных экранах плавно скрываем нижний список документов в 0px
-                if (ui->openFilesContainer && ui->leftVerticalSplitter) {
-                    ui->openFilesContainer->setVisible(false);
-                    ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
-                }
-            }
-            else if (currentKey == "AI_CHAT_SCREEN")
-            {
-                if (btnAIChat) btnAIChat->setChecked(true);
-                if (btnTerminal) btnTerminal->setChecked(false);
-
-                // На экране чата тоже скрываем нижнюю панель документов в 0px
-                if (ui->openFilesContainer && ui->leftVerticalSplitter) {
-                    ui->openFilesContainer->setVisible(false);
-                    ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
-                }
-            }
-            else
-            {
-                // ЕСЛИ ВЫБРАН ЛЮБОЙ РЕАЛЬНЫЙ С КРИПТ ИЛИ ФАЙЛ КОДА (ИНДЕКСЫ >= 2)
-                if (btnTerminal) btnTerminal->setChecked(false);
-                if (btnAIChat) btnAIChat->setChecked(false);
-
-                // ГЛАВНЫЙ ИСПРАВЛЯЮЩИЙ ТРИГГЕР: Выдвигаем нижнюю панель на экран!
-                if (ui->openFilesContainer && ui->leftVerticalSplitter)
-                {
-                    ui->openFilesContainer->setVisible(true);
-
-                    // Задаем жесткие, видимые пропорции сплиттеру (180 пикселей под список файлов)
-                    int totalHeight = ui->leftVerticalSplitter->height();
-                    if (totalHeight <= 0) totalHeight = 600; // Страховка для старта
-
-                    ui->leftVerticalSplitter->setSizes(QList<int>({totalHeight - 180, 180}));
-                    ui->leftVerticalSplitter->update();
-                }
+            // Скрываем нижний список документов на сервисных экранах
+            if (ui->openFilesContainer && ui->leftVerticalSplitter) {
+                ui->openFilesContainer->setVisible(false);
+                ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
             }
         }
+        else if (currentKey == "AI_CHAT_SCREEN")
+        {
+            // Сбрасываем заголовок до уровня проекта
+            updateCustomTitle("");
+
+            if (btnAIChat) btnAIChat->setChecked(true);
+            if (btnTerminal) btnTerminal->setChecked(false);
+
+            // Скрываем нижнюю панель документов на экране чата
+            if (ui->openFilesContainer && ui->leftVerticalSplitter) {
+                ui->openFilesContainer->setVisible(false);
+                ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
+            }
+        }
+        else
+        {
+            // --- ЕСЛИ ВЫБРАН РЕАЛЬНЫЙ ФАЙЛ КОДА (ИНДЕКСЫ >= 2) ---
+            // ЖЕЛЕЗНЫЙ ФИКС: Берем не текст, а сохраненный полный путь к файлу на диске
+            QString fullFilePath = ui->fileComboBox->itemData(index).toString();
+
+            if (!fullFilePath.isEmpty()) {
+                // Класс QFileInfo мгновенно и чисто вырежет имя файла из любого пути
+                QFileInfo fileInfo(fullFilePath);
+                QString pureFileName = fileInfo.fileName(); // Получим чистое "train.py"
+
+                // Устанавливаем заголовок в формате: имя_файла@имя_проекта — pyTorch Studio
+                updateCustomTitle(pureFileName);
+            }
+
+            if (btnTerminal) btnTerminal->setChecked(false);
+            if (btnAIChat) btnAIChat->setChecked(false);
+
+            // Выдвигаем нижнюю панель со списком открытых файлов на экран
+            if (ui->openFilesContainer && ui->leftVerticalSplitter) {
+                ui->openFilesContainer->setVisible(true);
+                int totalHeight = ui->leftVerticalSplitter->height();
+                if (totalHeight <= 0) totalHeight = 600;
+                ui->leftVerticalSplitter->setSizes(QList<int>({totalHeight - 180, 180}));
+                ui->leftVerticalSplitter->update();
+            }
+        }
+
     });
+
 
     // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm::Neuro_programm ---
 
@@ -2132,6 +2177,8 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         ui->fileComboBox->addItem(info.fileName(), filePath);
         ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
     }
+    updateCustomTitle(info.fileName());
+
 
     // ШАГ В (ГЛАВНЫЙ СУПЕР-ФИКС ГЕОМЕТРИИ):
     // Принудительно разворачиваем нижний контейнер, ломая любые запреты из Qt Designer
@@ -2170,6 +2217,11 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         }
         updateTabName();
     }); //
+    QFileInfo finalFileInfo(filePath);
+    qDebug() << "=== ПОПЫТКА ОБНОВИТЬ ЗАГОЛОВОК ДЛЯ ФАЙЛА:" << finalFileInfo.fileName() << "===";
+
+    // Принудительно вызываем обновление заголовка по чистому имени файла!
+    updateCustomTitle(finalFileInfo.fileName());
 }
 
 void Neuro_programm::onCloseCurrentFileClicked()
@@ -7740,6 +7792,35 @@ void Neuro_programm::onReplaceAll() {
 
     // Выводим отчет в статусбар
     ui->statusbar->showMessage(QString("✔ Успешно заменено совпадений: %1").arg(replaceCount), 4000);
+}
+
+void Neuro_programm::updateCustomTitle(const QString &fileName) {
+    // ПРОВЕРКА №1: Проверяем, существует ли сам графический элемент на форме
+    if (!titleLabel) {
+        qDebug() << "❌ КРИТИЧЕСКАЯ ОШИБКА: Указатель titleLabel равен nullptr!";
+        return;
+    }
+
+    QString projectName = "";
+    if (!currentOpenProjectPath.isEmpty()) {
+        QFileInfo projectInfo(currentOpenProjectPath);
+        projectName = projectInfo.fileName();
+    }
+
+    QString finalTitleText = "";
+    if (fileName.isEmpty()) {
+        if (!projectName.isEmpty()) finalTitleText = QString("%1 — PyTorch Studio").arg(projectName);
+        else finalTitleText = "PyTorch Studio";
+    } else {
+        if (!projectName.isEmpty()) finalTitleText = QString("%1@%2 — PyTorch Studio").arg(fileName, projectName);
+        else finalTitleText = QString("%1 — PyTorch Studio").arg(fileName);
+    }
+
+    // Выводим в лог то, что сейчас попытаемся нарисовать на экране
+    qDebug() << "🎯 Успешно устанавливаем текст в кастомную шапку:" << finalTitleText;
+
+    // Физически меняем текст на экране приложения
+    titleLabel->setText(finalTitleText);
 }
 
 
