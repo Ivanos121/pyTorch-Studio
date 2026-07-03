@@ -8,6 +8,8 @@
 #include "start_progect.h"
 #include "panel_other.h"
 #include "search.h"
+#include "elidedlabel.h"
+#include "ai_panel.h"
 
 #include <QMainWindow>
 #include <QCompleter>
@@ -22,6 +24,8 @@
 #include <QIODevice>
 #include <QtCharts/QChartView>
 #include <QtCharts/QChart>
+#include <QPointer>
+#include <QTextBrowser>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -37,13 +41,16 @@ public:
     explicit Neuro_programm(QWidget *parent = nullptr);
     ~Neuro_programm() override;
     Ui::Neuro_programm *ui;
+    class AI_panel *aiPanel = nullptr;
 
     void sync();
+    void setIDEInStartMode(bool isStartMode);
     void open_project(const QString &path = "");
     void forceOpenConsoleWithError(const QString &errorMessage);
     void processEnvironmentAndSync(const QString &projectPath, const QString &architecture = "AUTO");
     QString calculateFileMd5(const QString &filePath);
     void syncVenvToRequirements();
+    void updateProjectsListFromSettings();
     static Neuro_programm* self;
     QString getCurrentOpenFilePath() const;
     void sendLspRequest(const QString &method, const QJsonObject &params, int id = 0);
@@ -70,10 +77,13 @@ public:
     QProcess *lspProcess = nullptr;
     QProcess *tensorboardProcess = nullptr;
     panel_other *panelOther;
-
-
-
+    QPointer<QTextBrowser> m_docWindow;
     void updateCustomTitle(const QString &fileName);
+
+public slots:
+    void updateJediStatusText(const QString &message, bool isError);
+
+    void updateJediStatusTextFromLsp(int errorCount);
 signals:
     void signalSendChunkToConsole(const QString &text);
     void completionDataReceived(const QStringList &completions);
@@ -103,13 +113,14 @@ protected slots:
     void onFindNext();
     void onFindPrev();
     void onSelectAll();
+    void loadProjectFromSettingsList(QListWidgetItem *item);
 
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
     void sendSystemNotification(const QString &title, const QString &text);
     void initProjectTreeModel(QString path);
-    void initLossChart();
+    //void initLossChart();
     void updateRecentProjectActions();   // Метод перерисовки списка в меню
     void addProjectToRecent(const QString &projectPath); // Метод добавления нового пути
     void initLspServer();
@@ -127,6 +138,7 @@ private:
     void applyThemeColors(bool isDarkTheme);
     QString getSafeSaveFolderPath();
     void saveSettings();
+    void updateCursorPositionIndicator();
 
 
 private slots:
@@ -163,11 +175,13 @@ private slots:
 
 private:
     Start_progect *rsc;
+    QString m_pendingAutoloadFile;
     Settings    *rsc2;
     About_program *rsc3;
     QWidget *rsc4;
     Search *search;
-    //ProjectRootProxyModel *projectProxyModel;
+    QAction *actProject;
+    ElidedLabel *statusLogLabel;
     QFileSystemModel *projectModel = nullptr;
     ProjectRootProxyModel *projectProxyModel = nullptr;
     QSplitter   *mainVerticalSplitter;
@@ -177,7 +191,6 @@ private:
     QPushButton *btnTogglePip;
     QPushButton *btnAIChat;
     QPushButton *btnStartDebug;
-    //QFileSystemModel *projectModel;
     QProcess *trainingProcess;
     QChart      *lossChart;
     QLineSeries *lossSeries;
@@ -202,7 +215,10 @@ private:
     QPushButton *topBtnInfo = nullptr;
     QPushButton *topBtnStatus = nullptr;
     QPushButton *topBtnSettings = nullptr;
+    QWidget *statusSpacer = nullptr;
     QByteArray m_lspAccumulatedBuffer;
+    QWidget *leftSideBarContainer = nullptr;
+
     bool m_dragging = false;
     bool m_isDragging = false;
     class QSpacerItem *leftPaddingSpacer = nullptr; // Указатель на левый отступ фальш-панели
@@ -210,7 +226,10 @@ private:
     QString currentFilePath;
     QTimer *monitorTimer;
     QProcess *debuggedScriptProcess;
-    //QLabel *titleLabel;
+    QAction *actControlPanel;
+    QAction *actTensor;
+    QAction *actPip;
+    QAction *actSearch;
     void updateTabName();
     void setFileModifiedState(CodeEditor *editor, bool modified);
     bool archiveProject(const QString &sourceDir, const QString &outputSavePath);
@@ -227,5 +246,6 @@ private:
     QProcess *torchCacheProc = nullptr;
     CodeEditor* getCurrentEditor();
     void highlightCurrentMatch(QTextCursor symbolCursor);
+    void updateFunctionNavigator(CodeEditor *editor);
 };
 #endif // NEURO_PROGRAMM_H

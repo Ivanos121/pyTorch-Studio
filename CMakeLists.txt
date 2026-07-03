@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Поиск необходимых модулей Qt (извлекаем модули на основе ваших инклудов)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets Concurrent)
 
 # Список всех исходных файлов (.cpp) вашего проекта
 set(PROJECT_SOURCES
@@ -23,6 +23,7 @@ set(PROJECT_SOURCES
     src/codeeditor.cpp
     src/help_window.cpp
     src/main.cpp
+    src/minimaparea.cpp
     src/neuro_programm.cpp
     src/panel_other.cpp
     src/projectrootproxymodel.cpp
@@ -32,6 +33,10 @@ set(PROJECT_SOURCES
     src/start_progect.cpp
     src/statusbuttonstyle.cpp
     src/terminalwidget.cpp
+    src/editorplaceholder.cpp
+    src/stickyscrollarea.cpp
+    src/qhtmldelegate.cpp
+    src/elidedlabel.cpp
 
     src/FolderBlockData.h
     src/about_program.h
@@ -40,6 +45,7 @@ set(PROJECT_SOURCES
     src/breezeflatstyle.h
     src/codeeditor.h
     src/help_window.h
+    src/minimaparea.h
     src/neuro_programm.h
     src/panel_other.h
     src/projectrootproxymodel.h
@@ -49,6 +55,10 @@ set(PROJECT_SOURCES
     src/start_progect.h
     src/statusbuttonstyle.h
     src/terminalwidget.h
+    src/editorplaceholder.h
+    src/stickyscrollarea.h
+    src/qhtmldelegate.h
+    src/elidedlabel.h
 )
 
 # Список всех файлов интерфейса (.ui)
@@ -72,7 +82,20 @@ add_executable(pytorch-studio
     ${PROJECT_SOURCES}
     ${PROJECT_FORMS}
     ${PROJECT_RESOURCES}
+    src/minimaparea.h src/minimaparea.cpp
+    src/editorplaceholder.h src/editorplaceholder.cpp
+    src/stickyscrollarea.h src/stickyscrollarea.cpp
+    src/qhtmldelegate.h src/qhtmldelegate.cpp
+    src/elidedlabel.h src/elidedlabel.cpp
+    src/ai_panel.h src/ai_panel.cpp src/ai_panel.ui
 )
+
+# Путь к заголовочным файлам виджета терминала
+target_include_directories(pytorch-studio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/utils/qtermwidget/include)
+
+# Путь к библиотеке терминала
+target_link_libraries(pytorch-studio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/utils/qtermwidget/lib/libqtermwidget6.so)
+
 
 # Указываем CMake искать заголовочные файлы в корне проекта
 # Это позволит компилятору находить <panel_other.h> и другие локальные файлы
@@ -89,7 +112,7 @@ target_link_libraries(pytorch-studio PRIVATE
     Qt${QT_VERSION_MAJOR}::Charts   # Для графиков Loss/Accuracy
     Qt${QT_VERSION_MAJOR}::Network  # Для API-запросов к Ollama ИИ
     Qt${QT_VERSION_MAJOR}::WebEngineWidgets  # Для API-запросов к Ollama ИИ
-
+    Qt${QT_VERSION_MAJOR}::Concurrent  # Для API-запросов к Ollama ИИ
 )
 
 # Установка имени WM_CLASS для Wayland (чтобы работала иконка приложения)
@@ -107,5 +130,8 @@ target_compile_definitions(pytorch-studio PRIVATE
     APP_VERSION_MAJOR=1
     APP_VERSION_MINOR=0
     APP_VERSION_PATCH=0
-    APP_BUILD_NUMBER="1.0.260624"  # Наш номер сборки из прошлого шага
 )
+
+# Включаем использование RPATH для поиска библиотек относительно исполняемого файла
+set(CMAKE_BUILD_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/utils/qtermwidget/lib")
+set(CMAKE_INSTALL_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/utils/qtermwidget/lib")

@@ -31,13 +31,13 @@
         <property name="minimumSize">
          <size>
           <width>84</width>
-          <height>0</height>
+          <height>34</height>
          </size>
         </property>
         <property name="maximumSize">
          <size>
-          <width>84</width>
-          <height>16777215</height>
+          <width>0</width>
+          <height>34</height>
          </size>
         </property>
         <property name="text">
@@ -53,6 +53,12 @@
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>34</height>
+         </size>
+        </property>
         <property name="text">
          <string>Далее &gt;</string>
         </property>
@@ -65,6 +71,12 @@
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>34</height>
+         </size>
         </property>
         <property name="text">
          <string>Отмена</string>
@@ -157,6 +169,12 @@
         </item>
         <item row="1" column="2">
          <widget class="QPushButton" name="btn_dyr_folder">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>34</height>
+           </size>
+          </property>
           <property name="text">
            <string>Обзор</string>
           </property>
@@ -204,6 +222,12 @@
         </item>
         <item row="1" column="1">
          <widget class="QPushButton" name="btn_dyr2">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>34</height>
+           </size>
+          </property>
           <property name="text">
            <string>Обзор</string>
           </property>
@@ -221,6 +245,12 @@
         </item>
         <item row="3" column="1">
          <widget class="QPushButton" name="btn_dyr">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>34</height>
+           </size>
+          </property>
           <property name="text">
            <string>Обзор</string>
           </property>
@@ -300,9 +330,15 @@
         <rect>
          <x>340</x>
          <y>180</y>
-         <width>88</width>
-         <height>34</height>
+         <width>0</width>
+         <height>0</height>
         </rect>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
        </property>
        <property name="text">
         <string>Обзор</string>

@@ -22,10 +22,13 @@
 #include <QHelpEvent>
 #include <QToolTip>
 #include <QTextBlock>
+#include <QHBoxLayout>
 
 class CodeEditor;
 class Neuro_program;
 class FoldingArea;
+class MinimapArea;
+class StickyScrollArea;
 
 // =========================================================================
 // ШАГ 1: СТРУКТУРА БЫСТРЫХ ИСПРАВЛЕНИЙ ПЕРЕНЕСЕНА НАВЕРХ (ДО КЛАССА EDITOR)
@@ -45,6 +48,9 @@ public:
     int indentLevel = 0;     // Уровень отступа строки
     bool isFoldStart = false; // Начало блока (def/class)
     bool isFolded = false;    // Свернут ли блок
+
+    enum ChangeState { Unchanged, Modified, Saved };
+    ChangeState changeState = Unchanged;
 };
 
 class PythonHighlighter : public QSyntaxHighlighter
@@ -97,7 +103,21 @@ public:
     QStringList temporaryOpenFilesBackup;
     void updateFoldingData();
     void registerCompletionWidgets(QWidget* popup, QListWidget* list);
+    int getHorizontalOffset() const { return static_cast<int>(contentOffset().x()); }
+    int getVerticalOffset() const { return static_cast<int>(contentOffset().y()); }
+    int foldingAreaWidth() { return 16; }
+    QTextBlock getFirstVisibleBlock() const { return firstVisibleBlock(); }
+    int getFirstVisibleBlockTop() const {
+        return static_cast<int>(blockBoundingGeometry(firstVisibleBlock()).top());
+    }
+    static QWidget* createEditorWithMinimap(QWidget *parent, CodeEditor* &outEditor, MinimapArea* &outMinimap);
 
+    int getBlockTop(const QTextBlock &block) const {
+        return static_cast<int>(blockBoundingGeometry(block).top());
+    }
+    void handleMouseMoveFromEditor(const QPoint &pos);
+    void handleMouseLeaveFromEditor();
+    void setChangesAsSaved();
 
     struct LspErrorData {
         int line;
@@ -108,10 +128,12 @@ public:
     static QList<LspErrorData> currentLspErrors;
     QString currentFilePath;
 
+    void formatSelectedPythonCode();
 signals:
     void logMessage(const QString &message);
     void errorsCountChanged(int count);
     void selectionExecutionRequested(const QString &selectedText);
+    void documentationRequested(const QString &filePath, int line, int character);
 
 public slots:
     // Теперь этот слот скомпилируется без ошибок соответствия типов!
@@ -120,12 +142,14 @@ public slots:
 protected:
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *e) override;
+    void keyReleaseEvent(QKeyEvent *e) override;
     void foldingAreaPaintEvent(QPaintEvent *event);
     void foldingAreaMousePressEvent(QMouseEvent *event);
     void paintEvent(QPaintEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *e) override;
     bool event(QEvent *event) override;
-    void wheelEvent(QWheelEvent *e) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
+    void mousePressEvent(QMouseEvent *e) override;
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
@@ -140,18 +164,21 @@ private slots:
     void onAutoIndentRequested();
     void onRunCurrentFileRequested();
     void onCheckSyntaxRequested();
+    void showLspCompletionsInGui(const QStringList &completions);
+    void drawLspErrorsInGui(const QList<CodeEditor::LspErrorData> &errors);
 
 private:
-    QWidget *lineNumberArea;
     QCompleter *c = nullptr;
+    bool m_isInsertingMultiCaret = false;
+    qint64 m_lastKeyPressTime = 0;
     bool isLspFreeze = false;
     QPointer<QWidget> m_popupWindow;
     QListWidget *m_listWidget = nullptr;
     int m_startPosition = 0;
     FoldingArea *m_foldingArea = nullptr;
+    StickyScrollArea *m_stickyScrollWidget = nullptr;
     QProcess *lspProcess = nullptr;
     QTimer *lspDelayTimer = nullptr;
-    int foldingAreaWidth() { return 16; }
     void clearErrorHighlights();
     void highlightError(int startLine, int startChar, int endLine, int endChar, bool isError);
     int findMatchingBracket(int pos, QChar openBracket, QChar closeBracket, bool directionRight);
@@ -160,9 +187,14 @@ private:
     PythonHighlighter *m_highlighter = nullptr;
     int lspDocumentVersion = 1;
     QList<QTextEdit::ExtraSelection> m_lspSelectionsBuffer;
-    QList<QTextEdit::ExtraSelection> m_currentLspSelections; // Наш постоянный буфер ошибок вкладки
+    QList<QTextEdit::ExtraSelection> m_currentLspSelections;
     void sendLspDidOpen();
     QByteArray m_lspBuffer;
+    QWidget *lineNumberArea;
+    QWidget *m_foldingAreas;
+    MinimapArea *minimapArea;
+    QList<QTextCursor> m_virtualCursors;
+    void updateVirtualCursorHighlights();
 };
 
 class FoldingArea : public QWidget
