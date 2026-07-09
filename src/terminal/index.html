@@ -1,0 +1,33 @@
+cat << 'EOF' > /home/elf/pyTorch-Studio/src/terminal/index.html
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="xterm.css" />
+    <script src="qwebchannel.js"></script>
+    <script src="xterm.js"></script>
+    <style>
+        html, body, #terminal {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: #232629; overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div id="terminal"></div>
+    <script>
+        const term = new Terminal();
+        term.open(document.getElementById('terminal'));
+
+        new QWebChannel(qt.webChannelTransport, function (channel) {
+            const backend = channel.objects.backend;
+
+            document.getElementById('terminal').style.fontFamily = backend.fontFamily;
+            document.getElementById('terminal').style.fontSize = backend.fontSize + 'pt';
+
+            backend.sendOutput.connect(function (text) {
+                term.write(text);
+            });
+        });
+    </script>
+</body>
+</html>

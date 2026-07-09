@@ -30,6 +30,76 @@
     <property name="spacing">
      <number>0</number>
     </property>
+    <item row="0" column="0" colspan="2">
+     <widget class="QWidget" name="customTitleBarPanel" native="true">
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
+        <height>30</height>
+       </size>
+      </property>
+      <property name="mouseTracking">
+       <bool>false</bool>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="1">
+     <widget class="Search" name="search_panel" native="true"/>
+    </item>
+    <item row="2" column="0">
+     <widget class="QListWidget" name="quickActionsList">
+      <property name="minimumSize">
+       <size>
+        <width>250</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="maximumSize">
+       <size>
+        <width>250</width>
+        <height>16777215</height>
+       </size>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QListWidget#quickActionsList {
+    background-color: #f8f9fa;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #333333;
+    padding: 5px;
+}
+QListWidget#quickActionsList::item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #e2e8f0;
+}
+QListWidget#quickActionsList::item:hover {
+    background-color: #eaedf1;
+    border-radius: 4px;
+}
+QListWidget#quickActionsList::item:selected {
+    background-color: #0056b3;
+    color: white;
+    border-radius: 4px;
+}
+</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>📝 Документировать код</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>🔍 Найти баги</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>🚀 Оптимизировать код</string>
+       </property>
+      </item>
+     </widget>
+    </item>
     <item row="1" column="0" colspan="2">
      <widget class="QWidget" name="widget_3" native="true">
       <property name="sizePolicy">
@@ -211,29 +281,6 @@ QPushButton:disabled {
         </spacer>
        </item>
       </layout>
-     </widget>
-    </item>
-    <item row="4" column="1">
-     <widget class="panel_other" name="panelOther" native="true">
-      <property name="maximumSize">
-       <size>
-        <width>16777215</width>
-        <height>0</height>
-       </size>
-      </property>
-     </widget>
-    </item>
-    <item row="0" column="0" colspan="2">
-     <widget class="QWidget" name="customTitleBarPanel" native="true">
-      <property name="minimumSize">
-       <size>
-        <width>0</width>
-        <height>30</height>
-       </size>
-      </property>
-      <property name="mouseTracking">
-       <bool>false</bool>
-      </property>
      </widget>
     </item>
     <item row="2" column="1">
@@ -485,63 +532,6 @@ QTextEdit#inputChatText:focus {
        </layout>
       </widget>
      </widget>
-    </item>
-    <item row="2" column="0">
-     <widget class="QListWidget" name="quickActionsList">
-      <property name="minimumSize">
-       <size>
-        <width>250</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="maximumSize">
-       <size>
-        <width>250</width>
-        <height>16777215</height>
-       </size>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">QListWidget#quickActionsList {
-    background-color: #f8f9fa;
-    border: 1px solid #cbd5e1;
-    border-radius: 6px;
-    color: #333333;
-    padding: 5px;
-}
-QListWidget#quickActionsList::item {
-    padding: 8px 12px;
-    border-bottom: 1px solid #e2e8f0;
-}
-QListWidget#quickActionsList::item:hover {
-    background-color: #eaedf1;
-    border-radius: 4px;
-}
-QListWidget#quickActionsList::item:selected {
-    background-color: #0056b3;
-    color: white;
-    border-radius: 4px;
-}
-</string>
-      </property>
-      <item>
-       <property name="text">
-        <string>📝 Документировать код</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>🔍 Найти баги</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>🚀 Оптимизировать код</string>
-       </property>
-      </item>
-     </widget>
-    </item>
-    <item row="3" column="1">
-     <widget class="Search" name="search_panel" native="true"/>
     </item>
    </layout>
   </widget>
@@ -830,12 +820,6 @@ QListWidget#quickActionsList::item:selected {
    <class>QWebEngineView</class>
    <extends>QWidget</extends>
    <header location="global">QtWebEngineWidgets/QWebEngineView</header>
-  </customwidget>
-  <customwidget>
-   <class>panel_other</class>
-   <extends>QWidget</extends>
-   <header location="global">panel_other.h</header>
-   <container>1</container>
   </customwidget>
   <customwidget>
    <class>Search</class>

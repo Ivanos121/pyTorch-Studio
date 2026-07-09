@@ -12,7 +12,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Поиск необходимых модулей Qt (извлекаем модули на основе ваших инклудов)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets Concurrent WebChannel)
+
+set(KF6_VERSION "6.26.0" CACHE STRING "Force KF6 Version" FORCE)
+set(KF6Parts_VERSION "6.26.0" CACHE STRING "Force KF6 Parts Version" FORCE)
+
+find_package(KF6Parts REQUIRED)
 
 # Список всех исходных файлов (.cpp) вашего проекта
 set(PROJECT_SOURCES
@@ -88,13 +93,10 @@ add_executable(pytorch-studio
     src/qhtmldelegate.h src/qhtmldelegate.cpp
     src/elidedlabel.h src/elidedlabel.cpp
     src/ai_panel.h src/ai_panel.cpp src/ai_panel.ui
+    src/pythonenvmanager.h src/pythonenvmanager.cpp
+    src/projectbuilderworker.h src/projectbuilderworker.cpp
 )
 
-# Путь к заголовочным файлам виджета терминала
-target_include_directories(pytorch-studio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/utils/qtermwidget/include)
-
-# Путь к библиотеке терминала
-target_link_libraries(pytorch-studio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/utils/qtermwidget/lib/libqtermwidget6.so)
 
 
 # Указываем CMake искать заголовочные файлы в корне проекта
@@ -113,6 +115,12 @@ target_link_libraries(pytorch-studio PRIVATE
     Qt${QT_VERSION_MAJOR}::Network  # Для API-запросов к Ollama ИИ
     Qt${QT_VERSION_MAJOR}::WebEngineWidgets  # Для API-запросов к Ollama ИИ
     Qt${QT_VERSION_MAJOR}::Concurrent  # Для API-запросов к Ollama ИИ
+    Qt${QT_VERSION_MAJOR}::WebChannel  # Для API-запросов к Ollama ИИ
+    KF6::Parts
+)
+
+target_link_libraries(pytorch-studio PRIVATE
+    KF6::Parts
 )
 
 # Установка имени WM_CLASS для Wayland (чтобы работала иконка приложения)
@@ -131,7 +139,3 @@ target_compile_definitions(pytorch-studio PRIVATE
     APP_VERSION_MINOR=0
     APP_VERSION_PATCH=0
 )
-
-# Включаем использование RPATH для поиска библиотек относительно исполняемого файла
-set(CMAKE_BUILD_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/utils/qtermwidget/lib")
-set(CMAKE_INSTALL_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/utils/qtermwidget/lib")

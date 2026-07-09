@@ -10,6 +10,7 @@
 #include "search.h"
 #include "elidedlabel.h"
 #include "ai_panel.h"
+#include "pythonenvmanager.h"
 
 #include <QMainWindow>
 #include <QCompleter>
@@ -36,6 +37,8 @@ QT_END_NAMESPACE
 class Neuro_programm : public QMainWindow
 {
     Q_OBJECT
+
+    friend class panel_other;
 
 public:
     explicit Neuro_programm(QWidget *parent = nullptr);
@@ -93,7 +96,6 @@ protected:
     void showEvent(QShowEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
-    void paintEvent(QPaintEvent *event) override;
     void changeEvent(QEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
     void mousePressEvent(QMouseEvent *event) override;
@@ -139,6 +141,11 @@ private:
     QString getSafeSaveFolderPath();
     void saveSettings();
     void updateCursorPositionIndicator();
+    void updateBottomPanelGeometry();
+    void initializeEnvironmentOnStartup();
+    void showVenvEmergencyDialog(const QString &reason);
+    void load_progect(const QString &projectPath);
+    bool createProjectPassport(const QString &projectName, const QString &projectFolderPath, bool useGpuArchitecture);
 
 
 private slots:
@@ -174,6 +181,7 @@ private slots:
     void onReplaceAll();
 
 private:
+    PythonEnvManager *envManager;
     Start_progect *rsc;
     QString m_pendingAutoloadFile;
     Settings    *rsc2;
@@ -239,7 +247,6 @@ private:
     void sendLspDidOpenForFile(const QString &filePath, const QString &fileContent);
     void checkAndCreateVenvAsync(const QString &projectPath, bool isFreshExtract = false);
     void installPackagesFromRequirements(const QString &workingDir, const QString &pythonPath, const QString &reqPath);
-    void printToConsole(const QByteArray &rawBytes);
     void startTensorBoard(const QString &logDir);
     void updateAiStackCache();
     QString cachedOllamaVersion;
@@ -247,5 +254,6 @@ private:
     CodeEditor* getCurrentEditor();
     void highlightCurrentMatch(QTextCursor symbolCursor);
     void updateFunctionNavigator(CodeEditor *editor);
+    void on_btnSidebarTerminal_clicked();
 };
 #endif // NEURO_PROGRAMM_H

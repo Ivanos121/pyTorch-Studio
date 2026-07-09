@@ -134,6 +134,7 @@ signals:
     void errorsCountChanged(int count);
     void selectionExecutionRequested(const QString &selectedText);
     void documentationRequested(const QString &filePath, int line, int character);
+    void definitionRequested(const QString &filePath, int line, int column);
 
 public slots:
     // Теперь этот слот скомпилируется без ошибок соответствия типов!

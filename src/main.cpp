@@ -10,6 +10,7 @@
 #include <QMutexLocker>
 #include <QVBoxLayout>
 #include <QGraphicsDropShadowEffect>
+#include <QFontInfo>
 
 // =========================================================================
 // ШАГ 1.1: СОЗДАЕМ ГЛОБАЛЬНЫЙ ОБЪЕКТ ФАЙЛА ДЛЯ ДОСТУПА ИЗ ХЕНДЛЕРА
@@ -79,17 +80,50 @@ int main(int argc, char *argv[])
 {
     qputenv("QT_QPA_PLATFORMTHEME", "kde");
     qputenv("XDG_CURRENT_DESKTOP", "KDE");
+    qputenv("FONTCONFIG_FILE", "/etc/fonts/fonts.conf");
+    qputenv("FONTCONFIG_PATH", "/etc/fonts");
+
+    // =========================================================================
+    // КРИТИЧЕСКИЙ ФИКС БЛОКИРОВКИ СТАРТА ТЕКСТА (ОБХОД CORS ДЛЯ FILE://)
+    // =========================================================================
+    // Разрешаем Chromium загружать JS-модули xterm.js напрямую с жесткого диска
+    qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-web-security --allow-file-access-from-files");
+
+// Отключаем размытие шрифтов при масштабировании интерфейса
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::Round);
+#endif
+
     QApplication a(argc, argv);
 
-    a.setDesktopFileName("pytorch-studio");
-    QCoreApplication::setOrganizationName("PyTorchStudio");
-    QCoreApplication::setApplicationName("IDE");
+    QFont globalFixedFont;
+    globalFixedFont.setFamily("Liberation Mono"); // Ваш проверенный шрифт
+    globalFixedFont.setStyleHint(QFont::TypeWriter);
+    globalFixedFont.setFixedPitch(true);
+    globalFixedFont.setPointSize(10);
+
+    // Накатываем шрифт глобально на все будущие виджеты программы
+    a.setFont(globalFixedFont);
+
+    QFontInfo appFontInfo(a.font());
+
+    qDebug() << "================== ТЕСТ ЯДРА QT (main.cpp) ==================";
+    qDebug() << "Реальное семейство шрифта приложения:" << appFontInfo.family();
+    qDebug() << "Флаг моноширинности (Fixed Pitch):"
+             << (appFontInfo.fixedPitch() ? "🟢 ДА, МОНОШИРИННЫЙ" : "🔴 НЕТ, ПРОПОРЦИОНАЛЬНЫЙ");
+    qDebug() << "============================================================";
+
+    //a.setDesktopFileName("pytorch-studio");
+    //QCoreApplication::setOrganizationName("PyTorchStudio");
+    QCoreApplication::setApplicationName("pytorch-studio");
 
     a.setDesktopFileName("pytorch-studio");
-    a.setApplicationName("pytorch-studio");
+   // a.setApplicationName("pytorch-studio");
 
     QIcon appIcon(":/Data/Icons/pytorch-studio.svg");
     a.setWindowIcon(appIcon);
+
+
 
     // Формируем строковую версию из макросов сборщика: "2026.1-LTS"
     QString appVersion = QString("%1.%2-%3")
