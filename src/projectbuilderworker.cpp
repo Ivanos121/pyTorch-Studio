@@ -10,15 +10,17 @@ ProjectBuilderWorker::ProjectBuilderWorker(const QString &projectPath,
                                            bool useGpu,
                                            bool useCustomReq,
                                            const QString &customReqPath,
-                                           const QString &venvPath,
+                                           const QString &customVenvPath,
+                                           bool isExistingVenvMode,
                                            QObject *parent)
-    : QObject(parent)
-    , m_projectPath(projectPath)
-    , m_projectName(projectName)
-    , m_useGpu(useGpu)
-    , m_useCustomReq(useCustomReq)
-    , m_customReqPath(customReqPath)
-    , m_venvPath(venvPath)
+    : QObject(parent),
+    m_projectPath(projectPath),
+    m_projectName(projectName),
+    m_useGpu(useGpu),
+    m_useCustomReq(useCustomReq),
+    m_customReqPath(customReqPath),
+    m_customVenvPath(customVenvPath),
+    m_isExistingVenvMode(isExistingVenvMode)
 {
 }
 
@@ -26,17 +28,38 @@ void ProjectBuilderWorker::startBuildPipeline()
 {
     emit logOutputReceived("🚀 <b>[СТАРТ] Начало сборки MLOps-окружения проекта " + m_projectName + "</b><br>");
 
-    // СТАДИЯ 1: GIT И .GITIGNORE
+    // СТАДИЯ 1: GIT И .GITIGNORE (Общая для всех режимов)
     if (!initializeGitRepository()) return;
 
-    // СТАДИЯ 2: СОЗДАНИЕ VENV
     QString finalVenvPath;
-    if (!createVirtualEnvironment(finalVenvPath)) return;
+
+    // ВЕТВЛЕНИЕ В ЗАВИСИМОСТИ ОТ ВЫБОРА ПОЛЬЗОВАТЕЛЯ
+    if (m_isExistingVenvMode) {
+        // РЕЖИМ А: Использование внешнего существующего venv
+        emit logOutputReceived("🔗 <b>[СТАДИЯ 2] Проверка существующего виртуального окружения...</b>");
+
+        if (!validateExistingEnvironment(m_customVenvPath)) {
+            emit pipelineBuildFinished(false, "Указанная папка не является валидным venv (отсутствует интерпретатор).");
+            return;
+        }
+
+        finalVenvPath = m_customVenvPath; // Фиксируем оригинальный внешний путь
+        emit logOutputReceived("  • Окружение успешно валидировано по адресу: <font color='#00FF00'>" + finalVenvPath + "</font>");
+        emit progressStepChanged(50, "Окружение привязано");
+
+    } else {
+        // РЕЖИМ Б: Создание нового venv внутри каталога проекта (Ваш старый код)
+        emit logOutputReceived("📦 <b>[СТАДИЯ 2] Создание нового изолированного venv в каталоге проекта...</b>");
+
+        if (!createVirtualEnvironment(finalVenvPath)) return;
+    }
 
     // СТАДИЯ 3: УСТАНОВКА ПАКЕТОВ (PIP)
+    // Если venv существующий — мы накатываем кастомные requirements (если пользователь попросил).
+    // Если venv новый — ставим базовый стек PyTorch.
     if (!installMLOpsDependencies(finalVenvPath)) return;
 
-    // СТАДИЯ 4: РЕГИСТРАЦИЯ В JUPYTER
+    // СТАДИЯ 4: РЕГИСТРАЦИЯ В JUPYTER (Фоновое ядро связывается с выбранным finalVenvPath)
     if (!registerJupyterKernel(finalVenvPath)) return;
 
     // ФИНАЛ УСПЕХА
@@ -44,6 +67,7 @@ void ProjectBuilderWorker::startBuildPipeline()
     emit progressStepChanged(100, "Готово");
     emit pipelineBuildFinished(true, "Проект успешно инициализирован.");
 }
+
 
 bool ProjectBuilderWorker::initializeGitRepository()
 {
@@ -71,7 +95,7 @@ bool ProjectBuilderWorker::createVirtualEnvironment(QString &outVenvPath)
 {
     emit progressStepChanged(2, "Создание виртуального окружения");
 
-    QString rawPath = m_venvPath.trimmed();
+    QString rawPath = m_customVenvPath.trimmed();
 
     // Убрана блокировка пути "/home/elf/venv"
     if (rawPath.isEmpty() || !QDir::isAbsolutePath(rawPath) ||
@@ -178,4 +202,26 @@ bool ProjectBuilderWorker::runSystemCommand(const QString &program, const QStrin
 
     process.waitForFinished(-1);
     return (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0);
+}
+
+bool ProjectBuilderWorker::validateExistingEnvironment(const QString &venvPath)
+{
+    if (venvPath.isEmpty()) return false;
+
+    QDir venvDir(venvPath);
+
+    // В зависимости от ОС исполняемый файл Python лежит в разных подпапках
+#if defined(Q_OS_WIN)
+    QString pythonBinaryPath = venvDir.absoluteFilePath("Scripts/python.exe");
+#else
+    QString pythonBinaryPath = venvDir.absoluteFilePath("bin/python");
+#endif
+
+    // Проверяем физическое существование файла на диске
+    if (!QFile::exists(pythonBinaryPath)) {
+        emit logOutputReceived("<font color='#FF0000'>❌ Ошибка: Интерпретатор Python не найден по пути: " + pythonBinaryPath + "</font>");
+        return false;
+    }
+
+    return true;
 }

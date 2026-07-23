@@ -9,7 +9,7 @@ class AdvancedCloseDialog : public QDialog {
     Q_OBJECT
 
 public:
-    AdvancedCloseDialog(bool hasModifiedFiles, bool isTraining, QWidget *parent = nullptr);
+    AdvancedCloseDialog(const QStringList &modifiedFiles, bool isTraining, QWidget *parent = nullptr);
     ~AdvancedCloseDialog() override = default;
 
     enum CustomResult {

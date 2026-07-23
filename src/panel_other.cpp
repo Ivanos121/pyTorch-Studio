@@ -17,6 +17,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QTimer>
+#include <QAction>
 
 panel_other::panel_other(QWidget *parent) :
     QWidget(parent),
@@ -184,6 +185,13 @@ panel_other::panel_other(QWidget *parent) :
         });
     }
 
+    // if (actDebug) {
+    //     connect(ui->termView, &QPushButton::clicked, this, [this]() {
+    //         ui->stackedWidget->setCurrentIndex(2);
+    //         ui->stackedWidget->show();
+    //     });
+    // }
+
     connect(ui->btnClose2, &QPushButton::clicked, this, &panel_other::close);
 
     // =========================================================================
@@ -264,11 +272,38 @@ panel_other::panel_other(QWidget *parent) :
             }
         });
     }
+
+    ui->logEdit->setStyleSheet(
+        "background-color: #000000; "
+        "color: #00FF00; "
+        "font-family: 'Courier New', 'Consolas', monospace; "
+        "font-size: 11pt; "
+        "border: 1px solid #333333;"
+        );
+
+    // Инициализируем обработчик прямо здесь, передавая ему вашу таблицу
+    m_stackHandler = new StackTableHandler(ui->callStackListWidget, this);
+
+    // Связываем сигнал двойного клика из обработчика с сигналом-ретранслятором панели
+    connect(m_stackHandler, &StackTableHandler::frameSelected,
+            this, &panel_other::fileNavigationRequested);
 }
 
 panel_other::~panel_other()
 {
     delete ui;
+}
+
+void panel_other::setCallStackData(const QList<StackFrame> &frames) {
+    // 1. Активируем нужную вкладку/страницу (индекс 2, где лежит таблица)
+    if (ui && ui->stackedWidget) {
+        ui->stackedWidget->setCurrentIndex(2);
+    }
+
+    // 2. Отправляем данные обработчику таблицы
+    if (m_stackHandler) {
+        m_stackHandler->updateTable(frames);
+    }
 }
 
 bool panel_other::eventFilter(QObject *obj, QEvent *event)
@@ -420,19 +455,38 @@ void panel_other::onReplReadyRead()
 
 void panel_other::appendTrainingLog(const QString &text)
 {
-    if (text.isEmpty()) return;
+    if (ui && ui->logEdit) {
+        // БЫЛО: ui->logEdit->append(text); или insertPlainText(text);
+        // СТАЛО: Заставляем текстовое поле парсить неоновые цвета и теги жирности <b>
+        ui->logEdit->appendHtml(text);
 
-    QTextCursor cursor = ui->logEdit->textCursor();
-    cursor.movePosition(QTextCursor::End);
-
-    if (text.contains('\r')) {
-        cursor.select(QTextCursor::LineUnderCursor);
-        cursor.removeSelectedText();
-        QString cleanText = text;
-        cleanText.remove('\r');
-        cursor.insertText(cleanText);
-    } else {
-        ui->logEdit->appendPlainText(text);
+        // Автоматический скролл консоли вниз
+        QScrollBar *sb = ui->logEdit->verticalScrollBar();
+        if (sb) sb->setValue(sb->maximum());
     }
-    ui->logEdit->ensureCursorVisible();
+}
+
+void panel_other::onDebugModeTriggered(bool checked)
+{
+    if (checked) {
+        // Силово переключаем stackedWidget на ТРЕТЬЮ страницу (индекс 2 - Стек вызовов)
+        if (ui && ui->stackedWidget) {
+            ui->stackedWidget->setCurrentIndex(2);
+        }
+
+        // Задаем правый отступ в 350 пикселей, чтобы не залезать под правую панель дебага
+        //this->setContentsMargins(0, 0, 350, 0);
+    }
+    else {
+        // При остановке возвращаем панель на всю ширину экрана
+        this->setContentsMargins(0, 0, 0, 0);
+    }
+}
+
+void panel_other::setDebugAction(QAction *action)
+{
+    if (!action) return;
+
+    // Связываем сигнал кнопки сайдбара напрямую со слотом внутри этого класса
+    connect(action, &QAction::triggered, this, &panel_other::onDebugModeTriggered);
 }

@@ -23,6 +23,7 @@
 #include <QToolTip>
 #include <QTextBlock>
 #include <QHBoxLayout>
+#include <QList>
 
 class CodeEditor;
 class Neuro_program;
@@ -67,8 +68,10 @@ public:
     QTextCharFormat stringFormat;
     QTextCharFormat commentFormat;
     QTextCharFormat multiLineCommentFormat;
+
 protected:
     void highlightBlock(const QString &text) override;
+
 private:
     QHash<QRegularExpression, QTextCharFormat*> highlightingRulesMap;
     QRegularExpression tripleSingleQuote;
@@ -79,10 +82,14 @@ class LineNumberArea : public QWidget {
 public:
     LineNumberArea(CodeEditor *editor);
     QSize sizeHint() const override { return QSize(0, 0); }
+
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+
 private:
     CodeEditor *codeEditor;
+    QList<int> m_breakpoints;
 };
 
 // =========================================================================
@@ -98,7 +105,6 @@ public:
     virtual ~CodeEditor();
     void lineNumberAreaPaintEvent(QPaintEvent *event);
     int lineNumberAreaWidth();
-    void setCompleter(QCompleter *completer);
     QString textUnderCursor() const;
     QStringList temporaryOpenFilesBackup;
     void updateFoldingData();
@@ -118,6 +124,8 @@ public:
     void handleMouseMoveFromEditor(const QPoint &pos);
     void handleMouseLeaveFromEditor();
     void setChangesAsSaved();
+    void handleGutterClick(const QPoint &pos);
+    QList<int> getActiveBreakpoints() const;
 
     struct LspErrorData {
         int line;
@@ -127,8 +135,10 @@ public:
     };
     static QList<LspErrorData> currentLspErrors;
     QString currentFilePath;
-
+    void updateInlineValues(const QMap<int, QString> &values);
+    void clearInlineValues();
     void formatSelectedPythonCode();
+
 signals:
     void logMessage(const QString &message);
     void errorsCountChanged(int count);
@@ -165,10 +175,12 @@ private slots:
     void onAutoIndentRequested();
     void onRunCurrentFileRequested();
     void onCheckSyntaxRequested();
+    void showLspCompletionsInGui(const QJsonArray &completionsArray);
     void showLspCompletionsInGui(const QStringList &completions);
     void drawLspErrorsInGui(const QList<CodeEditor::LspErrorData> &errors);
 
 private:
+    QMap<int, QString> m_inlineValues;
     QCompleter *c = nullptr;
     bool m_isInsertingMultiCaret = false;
     qint64 m_lastKeyPressTime = 0;
@@ -197,6 +209,7 @@ private:
     QList<QTextCursor> m_virtualCursors;
     void updateVirtualCursorHighlights();
 };
+Q_DECLARE_METATYPE(QList<int>)
 
 class FoldingArea : public QWidget
 {

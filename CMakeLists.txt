@@ -12,7 +12,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Поиск необходимых модулей Qt (извлекаем модули на основе ваших инклудов)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets Concurrent WebChannel)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets Concurrent
+    WebChannel WebSockets UiTools SerialPort)
 
 set(KF6_VERSION "6.26.0" CACHE STRING "Force KF6 Version" FORCE)
 set(KF6Parts_VERSION "6.26.0" CACHE STRING "Force KF6 Parts Version" FORCE)
@@ -42,6 +43,9 @@ set(PROJECT_SOURCES
     src/stickyscrollarea.cpp
     src/qhtmldelegate.cpp
     src/elidedlabel.cpp
+    src/projectmanager.cpp
+    src/configmanager.cpp
+    src/preferencesdialog.cpp
 
     src/FolderBlockData.h
     src/about_program.h
@@ -64,6 +68,9 @@ set(PROJECT_SOURCES
     src/stickyscrollarea.h
     src/qhtmldelegate.h
     src/elidedlabel.h
+    src/projectmanager.h
+    src/configmanager.h
+    src/preferencesdialog.h
 )
 
 # Список всех файлов интерфейса (.ui)
@@ -95,9 +102,26 @@ add_executable(pytorch-studio
     src/ai_panel.h src/ai_panel.cpp src/ai_panel.ui
     src/pythonenvmanager.h src/pythonenvmanager.cpp
     src/projectbuilderworker.h src/projectbuilderworker.cpp
+    src/pipmanagerpage.h src/pipmanagerpage.cpp
+    src/jupytermanager.h src/jupytermanager.cpp
+    src/tensorboardmanager.h src/tensorboardmanager.cpp
+    src/jupyterclient.h src/jupyterclient.cpp
+    src/huggingfacemanager.h src/huggingfacemanager.cpp
+    src/debugmanager.h src/debugmanager.cpp
+    src/debug_panel.h src/debug_panel.cpp src/debug_panel.ui
+    src/projectmanager.h src/projectmanager.cpp
+    src/documentmanager.h src/documentmanager.cpp
+    src/prog_stm.h src/prog_stm.cpp src/prog_stm.ui
+    src/stacktablehandler.h src/stacktablehandler.cpp
+    src/variablestablehandler.h src/variablestablehandler.cpp
+    src/savedata.h src/savedata.cpp src/savedata.ui
+    src/configmanager.h src/configmanager.cpp
+    src/preferencesdialog.h src/preferencesdialog.cpp
+    src/configmanager.h src/configmanager.cpp
+    src/preferencesdialog.h src/preferencesdialog.cpp
+    src/usbreceiver.h src/usbreceiver.cpp
+    src/prog_stm_work.h src/prog_stm_work.cpp src/prog_stm_work.ui
 )
-
-
 
 # Указываем CMake искать заголовочные файлы в корне проекта
 # Это позволит компилятору находить <panel_other.h> и другие локальные файлы
@@ -105,17 +129,38 @@ target_include_directories(pytorch-studio PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_include_directories(pytorch-studio PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# 2. Подключаем саму собранную статическую библиотеку (файл libstlink.a)
+target_link_libraries(pytorch-studio PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/libstlink.a
+)
+
+# 3. НАЙТИ И ПОДКЛЮЧИТЬ LIBUSB (Обязательно для Linux!)
+# Так как libstlink работает через USB, ей необходима системная библиотека libusb-1.0
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
+
+target_include_directories(pytorch-studio PRIVATE ${LIBUSB_INCLUDE_DIRS})
+target_link_libraries(pytorch-studio PRIVATE ${LIBUSB_LIBRARIES})
+
 # Линковка системных библиотек и модулей Qt к вашему приложению
 target_link_libraries(pytorch-studio PRIVATE
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Gui
     Qt${QT_VERSION_MAJOR}::Widgets
-    Qt${QT_VERSION_MAJOR}::DBus     # Для системных Freedesktop-уведомлений D-Bus
-    Qt${QT_VERSION_MAJOR}::Charts   # Для графиков Loss/Accuracy
-    Qt${QT_VERSION_MAJOR}::Network  # Для API-запросов к Ollama ИИ
-    Qt${QT_VERSION_MAJOR}::WebEngineWidgets  # Для API-запросов к Ollama ИИ
-    Qt${QT_VERSION_MAJOR}::Concurrent  # Для API-запросов к Ollama ИИ
-    Qt${QT_VERSION_MAJOR}::WebChannel  # Для API-запросов к Ollama ИИ
+    Qt${QT_VERSION_MAJOR}::DBus
+    Qt${QT_VERSION_MAJOR}::Charts
+    Qt${QT_VERSION_MAJOR}::Network
+    Qt${QT_VERSION_MAJOR}::WebEngineWidgets
+    Qt${QT_VERSION_MAJOR}::Concurrent
+    Qt${QT_VERSION_MAJOR}::WebChannel
+    Qt${QT_VERSION_MAJOR}::WebSockets
+    Qt${QT_VERSION_MAJOR}::UiTools
+    Qt${QT_VERSION_MAJOR}::SerialPort
+
     KF6::Parts
 )
 

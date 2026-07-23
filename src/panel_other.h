@@ -1,4 +1,6 @@
 #pragma once
+#include "stacktablehandler.h"
+
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QWidget>
@@ -24,6 +26,14 @@ public:
     void appendTrainingLog(const QString &text);
     void setSingleTerminalMode(bool onlyLeftTerminal);
     void sendInputToTerminal(const QString &text);
+    void setDebugAction(QAction *action);
+    void setCallStackData(const QList<StackFrame> &frames);
+
+public slots:
+    void onDebugModeTriggered(bool checked);
+
+signals:
+    void fileNavigationRequested(const QString &filePath, int lineNumber);
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -39,4 +49,5 @@ private:
     QPlainTextEdit *m_replEdit;
     QProcess *m_replProcess;
     int m_splitterMode = 0;
+    StackTableHandler *m_stackHandler = nullptr;
 };

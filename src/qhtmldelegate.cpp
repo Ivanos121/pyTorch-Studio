@@ -3,6 +3,8 @@
 #include <QTextDocument>
 #include <QAbstractTextDocumentLayout>
 #include <QStyle>
+#include <QFontMetrics>
+#include <QPainterPath>
 
 QHtmlDelegate::QHtmlDelegate(QObject *parent)
     : QStyledItemDelegate(parent)
@@ -11,39 +13,104 @@ QHtmlDelegate::QHtmlDelegate(QObject *parent)
 
 void QHtmlDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
-    QStyleOptionViewItem options = option;
-    initStyleOption(&options, index);
-
     painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true); // Включаем сглаживание для углов ячеек!
 
-    QTextDocument doc;
-    doc.setDefaultFont(options.font);
+    QColor darkBg(35, 38, 41);     // #232629
+    QColor selectBg(26, 74, 110);   // #1a4a6e
 
     // =========================================================================
-    // ЖЕЛЕЗНЫЙ UX ФИКС: Принудительный глобальный CSS-стиль для QTextDocument
+    // БРОНИРОВАННЫЙ UX-ПРОБОЙ ВЕРХНИХ УГЛОВ: СКРУГЛЕНИЕ ВНУТРИ ДЕЛЕГАТА
     // =========================================================================
-    // Задаем базовый цвет (color: #eff0f1) для ВСЕГО текста по умолчанию.
-    // Теперь любой текст, не обернутый в синий span, гарантированно станет светлым!
-    doc.setDefaultStyleSheet("body, span, p { color: #eff0f1; }");
+    if (option.state & QStyle::State_Selected) {
+        // Если это САМАЯ ПЕРВАЯ строка списка (индекс 0), скругляем ей только верхние углы!
+        if (index.row() == 0) {
+            painter->save();
+            QPainterPath path;
+            // Рисуем path со скруглением верхних углов (радиус 7px), низ оставляем прямой (0px)
+            path.addRoundedRect(option.rect, 7, 7, Qt::AbsoluteSize);
 
-    // Передаем HTML-строку (Qt применит наш стиль к тегам <span>)
-    doc.setHtml(options.text);
+            // Срезаем нижние углы, чтобы они оставались прямоугольными и не было щелей со 2-й строкой
+            QPainterPath clipBottom;
+            clipBottom.addRect(option.rect.left(), option.rect.top() + 7, option.rect.width(), option.rect.height() - 7);
+            path = path.united(clipBottom);
+
+            painter->setClipPath(path);
+            painter->fillRect(option.rect, selectBg);
+            painter->restore();
+        } else {
+            // Для всех остальных строк выделение остается обычным прямоугольным
+            painter->fillRect(option.rect, selectBg);
+        }
+    } else {
+        // Точно так же обрабатываем пассивное состояние для первой строки
+        if (index.row() == 0) {
+            painter->save();
+            QPainterPath path;
+            path.addRoundedRect(option.rect, 7, 7, Qt::AbsoluteSize);
+            QPainterPath clipBottom;
+            clipBottom.addRect(option.rect.left(), option.rect.top() + 7, option.rect.width(), option.rect.height() - 7);
+            path = path.united(clipBottom);
+
+            painter->setClipPath(path);
+            painter->fillRect(option.rect, darkBg);
+            painter->restore();
+        } else {
+            painter->fillRect(option.rect, darkBg);
+        }
+    }
     // =========================================================================
 
-    options.text = ""; // Очищаем дефолтный текст
-    options.widget->style()->drawControl(QStyle::CE_ItemViewItem, &options, painter, options.widget);
+    // ОРИГИНАЛЬНЫЙ КОД ОТРИСОВКИ ТЕКСТА (ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ)
+    QString rawHtml = index.data(Qt::DisplayRole).toString();
+    QString cleanText = rawHtml;
+    cleanText.remove(QRegularExpression("<[^>]*>"));
 
-    // Вычисляем идеальный вертикальный отступ, чтобы текст не обрезался снизу
-    int textHeight = doc.size().height();
-    int topOffset = options.rect.top() + (options.rect.height() - textHeight) / 2;
+    QFont font = option.font;
+    font.setFamily("JetBrains Mono");
+    font.setPixelSize(12);
+    painter->setFont(font);
 
-    // Сдвигаем по Х на 6 пикселей от края, а по Y выставляем строго по центру строки
-    painter->translate(options.rect.left() + 6, topOffset);
+    QTextLayout layout(cleanText, font);
+    layout.beginLayout();
+    QTextLine line = layout.createLine();
+    layout.endLayout();
 
-    QRectF clip(0, 0, options.rect.width() - 6, options.rect.height());
-    doc.drawContents(painter, clip);
+    int textHeight = painter->fontMetrics().height();
+    int yOffset = option.rect.top() + (option.rect.height() - textHeight) / 2 - 1;
+
+    int prefixLength = 0;
+    QRegularExpression prefixRegex("<b>(.*?)</b>");
+    QRegularExpressionMatch match = prefixRegex.match(rawHtml);
+    if (match.hasMatch()) {
+        prefixLength = match.captured(1).length();
+    }
+
+    QColor blueColor(76, 195, 255);
+    QColor whiteColor(239, 240, 241);
+
+    int startX = option.rect.left() + 10;
+    if (prefixLength > 0 && prefixLength <= cleanText.length()) {
+        QString typedPart = cleanText.left(prefixLength);
+        painter->setPen(blueColor);
+        QFont boldFont = font;
+        boldFont.setBold(true);
+        painter->setFont(boldFont);
+        painter->drawText(startX, yOffset, painter->fontMetrics().horizontalAdvance(typedPart), option.rect.height(), Qt::AlignLeft, typedPart);
+        startX += painter->fontMetrics().horizontalAdvance(typedPart);
+    }
+
+    QString restPart = cleanText.mid(prefixLength);
+    painter->setPen(whiteColor);
+    painter->setFont(font);
+    painter->drawText(startX, yOffset, painter->fontMetrics().horizontalAdvance(restPart) + 50, option.rect.height(), Qt::AlignLeft, restPart);
 
     painter->restore();
 }
+
+
+
+
+
 
 

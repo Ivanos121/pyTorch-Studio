@@ -89,7 +89,7 @@ int main(int argc, char *argv[])
     // Разрешаем Chromium загружать JS-модули xterm.js напрямую с жесткого диска
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-web-security --allow-file-access-from-files");
 
-// Отключаем размытие шрифтов при масштабировании интерфейса
+    // Отключаем размытие шрифтов при масштабировании интерфейса
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::Round);
 #endif
@@ -106,31 +106,23 @@ int main(int argc, char *argv[])
     a.setFont(globalFixedFont);
 
     QFontInfo appFontInfo(a.font());
-
     qDebug() << "================== ТЕСТ ЯДРА QT (main.cpp) ==================";
     qDebug() << "Реальное семейство шрифта приложения:" << appFontInfo.family();
     qDebug() << "Флаг моноширинности (Fixed Pitch):"
-             << (appFontInfo.fixedPitch() ? "🟢 ДА, МОНОШИРИННЫЙ" : "🔴 НЕТ, ПРОПОРЦИОНАЛЬНЫЙ");
+             << (appFontInfo.fixedPitch() ? " ДА, МОНОШИРИННЫЙ" : " НЕТ, ПРОПОРЦИОНАЛЬНЫЙ");
     qDebug() << "============================================================";
 
-    //a.setDesktopFileName("pytorch-studio");
-    //QCoreApplication::setOrganizationName("PyTorchStudio");
     QCoreApplication::setApplicationName("pytorch-studio");
-
     a.setDesktopFileName("pytorch-studio");
-   // a.setApplicationName("pytorch-studio");
 
     QIcon appIcon(":/Data/Icons/pytorch-studio.svg");
     a.setWindowIcon(appIcon);
-
-
 
     // Формируем строковую версию из макросов сборщика: "2026.1-LTS"
     QString appVersion = QString("%1.%2-%3")
                              .arg(APP_VERSION_MAJOR)
                              .arg(APP_VERSION_MINOR)
                              .arg(APP_VERSION_PATCH);
-
     QApplication::setApplicationVersion(appVersion);
 
     qRegisterMetaType<QList<QuickFixAction>>("QList<QuickFixAction>");
@@ -138,10 +130,8 @@ int main(int argc, char *argv[])
     // =========================================================================
     // АВТОМАТИЧЕСКИЙ ДИНАМИЧЕСКИЙ ПОИСК КОРНЯ ПРОЕКТА (БЕЗ МАКРОСОВ И СТРОК)
     // =========================================================================
-    // 1. Берем папку, в которой лежит запущенный бинарник программы
     QFileInfo mainFileInfo(__FILE__);
     QDir currentDir = mainFileInfo.absoluteDir();
-
     QString projectPath = currentDir.absolutePath();
 
     // На случай, если main.cpp лежит в подпапке (например, src/), поднимемся до корня репозитория
@@ -176,12 +166,11 @@ int main(int argc, char *argv[])
     // ШАГ 1.3: ПРИВЯЗЫВАЕМ ИМЯ И ПРИНУДИТЕЛЬНО ОТКРЫВАЕМ ПОТОК НА ЗАПИСЬ
     // =========================================================================
     logFile.setFileName(logFileName);
-
     if (logFile.exists()) {
         (void)logFile.remove();
     }
 
-    // ОТКРЫВАЕМ ФАЙЛ В РЕЖИМЕ ТЕКСТА НА ЗАПИСЬ (БЕЗ ЭТОГО ЛОГИ НЕ СОЗДАДУТСЯ!)
+    // ОТКРЫТИЕ ФАЙЛА В РЕЖИМЕ ТЕКСТА НА ЗАПИСЬ
     if (!logFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
         std::cerr << "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть файл для записи логов!" << std::endl;
     }
@@ -191,7 +180,20 @@ int main(int argc, char *argv[])
 
     qInfo() << "PyTorch Studio запуск... Сетевые и графические интерфейсы инициализированы.";
 
-    Neuro_programm w;
+    // =========================================================================
+    // ИЗМЕНЕНИЕ: Сбор и перехват внешних аргументов запуска ОС
+    // =========================================================================
+    QString startupPath = "";
+    QStringList args = QApplication::arguments();
+
+    // Если размер аргументов больше 1, значит ОС передала путь к открываемому файлу
+    if (args.size() > 1) {
+        startupPath = args.at(1);
+        qInfo() << "[SYSTEM_START] Обнаружен внешний аргумент пути запуска:" << startupPath;
+    }
+
+    // Передаем перехваченный путь в конструктор главного окна IDE
+    Neuro_programm w(startupPath);
     w.showMaximized();
 
     int execResult = QApplication::exec();

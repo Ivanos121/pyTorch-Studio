@@ -14,11 +14,9 @@ public:
                                   bool useGpu,
                                   bool useCustomReq,
                                   const QString &customReqPath,
-                                  const QString &venvPath,
+                                  const QString &customVenvPath, // Исправлено имя аргумента
+                                  bool isExistingVenvMode,
                                   QObject *parent = nullptr);
-
-    QString m_venvPath;
-
 
 public slots:
     void startBuildPipeline();
@@ -33,15 +31,17 @@ private:
     bool createVirtualEnvironment(QString &outVenvPath);
     bool installMLOpsDependencies(const QString &venvPath);
     bool registerJupyterKernel(const QString &venvPath);
-
+    bool validateExistingEnvironment(const QString &venvPath);
     bool runSystemCommand(const QString &program, const QStringList &arguments, const QString &workingDir);
 
-    // Параметры проекта
+    // Параметры проекта (Унифицированные имена для списка инициализации)
     QString m_projectPath;
     QString m_projectName;
     bool m_useGpu;
     bool m_useCustomReq;
     QString m_customReqPath;
+    QString m_customVenvPath;
+    bool m_isExistingVenvMode;
 };
 
 #endif // PROJECTBUILDERWORKER_H

@@ -3,6 +3,7 @@
 #include <QThread>
 #include <QString>
 #include <QStringList>
+#include <QProcessEnvironment>
 
 // Класс-воркер, который будет физически жить и выполняться в фоновом потоке
 class VenvWorker : public QObject {
@@ -35,8 +36,16 @@ public:
 
     QString currentPythonPath() const { return m_currentPythonPath; }
     QStringList cachedPackages() const { return m_cachedPackages; }
+    QProcessEnvironment getIsolatedEnvironment() const;
 
 signals:
     void venvConnectedSuccessfully(const QStringList &packages);
     void venvNotFoundOrCorrupted(const QString &reason);
+
+private:
+    QProcessEnvironment m_isolatedEnv;
+    void saveEnvToConfig(const QString &projectPath, const QString &pythonPath);
+    void buildIsolatedEnvironment();
 };
+
+

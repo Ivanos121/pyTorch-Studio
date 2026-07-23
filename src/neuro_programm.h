@@ -11,6 +11,18 @@
 #include "elidedlabel.h"
 #include "ai_panel.h"
 #include "pythonenvmanager.h"
+#include "pipmanagerpage.h"
+#include "jupytermanager.h"
+#include "tensorboardmanager.h"
+#include "huggingfacemanager.h"
+#include "debugmanager.h"
+#include "projectmanager.h"
+#include "documentmanager.h"
+#include "stlink.h"
+#include "prog_stm.h"
+#include "stacktablehandler.h"
+#include "variablestablehandler.h"
+#include "savedata.h"
 
 #include <QMainWindow>
 #include <QCompleter>
@@ -27,6 +39,10 @@
 #include <QtCharts/QChart>
 #include <QPointer>
 #include <QTextBrowser>
+#include <QWebEngineView>
+
+class JupyterClient;
+class JupyterManager;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -41,7 +57,7 @@ class Neuro_programm : public QMainWindow
     friend class panel_other;
 
 public:
-    explicit Neuro_programm(QWidget *parent = nullptr);
+    explicit Neuro_programm(const QString &startupPath = "", QWidget *parent = nullptr);
     ~Neuro_programm() override;
     Ui::Neuro_programm *ui;
     class AI_panel *aiPanel = nullptr;
@@ -56,6 +72,7 @@ public:
     void updateProjectsListFromSettings();
     static Neuro_programm* self;
     QString getCurrentOpenFilePath() const;
+    void showFloatingDocumentation(const QString &htmlContent);
     void sendLspRequest(const QString &method, const QJsonObject &params, int id = 0);
     QStringList temporaryOpenFilesBackup;
     QProcess* getLspProcess() const { return lspProcess; }
@@ -82,14 +99,24 @@ public:
     panel_other *panelOther;
     QPointer<QTextBrowser> m_docWindow;
     void updateCustomTitle(const QString &fileName);
+    void runPipUpgradeProcess(const QString &packageName);
+    void runPipUninstallProcess(const QString &packageName);
+    void onDetectDevice();
+    void onSelectFirmwareFile();
+    void onEraseFlash();
+    void onWrightFlash();
+    void onReadFlash();
+    void startFlashWritingProcess();
+
 
 public slots:
     void updateJediStatusText(const QString &message, bool isError);
-
     void updateJediStatusTextFromLsp(int errorCount);
+
 signals:
     void signalSendChunkToConsole(const QString &text);
     void completionDataReceived(const QStringList &completions);
+    void firmwareFlashSuccess();
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -116,6 +143,7 @@ protected slots:
     void onFindPrev();
     void onSelectAll();
     void loadProjectFromSettingsList(QListWidgetItem *item);
+    bool unarchiveProject(const QString &archivePath, const QString &targetExtractDir);
 
 private:
     bool bootstrapProjectStructure(const QString &rootPath);
@@ -146,7 +174,15 @@ private:
     void showVenvEmergencyDialog(const QString &reason);
     void load_progect(const QString &projectPath);
     bool createProjectPassport(const QString &projectName, const QString &projectFolderPath, bool useGpuArchitecture);
-
+    void setupInstallProcessConnections();
+    void initTensorBoardUi();
+    void processStartupPath(const QString &path);
+    QString getChipNameById(uint32_t chipId);
+    void setDebugButtonsEnabled(bool enabled);
+    bool showSaveConfirmationDialog();
+    void injectFinalMetricsToVariableTree(const QString &name, const QString &value, const QString &type);
+    void jumpToCodeLine(const QString &filePath, int lineNumber);
+    void refreshProblemsTableView();
 
 private slots:
     void onFileDoubleClicked(const QModelIndex &index);
@@ -179,14 +215,48 @@ private slots:
     void onReplaceCurrent();
     void onReplaceAndFindNext();
     void onReplaceAll();
+    void on_action_uninstall_package_triggered();
+    void on_action_upgrade_package_triggered();
+    void on_action_upgrade_all_packages_triggered();
+    void on_action_install_from_requirements_triggered();
+    void on_action_freeze_requirements_triggered();
+    void saveCurrentProjectChanges();
+    void saveProjectAsArchive();
+    void open_STM();
+    void open_STM_work();
 
 private:
+    QMenu *toolsMenu;
+    QMenuBar *customMenuBar;
+    QAction *actResume = nullptr;
+    QAction *actStepOver = nullptr;
+    QAction *actStepInto = nullptr;
+    QAction *actStopDebug = nullptr;
+    VariablesTableHandler *m_variablesHandler = nullptr;
+    int m_previousPageIndex = 0;
+    QAction *actSTM;
+    QAction *actSTM_work;
+    QAction *EraseFlash;
+    QAction *WrightFlash;
+    QString m_firmwarePath;
+    stlink_t* m_slContext = nullptr;
+    DocumentManager *docMgr;
+    ProjectManager *projectMgr;
+    DebugManager *pyDebugger;
+    HuggingFaceManager *hfManager;
+    QWebEngineView *m_tensorWebView;
+    TensorBoardManager *tensorBoardServer;
+    JupyterManager *jupyterServer;
+    JupyterClient  *jupyterClient;
+    QProcess *m_installProcess = nullptr;
     PythonEnvManager *envManager;
+    PipManagerPage *m_pipPage = nullptr;
     Start_progect *rsc;
     QString m_pendingAutoloadFile;
     Settings    *rsc2;
     About_program *rsc3;
     QWidget *rsc4;
+    Savedata *rsc5;
     Search *search;
     QAction *actProject;
     ElidedLabel *statusLogLabel;
@@ -226,7 +296,9 @@ private:
     QWidget *statusSpacer = nullptr;
     QByteArray m_lspAccumulatedBuffer;
     QWidget *leftSideBarContainer = nullptr;
+    QAction *actDebug;
 
+    bool isDocWindowActive = false;
     bool m_dragging = false;
     bool m_isDragging = false;
     class QSpacerItem *leftPaddingSpacer = nullptr; // Указатель на левый отступ фальш-панели
@@ -238,10 +310,13 @@ private:
     QAction *actTensor;
     QAction *actPip;
     QAction *actSearch;
+    QAction *actStartTrain;
+    QAction *actStop;
+    QAction *actStepOut;
     void updateTabName();
     void setFileModifiedState(CodeEditor *editor, bool modified);
     bool archiveProject(const QString &sourceDir, const QString &outputSavePath);
-    bool unarchiveProject(const QString &saveFilePath, const QString &targetExtractDir);
+    //bool unarchiveProject(const QString &saveFilePath, const QString &targetExtractDir);
     void saveProjectParameters(const QString &tmpDir);
     void loadProjectParameters(const QString &tmpDir);
     void sendLspDidOpenForFile(const QString &filePath, const QString &fileContent);
@@ -255,5 +330,16 @@ private:
     void highlightCurrentMatch(QTextCursor symbolCursor);
     void updateFunctionNavigator(CodeEditor *editor);
     void on_btnSidebarTerminal_clicked();
+    void on_action_install_package_triggered();
+    bool createServicesConfig(const QString &projectName, const QString &projectFolderPath);
+    bool createDefaultTrainNotebook(const QString &projectFolderPath);
+    void closeStlink();
+    void edit_intfce();
+    void add_vars_debug();
+    QStandardItemModel *m_varModel = nullptr;
+    void setupDebugInterface();
+    QStandardItemModel *m_sourcesModel = nullptr;
+    void createMenus();
+    void showPreferences();
 };
 #endif // NEURO_PROGRAMM_H

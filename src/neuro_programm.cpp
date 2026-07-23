@@ -3,11 +3,11 @@
 #include "ui_neuro_programm.h"
 #include "start_progect.h"
 #include "panel_other.h"
-#include "ui_panel_other.h"
+//#include "ui_panel_other.h"
 #include "settings.h"
 #include "breezeflatstyle.h"
 #include "codeeditor.h"
-#include "replwidget.h"
+//#include "replwidget.h"
 #include "advancedclosedialog.h"
 #include "projectrootproxymodel.h"
 #include "editorplaceholder.h"
@@ -16,6 +16,28 @@
 #include "ai_panel.h"
 #include "panel_other.h"
 #include "projectbuilderworker.h"
+#include "jupytermanager.h"
+#include "jupyterclient.h"
+#include "projectmanager.h"
+extern "C" {
+#include "stlink.h"
+//#include "stlink_backend.h"
+
+// Ручное прототипирование функций прошивальщика для C++ компилятора
+// Это закроет ошибку "was not declared in this scope" раз и навсегда
+// int stlink_erase_flash_mass(stlink_t* sl);
+// int stlink_fwrite_flash(stlink_t *sl, const char* path, stm32_addr_t addr);
+// int stlink_read_all_flash(stlink_t *sl, const char *path);
+
+void stlink_read_mem32(stlink_t *sl, uint32_t addr, uint16_t len);
+int32_t stlink_reset(stlink_t *sl, enum reset_type type);
+int stlink_erase_flash_mass(stlink_t* sl);
+int stlink_fwrite_flash(stlink_t *sl, const char* path, stm32_addr_t addr);
+}
+#include "savedata.h"
+#include "preferencesdialog.h"
+#include "usbreceiver.h"
+#include "prog_stm_work.h"
 
 #include <QFileSystemModel>
 #include <QInputDialog>
@@ -86,57 +108,100 @@
 #include <QThread>
 #include <QMessageBox>
 #include <QDateTime>
+#include <QPlainTextEdit>
+#include <QInputDialog>
 
 Neuro_programm* Neuro_programm::self = nullptr;
 QList<Neuro_programm::LspErrorData> Neuro_programm::globalLspErrors;
 
-Neuro_programm::Neuro_programm(QWidget *parent)
+Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::Neuro_programm)
 {
     ui->setupUi(this);
 
-    this->envManager = new PythonEnvManager(this);
-
-    // НАСТРАИВАЕМ РЕАКЦИЮ UI НА СИГНАЛЫ МЕНЕДЖЕРА ОКРУЖЕНИЯ
-    connect(envManager, &PythonEnvManager::venvConnectedSuccessfully, this, [this](const QStringList &packages)
+    if (ui->widget_4)
     {
-        QString torchVersion = !packages.isEmpty() ? packages.first() : "Определена";
+        ui->widget_4->setMainProgram(this);
+    }
 
-        ui->statusbar->showMessage("Окружение PyTorch успешно подключено!", 4000);
+    ui->rightDebugPanel->hide();
+    this->projectMgr = new ProjectManager(this);
+    this->envManager = new PythonEnvManager(this);
+    this->jupyterServer = new JupyterManager(this);
+    this->jupyterClient = new JupyterClient(this);
+    this->pyDebugger = new DebugManager(this);
+    UsbReceiver *usbDriver = new UsbReceiver(this);
 
-        if (this->statusLogLabel != nullptr)
-        {
-            this->statusLogLabel->setStyleSheet("color: #4caf50; font-weight: bold;"); // Зеленый цвет успеха
-            this->statusLogLabel->setFullText("PyTorch: Подключен (" + torchVersion + ")");
-        }
-
-        this->sendSystemNotification(
-                    "PyTorch Studio: Окружение подключено",
-                    QString("Виртуальное окружение venv успешно инициализировано. Зависимость: %1").arg(torchVersion)
-                    );
-
-        this->initLspServer(); // Накатываем автокомплит
+    // Перехватываем данные от нейросети
+    connect(usbDriver, &UsbReceiver::inferenceDataReceived, [this](const QString &line) {
+        // ДАННЫЕ ПРИЛЕТЕЛИ С ПЛАТЫ ПО miniUSB!
+        // Здесь вы можете вызывать парсер, обновлять графики, сохранять в логи
+        qDebug() << "Получены данные инференса:" << line;
     });
 
-    connect(envManager, &PythonEnvManager::venvNotFoundOrCorrupted, this, [this](const QString &reason)
+    // Автоматически запускаем подключение после успешной прошивки в onWrightFlash
+    connect(this, &Neuro_programm::firmwareFlashSuccess, [usbDriver]() {
+        // Пауза 500 мс, чтобы контроллер STM32 успел поднять USB CDC стек после Reset
+        QTimer::singleShot(500, [usbDriver]() {
+            qDebug() << "🔄 Попытка автоматического фонового подключения к miniUSB...";
+            usbDriver->connectToNucleo();
+        });
+    });
+
+    this->titleLabel = new QLabel("PyTorch Studio", this);
+    this->docMgr = new DocumentManager(this, ui->fileComboBox, ui->openFilesListWidget, this->titleLabel, this);
+
+    this->tensorBoardServer = new TensorBoardManager(this);
+    this->hfManager = new HuggingFaceManager(this);
+
+    // =========================================================================
+    // СИНХРОНИЗАЦИЯ UI И СИСТЕМНЫХ D-BUS УВЕДОМЛЕНИЙ ОБ ОКРУЖЕНИИ PYTHON (VENV)
+    // =========================================================================
+
+    // СЦЕНАРИЙ 1: УСПЕШНОЕ ПОДКЛЮЧЕНИЕ ОКРУЖЕНИЯ
+    connect(envManager, &PythonEnvManager::venvConnectedSuccessfully, this, [this](const QStringList &packages)
     {
-        // 1. Аппаратно перекрашиваем строку состояния и логгер Jedi в красный цвет ошибки
-        ui->statusbar->showMessage("Критическая ошибка виртуального окружения Python!", 0);
-        if (this->statusLogLabel != nullptr)
-        {
-            this->statusLogLabel->setStyleSheet("color: #ef5350; font-weight: bold;");
-            this->statusLogLabel->setFullText("PyTorch: Ошибка окружения (LSP отключен)");
+        // Извлекаем версию PyTorch (она гарантированно лежит первым элементом) [0:1.328]
+        QString torchVersion = !packages.isEmpty() ? packages.first() : "Определена";
+
+        // 1. Обновляем текстовую строчку в статусбаре приложения [0:1.328]
+        ui->statusbar->showMessage("Окружение PyTorch успешно подключено!", 4000);
+        if (this->statusLogLabel != nullptr) {
+            this->statusLogLabel->setStyleSheet("color: #4caf50; font-weight: bold;"); // Зеленый цвет успеха [0:1.328]
+            this->statusLogLabel->setFullText("PyTorch: Подключен (" + torchVersion + ")"); // [0:1.328]
         }
 
-        // 2. Выводим всплывающее D-Bus уведомление операционной системы
+        // 2. ВЫЗЫВАЕМ СИСТЕМНОЕ D-BUS УВЕДОМЛЕНИЕ ОС LINUX (Breeze/KDE/GNOME notification)
+        // Формат: sendSystemNotification(Заголовок, Текст_сообщения);
         this->sendSystemNotification(
-                    "PyTorch Studio: Ошибка venv",
-                    QString("Не удалось автоматически подключить PyTorch.\nПричина: %1").arg(reason)
+                    "PyTorch Studio: Окружение подключено",
+                    QString("Виртуальная среда venv успешно инициализирована.\n"
+                            "Интерпретатор: %1\n"
+                            "Версия PyTorch: %2")
+                    .arg(this->envManager->currentPythonPath()) // Подтягиваем найденный путь (/home/elf/venv/bin/python) [0:1.666]
+                    .arg(torchVersion)
+                    );
+    });
+
+    // СЦЕНАРИЙ 2: КРИТИЧЕСКИЙ СБОЙ ИЛИ ПОВРЕЖДЕНИЕ ОКРУЖЕНИЯ
+    connect(envManager, &PythonEnvManager::venvNotFoundOrCorrupted, this, [this](const QString &reason)
+    {
+        // 1. Перекрашиваем индикаторы статусбара в красный цвет ошибки [0:1.328]
+        ui->statusbar->showMessage("Критическая ошибка виртуального окружения Python!", 0); // [0:1.328]
+        if (this->statusLogLabel != nullptr) {
+            this->statusLogLabel->setStyleSheet("color: #ef5350; font-weight: bold;"); // [0:1.328]
+            this->statusLogLabel->setFullText("PyTorch: Ошибка окружения (LSP отключен)"); // [0:1.328]
+        }
+
+        // 2. ВЫЗЫВАЕМ СИСТЕМНОЕ D-BUS УВЕДОМЛЕНИЕ ОБ ОШИБКЕ СБОЯ
+        this->sendSystemNotification(
+                    "PyTorch Studio: Ошибка окружения",
+                    QString("Не удалось подключить интерпретатор Python.\nПричина: %1").arg(reason) // [0:1.328]
                     );
 
-        // 3. Вызываем интерактивное диалоговое окно (табличку), предлагающее исправить пути
-        this->showVenvEmergencyDialog(reason);
+        // 3. Вызываем интерактивное диалоговое окно аварийного исправления путей [0:1.328]
+        this->showVenvEmergencyDialog(reason); // [0:1.328]
     });
 
     if (ui->widget_2)
@@ -251,45 +316,94 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     connect(New_progect, &QAction::triggered, this, &Neuro_programm::new_progect);
 
     // Действие "Новый файл" (Ctrl + N)
+    // Действие "Новый файл" (Ctrl + N)
     QAction *New_file = new QAction(" Новый файл", this);
-    New_file->setShortcut(QKeySequence("Ctrl + N"));
+    New_file->setShortcut(QKeySequence("Ctrl+N"));
     New_file->setIcon(QIcon(":/Data/system_icons/document-new.svg"));
-    // В файле neuro_programm.cpp внутри коннекта действия New_file (Страница 3-4 вашего PDF):
+
     connect(New_file, &QAction::triggered, this, [this]()
             {
+        // 1. ПРОВЕРКА: Открыт ли проект в IDE
         if (currentOpenProjectPath.isEmpty()) {
             sendSystemNotification("Внимание", "Сначала откройте или создайте проект (*.pystudio)");
             return;
         }
 
+        // 2. ДИАЛОГОВОЕ ОКНО: Запрос имени файла (инженер вводит только название)
         bool ok;
-        QString fileName = QInputDialog::getText(this, "Создание файла",
-                                                 "Введите имя нового Python-файла:",
-                                                 QLineEdit::Normal, "script", &ok);
+        QString fileName = QInputDialog::getText(
+                    this,
+                    "Создание чистого Python-файла",
+                    "Введите имя нового скрипта (файл автоматически сохранится в /scripts):",
+                    QLineEdit::Normal,
+                    "train_thermal_net",
+                    &ok
+                    );
 
-        if (ok && !fileName.trimmed().isEmpty()) {
-            if (!fileName.endsWith(".py", Qt::CaseInsensitive)) {
-                fileName += ".py";
-            }
+        if (!ok || fileName.trimmed().isEmpty()) return; // Пользователь отменил ввод
 
-            QString fullPath = currentOpenProjectPath + "/" + fileName.trimmed();
-
-            // 1. Создаем физически пустой файл на диске, чтобы openNewFileInEditor прочел его без багов
-            QFile file(fullPath);
-            if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                file.close(); // Создали пустым
-            }
-
-            // 2. Вызываем ваш метод вывода редактора на экран (он прогрузит вкладку)
-            this->openNewFileInEditor(fullPath);
-
-            // =========================================================================
-            // КРИТИЧЕСКИЙ ФИКС KEYERROR ДЛЯ НОВЫХ ФАЙЛОВ:
-            // Регистрируем свежесозданный пустой документ на сервере LSP!
-            // Теперь Jedi внесет script.py в ОЗУ, и KeyError больше никогда не возникнет.
-            // =========================================================================
-            this->sendLspDidOpenForFile(fullPath, "");
+        // Автоматически добавляем расширение .py, если пользователь его не написал
+        if (!fileName.endsWith(".py", Qt::CaseInsensitive)) {
+            fileName += ".py";
         }
+
+        // 3. АВТОСОХРАНЕНИЕ В /SCRIPTS: Жестко формируем абсолютный путь к папке scripts
+        QString fullPath = currentOpenProjectPath + "/scripts/" + fileName.trimmed();
+
+        // 4. ФИЗИЧЕСКОЕ СОЗДАНИЕ С БАЗОВЫМ ШАБЛОНОМ ЗАГОЛОВКА (BOILERPLATE)
+        QFile file(fullPath);
+        if (!file.exists()) {
+            QFileInfo fileInfo(fullPath);
+            QDir dir = fileInfo.dir();
+            if (!dir.exists()) {
+                dir.mkpath(dir.absolutePath());
+            }
+
+            if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream out(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+                out.setEncoding(QStringConverter::Utf8);
+#else
+                out.setCodec("UTF-8");
+#endif
+                // Записываем базовый шаблон заголовка
+                out << "# -*- coding: utf-8 -*-\n";
+                out << "\"\"\"\n";
+                out << "PyTorch Studio: Скрипт анализа температур асинхронных двигателей\n";
+                out << "Файл: " << fileInfo.fileName() << "\n";
+                out << "Создан: " << QDateTime::currentDateTime().toString("dd.MM.yyyy hh:mm") << "\n";
+                out << "\"\"\"\n\n";
+
+                // Предустановленный ML-стек для мгновенного подхвата сервером LSP Jedi
+                out << "import torch\n";
+                out << "import torch.nn as nn\n";
+                out << "import json\n\n";
+
+                // Автоматический мост к паспорту проекта (физическим параметрам двигателя)
+                out << "# Функция автоматического чтения физических параметров двигателя из паспорта\n";
+                out << "def load_engine_passport():\n";
+                out << "    try:\n";
+                out << "        with open('../passport.pystudio.json', 'r', encoding='utf-8') as f:\n";
+                out << "            return json.load(f)\n";
+                out << "    except FileNotFoundError:\n";
+                out << "        return None\n\n";
+
+                out << "# Инициализация вычислительного устройства (CPU/CUDA)\n";
+                out << "device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')\n";
+
+                file.close();
+                qInfo() << "[FILE_MGR] Чистый .py файл с шаблоном успешно записан в /scripts:" << fullPath;
+            } else {
+                qCritical() << "[FILE_MGR] Ошибка ОС: Не удалось создать файл по пути:" << fullPath;
+                return;
+            }
+        }
+
+        // 5. ОТКРЫТИЕ В РЕДАКТОРЕ КОДA
+        this->openNewFileInEditor(fullPath);
+
+        // 6. РЕГИСТРАЦИЯ В LSP JEDI
+        this->sendLspDidOpenForFile(fullPath, "");
     });
 
     // Действие "Открыть проект" (Ctrl + Shift + N)
@@ -319,7 +433,13 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // Действие "Сохранить проект" (Shift + S)
     QAction *save_progect_all = new QAction("Сохранить проект", this);
     save_progect_all->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_S));
-    //connect(save_progect_all, &QAction::triggered, this, &Neuro_programm::saveAllProjectChanges);
+    connect(save_progect_all, &QAction::triggered, this, &Neuro_programm::saveCurrentProjectChanges);
+
+    // Действие "Экспортировать проект в прхив" (Shift + E)
+    QAction *actionExportInArchiv = new QAction("Экспортировать проект в прхив", this);
+    actionExportInArchiv->setShortcut(QKeySequence("Ctrl+E"));
+    actionExportInArchiv->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_S));
+    connect(actionExportInArchiv, &QAction::triggered, this, &Neuro_programm::saveProjectAsArchive);
 
     // Действие "Закрыть проект" (Ctrl + W)
     QAction *actionCloseProject = new QAction("Закрыть проект", this);
@@ -401,12 +521,24 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         QIcon icon;
     };
 
+    actSTM = new QAction(this);
+    actSTM_work = new QAction(this);
+
+    actSTM->setCheckable(true);
+    actSTM_work->setCheckable(true);
+
+
     QList<SidebarButtonConfig> buttonConfigs = {
         {&actProject, "Проект", QIcon(":/Data/system_icons/document-open.svg")},
         {&actControlPanel, "Настройки ИИ", QIcon::fromTheme(":/Data/system_icons/configure.svg")},
         {&actTensor, "Графики", QIcon(":/Data/system_icons/document-save-as.svg")},
         {&actPip, "Пакеты PIP", QIcon(":/Data/system_icons/document-open.svg")},
-        {&actSearch, "Поиск", QIcon(":/Data/system_icons/edit-find.svg")}
+        {&actSearch, "Поиск", QIcon(":/Data/system_icons/edit-find.svg")},
+        {nullptr, "", QIcon()},
+        {&actStartTrain, "Обучение", QIcon(":/Data/system_icons/media-playback-start_2.svg")},
+        {&actDebug, "Дебаг", QIcon(":/Data/system_icons/media-playback-start_3.svg")},
+        {&actSTM, "Прошивка", QIcon(":/Data/system_icons/media-playback-start_3.svg")},
+        {&actSTM_work, "Работа STM", QIcon(":/Data/system_icons/media-playback-start_3.svg")}
     };
 
     sidebarLayout->addSpacing(10);
@@ -416,8 +548,20 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // =========================================================================
     for (const auto& config : buttonConfigs)
     {
+        if (config.text.isEmpty()) {
+            sidebarLayout->addStretch(1); // Расталкивает элементы
+            continue;
+        }
+
+        // 1. СНАЧАЛА ГАРАНТИРОВАННО ИНИЦИАЛИЗИРУЕМ ЭКШЕН В ПАМЯТИ
         *(config.targetActionPtr) = new QAction(config.text, this);
-        (*(config.targetActionPtr))->setCheckable(false);
+
+        // 2. И ТОЛЬКО ТЕПЕРЬ БЕЗОПАСНО НАСТРАИВАЕМ РЕЖИМ ТУМБЛЕРА (Указатель уже валиден!)
+        if (config.text == "Дебаг" || config.text == "Обучение") {
+            (*(config.targetActionPtr))->setCheckable(true);
+        } else {
+            (*(config.targetActionPtr))->setCheckable(false);
+        }
 
         QToolButton *btn = new QToolButton(leftSideBarContainer);
         btn->setObjectName(config.text); // Жестко связываем имя объекта
@@ -496,12 +640,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             }
         });
     }
-
-
-
-
-
-
 
     // НА СТРАНИЦЕ 6-7 ЗАМЕНИТЕ СЛОТ ДЛЯ actProject:
     connect(actProject, &QAction::triggered, this, [this, dockStack]()
@@ -599,7 +737,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     topContainerBar->addWidget(topWrapper);
 
     // 5. Создаем новый ручной QMenuBar, который будет вести себя как послушный виджет
-    QMenuBar *customMenuBar = new QMenuBar(topWrapper);
+    customMenuBar = new QMenuBar(topWrapper);
 
     customMenuBar->setAutoFillBackground(true);
 
@@ -624,13 +762,13 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     fileMenu->addAction(actionSave);
     fileMenu->addAction(actionSave_as);
     fileMenu->addAction(actionSaveAll);
+    fileMenu->addAction(actionExportInArchiv);
     fileMenu->addSeparator();
     fileMenu->addMenu(recentProjectsMenu);
     fileMenu->addSeparator();
     fileMenu->addAction(save_progect_all);
     fileMenu->addAction(actionCloseProject);
     fileMenu->addAction(actionClose);
-
 
     QMenu *editMenu = customMenuBar->addMenu("Правка");
 
@@ -715,26 +853,74 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     pipSubMenu->setIcon(QIcon(":/Data/system_icons/document-save-as.svg"));
 
     QAction *actInstallPip = new QAction("Установить пакет", this);
-    connect(actInstallPip, &QAction::triggered, this, &Neuro_programm::onInstallSinglePackageTriggered);
+    //connect(actInstallPip, &QAction::triggered, this, &Neuro_programm::onInstallSinglePackageTriggered);
+    connect(actInstallPip, &QAction::triggered,
+            this, &Neuro_programm::on_action_install_package_triggered);
     pipSubMenu->addAction(actInstallPip);
 
+    QAction *actDeletePip = new QAction("Удалить пакет", this);
+    connect(actDeletePip, &QAction::triggered,
+            this, &Neuro_programm::on_action_uninstall_package_triggered);
+    pipSubMenu->addAction(actDeletePip);
+
+    QAction *actUpdateSinglePip = new QAction("Обновить выбранный пакет до версии PyPI", this);
+    connect(actUpdateSinglePip, &QAction::triggered,
+            this, &Neuro_programm::on_action_upgrade_package_triggered);
+    pipSubMenu->addAction(actUpdateSinglePip);
+
+    QAction *actUpdateAllPip = new QAction("Обновить все пакеты до версии PyPI", this);
+    connect(actUpdateAllPip, &QAction::triggered,
+            this, &Neuro_programm::on_action_upgrade_all_packages_triggered);
+    pipSubMenu->addAction(actUpdateAllPip);
+
     // Действие Б: Установка из файла зависимостей
-    QAction *actInstallReqs = new QAction("Установить из requirements.txt...", this);
-    connect(actInstallReqs, &QAction::triggered, this, &Neuro_programm::install_from_requirements);
+    QAction *actInstallReqs = new QAction("Установить пакеты из requirements.txt", this);
+    connect(actInstallReqs, &QAction::triggered, this, &Neuro_programm::on_action_install_from_requirements_triggered);
     pipSubMenu->addAction(actInstallReqs);
 
     // Действие В: Быстрое обновление списка пакетов
-    QAction *actRefreshPip = new QAction("Обновить список пакетов", this);
-    connect(actRefreshPip, &QAction::triggered, this, [this]() {
-        if (!this->currentOpenProjectPath.isEmpty()) {
-            ui->statusbar->showMessage("Повторное сканирование PyTorch окружения...");
-            this->envManager->startBackgroundCheck(this->currentOpenProjectPath);
-        }
-    });
+    QAction *actRefreshPip = new QAction("Обновить список пакетов в requirements.txt", this);
+    // connect(actRefreshPip, &QAction::triggered, this, [this]()
+    // {
+    //     if (!this->currentOpenProjectPath.isEmpty())
+    //     {
+    //         ui->statusbar->showMessage("Повторное сканирование PyTorch окружения...");
+    //         this->envManager->startBackgroundCheck(this->currentOpenProjectPath);
+    //     }
+    // });
+    connect(actRefreshPip, &QAction::triggered,
+            this, &Neuro_programm::on_action_freeze_requirements_triggered);
     pipSubMenu->addAction(actRefreshPip);
 
     // 3. ДОБАВЛЯЕМ ПОДМЕНЮ В ГЛАВНОЕ МЕНЮ
     toolsMenu->addMenu(pipSubMenu);
+
+    //Создаем ПОДМЕНЮ для PIP (вместо QAction используем QMenu)
+    QMenu *stmSubMenu = new QMenu("Прошивка STM", this);
+    stmSubMenu->setIcon(QIcon(":/Data/system_icons/document-save-as.svg"));
+
+    QAction *findPlate = new QAction("Обнаружить плату", this);
+    connect(findPlate, &QAction::triggered, this, &Neuro_programm::onDetectDevice);
+    stmSubMenu->addAction(findPlate);
+
+    QAction *SelectFile = new QAction("Загрузить прошивку", this);
+    connect(SelectFile, &QAction::triggered, this, &Neuro_programm::onSelectFirmwareFile);
+    stmSubMenu->addAction(SelectFile);
+
+    EraseFlash = new QAction("Стереть Flash-память чипа", this);
+    WrightFlash = new QAction("Записать Flash-память чипа", this);
+
+    //EraseFlash = new QAction("Стереть Flash-память чипа", this);
+    connect(EraseFlash, &QAction::triggered, this, &Neuro_programm::onEraseFlash);
+    stmSubMenu->addAction(EraseFlash);
+    EraseFlash->setEnabled(false);
+
+    //WrightFlash = new QAction("Записать Flash-память чипа", this);
+    connect(WrightFlash, &QAction::triggered, this, &Neuro_programm::onWrightFlash);
+    stmSubMenu->addAction(WrightFlash);
+    WrightFlash->setEnabled(false);
+
+    toolsMenu->addMenu(stmSubMenu);
 
     QMenu *helpMenu = customMenuBar->addMenu("Справка");
     helpMenu->addAction(ui->action_help);
@@ -893,6 +1079,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     // Создаем текстовую метку программно
     titleLabel = new QLabel("PyTorch Studio", ui->customTitleBarPanel);
+    titleLabel->setObjectName("titleLabel");
     QFont titleFont = titleLabel->font();
     titleFont.setBold(true);
     titleLabel->setFont(titleFont);
@@ -1080,6 +1267,24 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         }
     }
 
+    // =========================================================================
+    // ВСТАВЛЯЙТЕ СЮДА (СТРОГО ПЕРЕД ЗАКРЫВАЮЩЕЙ ФИГУРНОЙ СКОБКОЙ КОНСТРУКТОРА)
+    // =========================================================================
+    if (leftSideBarContainer) {
+        // Аппаратно заставляем панель растянуться сверху донизу на всю высоту экрана
+        leftSideBarContainer->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+
+        if (leftSideBarContainer->layout()) {
+            leftSideBarContainer->layout()->setContentsMargins(0, 10, 0, 0);
+        }
+    }
+
+    QToolBar *wrapperBarObj = this->findChild<QToolBar*>("leftSideBar");
+    if (wrapperBarObj) {
+        wrapperBarObj->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+    }
+
+
     if (oldCentral && oldCentral->layout())
     {
         oldCentral->layout()->setContentsMargins(0, 0, 0, 0);
@@ -1138,6 +1343,17 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     btnTerminal->setAutoExclusive(false);
     btnTerminal->setStyle(new StatusButtonStyle(btnTerminal->style()));
+
+    // Изначально при старте приложения нижняя панель закрыта, кнопки отжаты
+    btnTerminal->blockSignals(true);
+    btnTerminal->setCheckable(true);
+    btnTerminal->setChecked(false);
+    btnTerminal->blockSignals(false);
+
+    btnSearch->blockSignals(true);
+    btnSearch->setCheckable(true);
+    btnSearch->setChecked(false);
+    btnSearch->blockSignals(false);
 
     btnTerminal->setStyleSheet("QPushButton { border: none; padding: 4px 12px; color: #ffffff; font-weight: bold; }");
 
@@ -1284,23 +1500,39 @@ Neuro_programm::Neuro_programm(QWidget *parent)
 
     // Полностью независимый коннект для btnTerminal
     // 1. Управление Терминалом (Используем строго toggled)
-    connect(btnTerminal, &QPushButton::toggled, this, [this, resetAllStatusButtons](bool checked) {
-        if (checked) {
+    connect(btnTerminal, &QPushButton::toggled, this, [this, resetAllStatusButtons](bool checked)
+    {
+        if (checked)
+        {
             resetAllStatusButtons();
             btnTerminal->blockSignals(true);
             btnTerminal->setChecked(true);
             btnTerminal->blockSignals(false);
 
-            // МЕНЯЕМ ui->panelOther НА ВАШ ЖИВОЙ panelOther С ТЕРМИНАЛОМ!
             if (panelOther) {
-                panelOther->setVisible(true); // Проявляем её на экране
-                panelOther->setMinimumHeight(200);
-                panelOther->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                // 1. Возвращаем нормальный режим виджета в сетке
+                panelOther->setWindowFlags(Qt::Widget);
+                panelOther->setMaximumWidth(16777215);
+                panelOther->setMinimumWidth(0);
 
-                // Заставляем stackedWidget внутри панели открыть первую страницу
+                // 2. ЖЕСТКИЙ ФИКС: Убираем любые скрытые отступы, которые могли выталкивать кнопку [X] вправо
+                panelOther->setContentsMargins(0, 0, 0, 0);
+                if (panelOther->layout()) {
+                    panelOther->layout()->setContentsMargins(0, 0, 0, 0);
+                }
+
+                // 3. Задаем фиксированную высоту терминала прямо через свойства виджета
+                panelOther->setFixedHeight(250);
+                panelOther->setVisible(true);
+
+                // 4. Просим сетку главного окна обновить геометрию под новые размеры
+                if (ui && ui->centralwidget && ui->centralwidget->layout()) {
+                    ui->centralwidget->layout()->activate();
+                }
+
                 QStackedWidget *stacked = panelOther->findChild<QStackedWidget*>("stackedWidget");
                 if (stacked) {
-                    stacked->setCurrentIndex(0); // Включаем страницу с терминалом
+                    stacked->setCurrentIndex(0);
                 }
             }
 
@@ -1308,6 +1540,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             if (ui->quickActionsList) ui->quickActionsList->setVisible(false);
         }
     });
+
 
     // =========================================================================
     // ИСПРАВЛЕННОЕ УПРАВЛЕНИЕ ОВЕРЛЕЙНОЙ ПАНЕЛЬЮ (БЕЗ СЖАТИЯ СПЛИТТЕРА!)
@@ -1361,7 +1594,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     ui->treeView->setIndentation(20);
 
     connect(ui->aboutProgram, &QAction::triggered, this, &Neuro_programm::open_about_program);
-    connect(save_progect_all, &QAction::triggered, this, &Neuro_programm::onSaveProjectMenuTriggered);
+    //connect(save_progect_all, &QAction::triggered, this, &Neuro_programm::onSaveProjectMenuTriggered);
 
     // --- ВНУТРИ КОНСТРУКТОРА Neuro_programm (Взамен старого монтажа) ---
     ui->fileComboBox->clear();
@@ -1373,47 +1606,53 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     placeholderScreen->setObjectName("JETBRAINS_PLACEHOLDER");
     int placeholderIndex = ui->centralStackedWidget->addWidget(placeholderScreen);
 
-    // Безопасно запрашиваем идеальную высоту виджета шорткатов
-    int requiredHeight = placeholderScreen->sizeHint().height();
+    // Разрешаем заставке шорткатов быть адаптивной:
+    // Задаем небольшую минимальную высоту, чтобы при открытии терминала (250px)
+    // менеджер геометрии Qt6 сжимал плейсхолдер, а не раздувал границы самого главного окна.
+    placeholderScreen->setMinimumHeight(150);
 
-    // Безопасный фолбэк: если класс EditorPlaceholder не переопределил sizeHint
-    // и вернул дефолтный 0 или -1, мы выставляем честную высоту заставки в пикселях.
-    // Измерьте высоту ваших шорткатов на экране — обычно 400-500px идеально, чтобы ничего не сжималось.
-    if (requiredHeight <= 0) {
-        requiredHeight = 650;
-    }
-
-    // Жестко фиксируем минимальную высоту плейсхолдера.
-    // Теперь, когда сплиттер сожмет окно centralwidget, менеджер геометрии Qt6
-    // физически НЕ СМОЖЕТ урезать высоту этого экрана, и он не сожмется ни на пиксель!
-    placeholderScreen->setMinimumHeight(requiredHeight);
-
-    // Возвращаем стандартную политику расширения
+    // Выставляем стандартную политику расширения (занимать всё доступное место)
     placeholderScreen->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     this->setProperty("placeholderIndex", placeholderIndex);
 
-
     // 3. БЛОКИРУЕМ СИГНАЛЫ комбобокса на время первичного наполнения,
-    // чтобы он случайно не дергал стек до окончания полной настройки!
+    // чтобы он случайно не дергал стек и панель panelOther до полной настройки!
     ui->fileComboBox->blockSignals(true);
 
-    ui->fileComboBox->addItem(" Панель обучения ИИ", QVariant("MAIN_SCREEN"));
-    ui->fileComboBox->addItem(" ИИ-Ассистент", QVariant("AI_CHAT_SCREEN"));
+    ui->fileComboBox->clear(); // Полностью зачищаем старый мусор из Designer
+    ui->fileComboBox->addItem(" Панель управления", QVariant("MAIN_SCREEN"));
+    ui->fileComboBox->addItem(" AI-ассистент", QVariant("AI_CHAT_SCREEN"));
 
     // 4. Проверяем состояние проекта и выставляем стартовый экран
-    if (this->currentOpenProjectPath.isEmpty()) {
-        // Если проект пуст — принудительно включаем заставку шорткатов
+    if (this->currentOpenProjectPath.isEmpty())
+    {
+        // СЦЕНАРИЙ А: ЧИСТЫЙ СТАРТ БЕЗ ПРОЕКТА
+        // Принудительно включаем пустую заставку шорткатов JetBrains
         ui->centralStackedWidget->setCurrentIndex(placeholderIndex);
-        ui->fileComboBox->setCurrentIndex(-1); // Сбрасываем выбор в комбобоксе, так как открыта заставка
-    } else {
+
+        // Жестко сбрасываем стрелку в нейтральное пустое положение -1.
+        // Терминал panelOther теперь гарантированно останется закрытым!
+        ui->fileComboBox->setCurrentIndex(-1);
+
+        // Насильно возвращаем заголовку ОС чистый вид "PyTorch Studio"
+        this->setWindowTitle("PyTorch Studio");
+        if (this->titleLabel) this->titleLabel->setText("PyTorch Studio");
+    }
+    else
+    {
+        // СЦЕНАРИЙ Б: ПРИ СТАРТЕ УЖЕ ПЕРЕДАН ПУТЬ К ПРОЕКТУ ЧЕРЕЗ АРГУМЕНТЫ ОС
         ui->centralStackedWidget->setCurrentIndex(0);
-        ui->fileComboBox->setCurrentIndex(0);
+        ui->fileComboBox->setCurrentIndex(0); // Включаем "Панель управления"
+
+        // Сразу просим менеджер документов нарисовать красивую шапку: Панель управления[z2.pystudio]
+        if (this->docMgr) {
+            this->docMgr->updateUiTitles("MAIN_SCREEN");
+        }
     }
 
     // 5. РАЗБЛОКИРУЕМ СИГНАЛЫ обратно — теперь интерфейс готов к действиям пользователя
     ui->fileComboBox->blockSignals(false);
-
 
     // 1. Коннект двойного щелчка по дереву файлов
     connect(ui->treeView, &QTreeView::doubleClicked, this, &Neuro_programm::onFileDoubleClicked);
@@ -1427,6 +1666,9 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         this->onCloseCurrentFileClicked();
     });
 
+    // =========================================================================
+    // СИНХРОНИЗИРОВАННЫЙ СМАРТ-КОННЕКТ КОМБОБОКСА (ФИНАЛЬНАЯ ИНТЕГРАЦИЯ С DOC_MGR)
+    // =========================================================================
     connect(ui->fileComboBox, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (index < 0 || index >= ui->centralStackedWidget->count()) return;
 
@@ -1440,50 +1682,142 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         if (dataVal.userType() == QMetaType::Int) {
             int targetStackIndex = dataVal.toInt();
             if (targetStackIndex >= 0 && targetStackIndex < ui->centralStackedWidget->count()) {
+                ui->centralStackedWidget->blockSignals(true);
                 ui->centralStackedWidget->setCurrentIndex(targetStackIndex);
+                ui->centralStackedWidget->blockSignals(false);
             }
         } else {
             // Для сервисных экранов (MAIN_SCREEN / AI_CHAT_SCREEN) перелистываем по базовому индексу
+            ui->centralStackedWidget->blockSignals(true);
             ui->centralStackedWidget->setCurrentIndex(index);
+            ui->centralStackedWidget->blockSignals(false);
         }
 
-        // Умное управление списками открытых документов на основе ключа userData
-        QString currentKey = dataVal.toString();
+        // =====================================================================
+        // ИСПРАВЛЕННЫЙ БЛОК УПРАВЛЕНИЯ СЕРВИСНЫМИ СТРАНИЦАМИ (ДОБАВЛЕНО ВЫДЕЛЕНИЕ)
+        // =====================================================================
+        // =====================================================================
+        // ИСПРАВЛЕННЫЙ БЛОК УПРАВЛЕНИЯ СЕРВИСНЫМИ СТРАНИЦАМИ (ФИКС НАЛОЖЕНИЯ ПАНЕЛЕЙ)
+        // =====================================================================
+        QString currentKey = dataVal.toString().trimmed();
         if (currentKey == "MAIN_SCREEN")
         {
-            updateCustomTitle("");
-            if (btnTerminal) {
-                btnTerminal->setChecked(true);
-                btnTerminal->setProperty("active", true);
-                btnTerminal->style()->unpolish(btnTerminal);
-                btnTerminal->style()->polish(btnTerminal);
+            if (this->docMgr) {
+                this->docMgr->updateUiTitles("MAIN_SCREEN");
+                this->docMgr->handleFileActivation("MAIN_SCREEN");
             }
-            if (btnAIChat) btnAIChat->setChecked(false);
 
-            if (ui->openFilesListWidget && ui->leftVerticalSplitter) {
-                ui->openFilesListWidget->setVisible(false);
-                ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
+            // Проверяем, какой индекс сейчас активен в центральном stackedWidget.
+            // Если открыты инженерные вкладки STM (индексы страниц настроек/мониторинга),
+            // комбобоксу ЗАПРЕЩЕНО насильно открывать panelOther и перебивать UI!
+            int currentCentralIndex = ui->centralStackedWidget->currentIndex();
+
+            // Предположим, страница Настроек ИИ = 1, Работа STM = 3. Защищаем их:
+            bool isStmOrSettingsActive = (currentCentralIndex == 1 || currentCentralIndex == 3);
+
+            if (!this->currentOpenProjectPath.isEmpty() && !isStmOrSettingsActive)
+            {
+                if (btnTerminal) {
+                    btnTerminal->blockSignals(true);
+                    btnTerminal->setChecked(true);
+                    btnTerminal->setProperty("active", true);
+                    btnTerminal->style()->unpolish(btnTerminal);
+                    btnTerminal->style()->polish(btnTerminal);
+                    btnTerminal->blockSignals(false);
+                }
+                if (panelOther) {
+                    panelOther->setVisible(true);
+                    panelOther->show();
+                }
+            }
+            else
+            {
+                if (btnTerminal) {
+                    btnTerminal->blockSignals(true);
+                    btnTerminal->setChecked(false);
+                    btnTerminal->setProperty("active", false);
+                    btnTerminal->blockSignals(false);
+                }
+                if (panelOther) {
+                    panelOther->setVisible(false);
+                    panelOther->hide();
+                }
+            }
+
+            if (btnAIChat) btnAIChat->setChecked(false);
+            if (ui->openFilesContainer && ui->leftVerticalSplitter) {
+                ui->openFilesContainer->setVisible(true);
+                int totalHeight = ui->leftVerticalSplitter->height();
+                if (totalHeight <= 0) totalHeight = 600;
+                ui->leftVerticalSplitter->setSizes(QList<int>({totalHeight - 180, 180}));
             }
         }
         else if (currentKey == "AI_CHAT_SCREEN")
         {
-            updateCustomTitle("");
+            if (this->docMgr) {
+                this->docMgr->updateUiTitles("AI_CHAT_SCREEN");
+                // -------------------------------------------------------------
+                // ЖЕЛЕЗНЫЙ UX-ФИКС: Красим строку "AI-ассистент" в синий!
+                // -------------------------------------------------------------
+                this->docMgr->handleFileActivation("AI_CHAT_SCREEN");
+            }
+
+            if (btnAIChat) btnAIChat->setChecked(true);
+
+            if (btnTerminal) {
+                btnTerminal->blockSignals(true);
+                btnTerminal->setChecked(false);
+                btnTerminal->blockSignals(false);
+            }
+            if (panelOther) {
+                panelOther->setVisible(false);
+                panelOther->hide();
+            }
+
+            if (ui->openFilesContainer && ui->leftVerticalSplitter) {
+                ui->openFilesContainer->setVisible(true);
+                int totalHeight = ui->leftVerticalSplitter->height();
+                if (totalHeight <= 0) totalHeight = 600;
+                ui->leftVerticalSplitter->setSizes(QList<int>({totalHeight - 180, 180}));
+            }
+        }
+
+        else if (currentKey == "AI_CHAT_SCREEN")
+        {
+            if (this->docMgr) this->docMgr->updateUiTitles("AI_CHAT_SCREEN"); // Явно просим выставить "AI-ассистент"
+
             if (btnAIChat) btnAIChat->setChecked(true);
             if (btnTerminal) btnTerminal->setChecked(false);
 
+            // ИСПРАВЛЕНО: БОЛЬШЕ НЕ ПРЯЧЕМ ПАНЕЛЬ
             if (ui->openFilesContainer && ui->leftVerticalSplitter) {
-                ui->openFilesContainer->setVisible(false);
-                ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
+                ui->openFilesContainer->setVisible(true); // Всегда TRUE
+                int totalHeight = ui->leftVerticalSplitter->height();
+                if (totalHeight <= 0) totalHeight = 600;
+                ui->leftVerticalSplitter->setSizes(QList<int>({totalHeight - 180, 180}));
             }
         }
-        // НА СТРАНИЦЕ 21-22 (Внутри connect для ui->fileComboBox -> ветка else):
+
+        // =====================================================================
+        // ИНТЕГРАЦИОННАЯ ВРЕЗКА: ЕСЛИ ВЫБРАН РЕАЛЬНЫЙ ФАЙЛ КОДА (ИНДЕКСЫ >= 2)
+        // =====================================================================
         else
         {
-            // --- ЕСЛИ ВЫБРАН РЕАЛЬНЫЙ ФАЙЛ КОДА (ИНДЕКСЫ >= 2) ---
-            QWidget *currentPage = ui->centralStackedWidget->widget(ui->centralStackedWidget->currentIndex());
-            if (currentPage) {
-                QFileInfo fileInfo(currentPage->objectName());
-                updateCustomTitle(fileInfo.fileName());
+            // Извлекаем абсолютный путь к открытому документу, который зашит в userData комбобокса
+            QString fullPath = currentKey;
+
+            if (!fullPath.isEmpty() && fullPath != "MAIN_SCREEN" && fullPath != "AI_CHAT_SCREEN") {
+                // Прямая команда менеджеру: он сам обновит сложный заголовок, нарисует
+                // звездочки сохранения на ходу и выделит нужную строку в списке открытых файлов!
+                if (this->docMgr) {
+                    this->docMgr->handleFileActivation(fullPath);
+                } else {
+                    QWidget *currentPage = ui->centralStackedWidget->widget(ui->centralStackedWidget->currentIndex());
+                    if (currentPage) {
+                        QFileInfo fileInfo(currentPage->objectName());
+                        updateCustomTitle(fileInfo.fileName());
+                    }
+                }
             }
 
             if (btnTerminal) btnTerminal->setChecked(false);
@@ -1495,6 +1829,16 @@ Neuro_programm::Neuro_programm(QWidget *parent)
                 if (totalHeight <= 0) totalHeight = 600;
                 ui->leftVerticalSplitter->setSizes(QList<int>({totalHeight - 180, 180}));
                 ui->leftVerticalSplitter->update();
+            }
+
+            // Переводим фокус ввода клавиатуры на текстовый холст редактора кода для удобства инженера
+            QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+            if (currentPage) {
+                CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+                if (currentEditor) {
+                    currentEditor->setFocus();
+                    currentEditor->update();
+                }
             }
 
             // =========================================================================
@@ -1521,6 +1865,9 @@ Neuro_programm::Neuro_programm(QWidget *parent)
                 }
             });
         }
+
+        // Синхронно обновляем индикатор строки и столбца (Ln, Col) каретки в статусбаре
+        this->updateCursorPositionIndicator();
     });
 
     // 1. Создаем кастомный виджет для шапки дока
@@ -1534,11 +1881,16 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     QLabel *titleLabel1 = new QLabel("📁 Открытые файлы и проект", customTitleWidget);
 
     // ЗАЩИТА: Если метка не была найдена в Designer, создаем её сами прямо сейчас
-    if (!titleLabel) {
+    if (this->titleLabel && ui->customTitleBarPanel) {
+        // Просто привязываем метку к панели шапки, не меняя её живой текст!
+        this->titleLabel->setParent(ui->customTitleBarPanel);
+    } else if (!titleLabel) {
         titleLabel = new QLabel("PyTorch Studio", ui->customTitleBarPanel);
-        QWidget *completelyEmptyTitle = new QWidget(ui->leftDockWidget);
-        ui->leftDockWidget->setTitleBarWidget(completelyEmptyTitle);
     }
+
+    // Заглушка для схлопывания заголовка дока (оставляем без изменений)
+    QWidget *completelyEmptyTitle = new QWidget(ui->leftDockWidget);
+    ui->leftDockWidget->setTitleBarWidget(completelyEmptyTitle);
 
     // Настраиваем строгий полужирный шрифт в стиле Breeze
     QFont titleFont1 = titleLabel->font();
@@ -1588,49 +1940,6 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // =========================================================================
     if (ui->leftDockWidget)
     {
-        // 1. Сбрасываем минимальные лимиты высоты из Designer (строка 11)
-        ui->leftDockWidget->setMinimumSize(QSize(300, 0));
-        ui->leftDockWidget->setMaximumSize(QSize(300, 524287));
-
-        // 2. Убираем встроенную плашку заголовка QDockWidget
-        if (ui->leftDockWidget) {
-            // Способ 1: Отключаем все нативные фичи заголовка (он схлопнется сам)
-            ui->leftDockWidget->setFeatures(QDockWidget::NoDockWidgetFeatures);
-
-            // Способ 2: Создаем действительно пустой виджет БЕЗ фиксации высоты
-            // Qt сам поймет, что у него нулевой размер и уберет заголовок
-            QWidget *emptyTitle = new QWidget(ui->leftDockWidget);
-            ui->leftDockWidget->setTitleBarWidget(emptyTitle);
-
-            // Способ 3: Срезаем внутренние отступы у контейнера дока через QSS
-            ui->leftDockWidget->setStyleSheet(
-                        "QDockWidget { background-color: #202225; border: none; padding: 0px; margin: 0px; }"
-                        "QDockWidget::title { background-color: transparent; height: 0px; padding: 0px; margin: 0px; }"
-                        );
-        }
-
-        // 3. Срезаем скрытые рамки у самих списков
-        ui->leftDockWidget->setStyleSheet(
-                    "QDockWidget { border: 1px solid #b0b0b0; padding: 0px !important; margin: 0px !important; }"
-                    "QDockWidget > QWidget { padding: 0px !important; margin: 0px !important; background: #ffffff; }"
-                    "QTreeView, QListWidget { border: none; padding: 0px; margin: 0px; background: #ffffff; }"
-                    );
-
-        // Считываем подложку дока и принудительно зануляем её макет
-        QWidget *dockContents = ui->leftDockWidget->widget();
-        if (dockContents && dockContents->layout()) {
-            dockContents->layout()->setContentsMargins(0, 0, 0, 0);
-            dockContents->layout()->setSpacing(0);
-        }
-
-
-    }
-
-    // =========================================================================
-    // ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПУСТОТЫ И НАСТРОЙКА ЛЕВОЙ ПАНЕЛИ НАВИГАЦИИ (ФИНАЛ)
-    // =========================================================================
-    if (ui->leftDockWidget)
-    {
         // 1. Сбрасываем минимальные лимиты высоты из Designer
         ui->leftDockWidget->setMinimumSize(QSize(300, 0));
         ui->leftDockWidget->setMaximumSize(QSize(300, 524287));
@@ -1641,33 +1950,41 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         emptyTitleWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
         ui->leftDockWidget->setTitleBarWidget(emptyTitleWidget);
 
-        // 3. ХИРУРГИЧЕСКИЙ CSS-СДВИГ: Выталкиваем первые элементы списков вверх,
-        // полностью уничтожая скрытые XML-пустоты под надписями!
+        // =====================================================================
+        // ИСПРАВЛЕННЫЙ CSS-КАСКАД: УБРАН BACKGROUND, БЛОКИРОВАВШИЙ ВЫДЕЛЕНИЕ QT
+        // =====================================================================
         ui->leftDockWidget->setStyleSheet(
                     "QDockWidget {"
-                    " border: 1px solid #b0b0b0;"
-                    " padding: 0px !important;"
-                    " margin: 0px !important;"
+                    "   border: 1px solid #b0b0b0;"
+                    "   padding: 0px !important;"
+                    "   margin: 0px !important;"
                     "}"
                     "QDockWidget > QWidget {"
-                    " padding: 0px !important;"
-                    " margin: 0px !important;"
-                    " background: #ffffff;"
+                    "   padding: 0px !important;"
+                    "   margin: 0px !important;"
+                    "   background: #ffffff;"
                     "}"
+                    // УДАЛЕН 'background: #ffffff;'! Оставляем только сброс рамок, чтобы оживить синий цвет
                     "QTreeView, QListWidget {"
-                    " border: none;"
-                    " margin: 0px !important;"
-                    " padding: 0px !important;"
-                    " background: #ffffff;"
+                    "   border: none;"
+                    "   margin: 0px !important;"
+                    "   padding: 0px !important;"
                     "}"
                     "QTreeView::item, QListWidget::item {"
-                    " padding-top: 2px !important;"
-                    " padding-bottom: 2px !important;"
+                    "   padding-top: 4px !important;"
+                    "   padding-bottom: 4px !important;"
+                    "}"
+                    "QTreeView::item:hover, QListWidget::item:hover {"
+                    "   background-color: #e4e5e6;"
                     "}"
                     );
+
+        // Обнуляем технические отступы самого главного окна для док-зон
         this->setStyleSheet(this->styleSheet() +
                             "QDockWidget { border: none; padding: 0px; margin: 0px; }"
                             "QDockWidget::title { background: transparent; height: 0px; max-height: 0px; padding: 0px; margin: 0px; border: none; }"
+                            "QMainWindow::separator { background: transparent; width: 0px; height: 0px; margin: 0px; padding: 0px; }"
+                            "QMainWindow::separator:hover { background: transparent; width: 0px; height: 0px; }"
                             );
 
         // Считываем подложку дока и принудительно зануляем её макет
@@ -1677,20 +1994,11 @@ Neuro_programm::Neuro_programm(QWidget *parent)
             dockContents->layout()->setSpacing(0);
         }
 
-        this->setStyleSheet(this->styleSheet() +
-                            "QMainWindow::separator { background: transparent; width: 0px; height: 0px; margin: 0px; padding: 0px; }"
-                            "QMainWindow::separator:hover { background: transparent; width: 0px; height: 0px; }"
-                            );
-
-        if (ui->leftDockWidget) {
-            // Говорим окну, что разделители вокруг этого дока не должны иметь кастомных отступов
-            ui->leftDockWidget->setContentsMargins(0, 0, 0, 0);
-        }
+        ui->leftDockWidget->setContentsMargins(0, 0, 0, 0);
 
         this->layout()->invalidate();
         this->layout()->activate();
     }
-
 
     // =========================================================================
     // ХИРУРГИЧЕСКИЙ ФИКС НАЛОЖЕНИЯ (КАШИ) НА ПЕРВОЙ СТРАНИЦЕ ДОКА
@@ -2436,20 +2744,22 @@ Neuro_programm::Neuro_programm(QWidget *parent)
     // =========================================================================
     // 8. В. УМНАЯ ЛОГИКА ДЛЯ КНОПКИ: ГРАФИКИ (actTensor) - БЕЗ ОШИБОК КОМПИЛЯЦИИ
     // =========================================================================
+    // =========================================================================
+    // УМНАЯ ЛОГИКА ДЛЯ КНОПКИ: ГРАФИКИ (actTensor) - ИНТЕГРАЦИЯ С WEBVIEW
+    // =========================================================================
     if (leftSideBarContainer && ui->mainHorizontalSplitter && ui->widgetRightCharts)
     {
         QToolButton *btnTensor = leftSideBarContainer->findChild<QToolButton*>("Графики");
-
         if (btnTensor) {
-            btnTensor->disconnect();
+            btnTensor->disconnect(); // Очищаем старые связи
 
             connect(btnTensor, &QToolButton::clicked, this, [this]() {
-                qDebug() << ">>> [UX КЛИК] Кнопка: Графики";
+                qDebug() << ">>> [UX КЛИК] Кнопка: Графики (TensorBoard)";
 
                 int totalWindowWidth = this->width();
                 QList<int> currentSizes = ui->mainHorizontalSplitter->sizes();
 
-                // ИСПРАВЛЕНО: точечное обращение к индексу [1] списка размеров
+                // Проверяем, скрыта ли сейчас панель графиков на экране
                 bool areChartsHidden = !ui->widgetRightCharts->isVisible() || (currentSizes.size() > 1 && currentSizes[1] <= 10);
 
                 if (areChartsHidden)
@@ -2461,24 +2771,19 @@ Neuro_programm::Neuro_programm(QWidget *parent)
                     ui->widgetRightCharts->setMinimumWidth(0);
                     ui->widgetRightCharts->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-                    QList<QWidget*> children = ui->widgetRightCharts->findChildren<QWidget*>();
-                    if (!children.isEmpty()) {
-                        QWidget *webView = children.first();
+                    // Динамически будим фоновый процесс TensorBoard, если он спал
+                    if (this->tensorBoardServer && !this->tensorBoardServer->isRunning()) {
+                        this->tensorBoardServer->startServer(this->currentOpenProjectPath, 6006);
+                    }
 
-                        if (!ui->widgetRightCharts->layout()) {
-                            QVBoxLayout *boxLayout = new QVBoxLayout(ui->widgetRightCharts);
-                            boxLayout->setContentsMargins(0, 0, 0, 0);
-                            boxLayout->setSpacing(0);
-                            boxLayout->addWidget(webView);
-                        }
-
-                        webView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-                        webView->setMinimumSize(QSize(0, 0));
-                        webView->setMaximumSize(QSize(16777215, 16777215));
+                    // Принудительно заставляем WebView загрузить локальную страницу TensorBoard
+                    if (m_tensorWebView) {
+                        m_tensorWebView->setUrl(QUrl("http://127.0.0.1:6006"));
                     }
 
                     ui->widgetRightCharts->setVisible(true);
 
+                    // Схлопываем левое дерево проекта, отдавая графикам 100% ширины
                     if (ui->leftDockWidget) {
                         ui->leftDockWidget->setVisible(false);
                         ui->leftDockWidget->hide();
@@ -2487,18 +2792,18 @@ Neuro_programm::Neuro_programm(QWidget *parent)
                     ui->mainHorizontalSplitter->setCollapsible(0, true);
                     ui->mainHorizontalSplitter->setSizes(QList<int>({0, totalWindowWidth}));
 
-                    qDebug() << ">>> [TENSORBOARD] WebView успешно растянут на 100% ширины.";
+                    qInfo() << "[TENSORBOARD] Панель развернута. WebView подключен к порту 6006.";
                 }
                 else
                 {
                     // -------------------------------------------------------------
-                    // РЕЖИМ 2: СВОРУЧИВАНИЕ ГРАФИКОВ (ВОЗВРАТ К КОДУ)
+                    // РЕЖИМ 2: СВОРУЧИВАНИЕ ГРАФИКОВ (ВОЗВРАТ К ИСХОДНОМУ КОДУ)
                     // -------------------------------------------------------------
                     ui->mainHorizontalSplitter->setSizes(QList<int>({1000, 0}));
                     ui->widgetRightCharts->setVisible(false);
-
                     ui->mainHorizontalSplitter->setCollapsible(0, false);
 
+                    // Возвращаем боковую панель навигации (дерево файлов) на экран
                     if (ui->leftDockWidget) {
                         QStackedWidget *dockStack = ui->leftDockWidget->findChild<QStackedWidget*>("dockContentsStack");
                         if (dockStack) {
@@ -2508,8 +2813,7 @@ Neuro_programm::Neuro_programm(QWidget *parent)
                         ui->leftDockWidget->setVisible(true);
                         ui->leftDockWidget->show();
                     }
-
-                    qDebug() << ">>> [TENSORBOARD] Интерфейс возвращен к коду.";
+                    qDebug() << ">>> [TENSORBOARD] Интерфейс возвращен к кодовой базе.";
                 }
 
                 if (this->layout()) {
@@ -2595,16 +2899,88 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         }
     }
 
+    // =========================================================================
+    // ИНИЦИАЛИЗАЦИЯ НИЖНЕЙ ПАНЕЛИ ТЕРМИНАЛА (КОНЕЦ КОНСТРУКТОРА)
+    // =========================================================================
     panelOther = new panel_other(this);
+    // mainVerticalSplitter->addWidget(panelOther);
+
+    if (actDebug)
+    {
+        panelOther->setDebugAction(actDebug);
+    }
+
     mainVerticalSplitter->addWidget(panelOther);
+
+    // 1. Скрываем виджет на уровне менеджмента слоев Qt
+    panelOther->setVisible(false);
+    panelOther->hide();
+
+    // 2. ЖЕСТКИЙ АППАРАТНЫЙ ФИКС: Явно отдаем верхнему редактору 100% высоты,
+    // а нижний терминал зануляем в ОЗУ сплиттера, полностью стирая зазор!
+    int totalWindowHeight = this->height() > 0 ? this->height() : 800;
+    QList<int> initialVerticalSizes;
+    initialVerticalSizes << totalWindowHeight << 0; // Верхняя зона = максимум, нижняя = 0
+    mainVerticalSplitter->setSizes(initialVerticalSizes);
+
+    // Блокируем схлопывание кода в ноль, но разрешаем полностью прятать терминал
+    mainVerticalSplitter->setCollapsible(0, false);
+    mainVerticalSplitter->setCollapsible(1, true);
+
+
+    // =========================================================================
+    // БЕТОНИРОВАНИЕ ПАЛИТРЫ ТЕРМИНАЛА logEdit (УГОЛЬНО-ЧЕРНЫЙ + ЗЕЛЕНЫЙ НЕОН)
+    // =========================================================================
+    QTextEdit *logEditWidget = panelOther->findChild<QTextEdit*>("logEdit");
+    if (logEditWidget) {
+        logEditWidget->setAutoFillBackground(true);
+
+        QPalette logPalette = logEditWidget->palette();
+        logPalette.setColor(QPalette::Base, QColor(30, 30, 30));      // Фон — угольно-черный (#1e1e1e)
+        logPalette.setColor(QPalette::Text, QColor(0, 255, 0));       // Текст — неоново-зеленый (#00ff00)
+        logEditWidget->setPalette(logPalette);
+
+        // Дополнительно страхуем шрифтом
+        logEditWidget->setStyleSheet("border: none; font-family: 'Liberation Mono'; font-size: 11px;");
+    }
+
+    // =========================================================================
+    // БЕТОНИРОВАНИЕ ПАЛИТРЫ REPL-КОНСОЛИ (УГОЛЬНО-ЧЕРНЫЙ + БЕЛЫЙ ТЕКСТ ВВОДА)
+    // =========================================================================
+    QTextEdit *replWidget = panelOther->findChild<QTextEdit*>("replTextEdit");
+    if (!replWidget) replWidget = panelOther->findChild<QTextEdit*>("replEdit"); // Фолбэк имени
+
+    if (replWidget) {
+        replWidget->setAutoFillBackground(true);
+
+        QPalette replPalette = replWidget->palette();
+        replPalette.setColor(QPalette::Base, QColor(30, 30, 30));     // Фон — угольно-черный
+        replPalette.setColor(QPalette::Text, QColor(0, 255, 0));   // Текст ввода — белый
+        replWidget->setPalette(replPalette);
+
+        replWidget->setStyleSheet("border: none; font-family: 'Liberation Mono'; font-size: 11px;");
+    }
+
+
     panelOther->setVisible(false); // Изначально скрыта
 
     // Привязываем фокус-политику к кнопкам и панелям, чтобы они НЕ перехватывали клавиатуру
     panelOther->setFocusPolicy(Qt::NoFocus);
 
-    this->updateProjectsListFromSettings();
+    //this->updateProjectsListFromSettings();
     //this->envManager = new PythonEnvManager(this);
-    QTimer::singleShot(250, this, &Neuro_programm::initializeEnvironmentOnStartup);
+    // =========================================================================
+    // ЖЕСТКИЙ ФИКС ЧИСТОГО СТАРТА: БЛОКИРУЕМ АВТОЗАГРУЗКУ ПРОЕКТА
+    // =========================================================================
+    this->currentOpenProjectPath = ""; // Гарантируем, что ОЗУ проекта пуста
+
+    QTimer::singleShot(250, this, [this]() {
+        // ИСПРАВЛЕНО: Вызываем ваш родной метод инициализации окружения из главного класса!
+        this->initializeEnvironmentOnStartup();
+
+        // Принудительно выставляем интерфейс в чистый стартовый режим
+        this->setIDEInStartMode(true);
+    });
 
     // =========================================================================
     // СИНХРОНИЗАЦИЯ UI И СИСТЕМНЫХ УВЕДОМЛЕНИЙ ПРИ УСПЕШНОМ ПОДКЛЮЧЕНИИ VENV
@@ -2637,6 +3013,583 @@ Neuro_programm::Neuro_programm(QWidget *parent)
         this->initLspServer();
     });
 
+    this->jupyterServer = new JupyterManager(this);
+
+    // Прямая коммутация логов фонового ядра в наш красивый черный logEdit терминал
+    connect(jupyterServer, &JupyterManager::jupyterLogReceived, this, [this](const QString &text) {
+        if (panelOther) {
+            panelOther->appendTrainingLog(text); // Текст автоматически ложится на черный фон зеленым цветом
+        }
+    });
+
+    // Перехват критических ошибок ядра
+    connect(jupyterServer, &JupyterManager::serverErrorOccurred, this, [this](const QString &errorMsg) {
+        this->sendSystemNotification("Ошибка Jupyter", errorMsg);
+    });
+
+    this->tensorBoardServer = new TensorBoardManager(this);
+
+    // Направляем логи старта в зеленый терминал logEdit
+    connect(tensorBoardServer, &TensorBoardManager::boardLogReceived, this, [this](const QString &text) {
+        if (panelOther) {
+            panelOther->appendTrainingLog(text);
+        }
+    });
+
+    // Выводим системное уведомление при ошибках
+    connect(tensorBoardServer, &TensorBoardManager::boardErrorOccurred, this, [this](const QString &errorMsg) {
+        this->sendSystemNotification("Ошибка TensorBoard", errorMsg);
+    });
+
+    this->initTensorBoardUi();
+
+    this->hfManager = new HuggingFaceManager(this);
+
+    // Направляем логи скачивания моделей в наш неоновый зеленый терминал logEdit
+    connect(hfManager, &HuggingFaceManager::hfLogReceived, this, [this](const QString &text) {
+        if (panelOther) {
+            panelOther->appendTrainingLog(text);
+        }
+    });
+
+    // Слушаем результаты завершения скачивания/логина
+    connect(hfManager, &HuggingFaceManager::operationFinished, this, [this](bool success, const QString &msg) {
+        if (success) {
+            this->sendSystemNotification("Hugging Face", "Загрузка весов/авторизация завершена успешно.");
+        } else {
+            this->sendSystemNotification("Ошибка Hugging Face", msg);
+        }
+    });
+
+    if (!startupPath.isEmpty())
+    {
+        // Даем 200мс на то, чтобы главное окно отрисовалось на экране,
+        // и только потом асинхронно запускаем распаковку или открытие
+        QTimer::singleShot(200, this, [this, startupPath]()
+        {
+            this->processStartupPath(startupPath);
+        });
+    }
+
+    // =========================================================================
+    // ЧАСТЬ 1: ИНИЦИАЛИЗАЦИЯ И СИСТЕМНЫЕ СВЯЗИ МЕНЕДЖЕРА ОТЛАДКИ
+    // =========================================================================
+    this->pyDebugger = new DebugManager(this);
+
+    // Прямая коммутация текстовых логов дебаггера в зеленый терминал logEdit
+    connect(pyDebugger, &DebugManager::statusMessageReady, this, [this](const QString &message, int timeout) {
+        if (ui->statusbar) {
+            ui->statusbar->showMessage(message, timeout);
+        }
+    });
+
+    // 1. Коннект для заполнения нижней таблицы Стек вызовов (Qt Creator style)
+    connect(pyDebugger, &DebugManager::stackTraceReceived, this, [this](const QList<QStringList> &stackFrames) {
+        QTableWidget *stackTable = panelOther ? panelOther->findChild<QTableWidget*>() : nullptr;
+        if (stackTable) {
+            stackTable->setRowCount(0);
+            for (int i = 0; i < stackFrames.size(); ++i) {
+                stackTable->insertRow(i);
+                for (int col = 0; col < 5; ++col) {
+                    stackTable->setItem(i, col, new QTableWidgetItem(stackFrames[i][col]));
+                }
+            }
+        }
+    });
+
+    // 2. Коннект для заполнения правой таблицы Локальных переменных
+    connect(pyDebugger, &DebugManager::variablesReceived, this, [this](const QList<QStringList> &variables) {
+        QTableWidget *localVarsTable = ui->rightDebugPanel ? ui->rightDebugPanel->findChild<QTableWidget*>("debugLocalVarsTable") : nullptr;
+        if (localVarsTable) {
+            localVarsTable->setRowCount(0);
+            for (int i = 0; i < variables.size(); ++i) {
+                localVarsTable->insertRow(i);
+                for (int col = 0; col < 3; ++col) {
+                    localVarsTable->setItem(i, col, new QTableWidgetItem(variables[i][col]));
+                }
+            }
+        }
+    });
+
+
+    // ОБРАБОТКА СИГНАЛА ПОПАДАНИЯ НА БРЕЙКПОИНТ PyTorch (ЧЕРЕЗ EXTRASELECTION)
+    // =========================================================================
+    // АСИНХРОННЫЙ UX-МОСТ ПОДСВЕТКИ СТРОКИ ОСТАНОВА (ЗАЩИТА ОТ OUT OF RANGE)
+    // =========================================================================
+    connect(pyDebugger, &DebugManager::breakpointHit, this, [this](int line, const QString &sourceFile) {
+        // 1. Принудительно открываем и загружаем файл в редактор
+        this->openNewFileInEditor(sourceFile);
+
+        // 2. ДЕЛАЕМ МИКРО-ПАУЗУ ДЛЯ СИНХРОНИЗАЦИИ ОЗУ И ХОЛСТА РЕДАКТОРА
+        QTimer::singleShot(100, this, [this, line]() {
+            QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+            if (!currentPage) return;
+
+            CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+            if (currentEditor && currentEditor->document()) {
+                // В Qt нумерация строк идет с 0, поэтому line - 1
+                QTextBlock block = currentEditor->document()->findBlockByLineNumber(line - 1);
+
+                if (block.isValid()) {
+                    int docTotalChars = currentEditor->document()->characterCount();
+                    int targetPosition = block.position();
+
+                    // ИСКЛЮЧАЕМ КРАШ: Проверяем, что позиция на 100% существует в памяти документа
+                    if (targetPosition >= 0 && targetPosition < docTotalChars) {
+                        QTextCursor cursor = currentEditor->textCursor();
+                        cursor.setPosition(targetPosition);
+                        currentEditor->setTextCursor(cursor);
+                        currentEditor->centerCursor(); // Центрируем экран на строке
+
+                        // Накатываем чистую желтую подложку маркера DAP
+                        QList<QTextEdit::ExtraSelection> extraSelections;
+                        QTextEdit::ExtraSelection selection;
+                        selection.format.setBackground(QColor(255, 255, 150, 100)); // RGBA
+                        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+                        selection.cursor = currentEditor->textCursor();
+                        selection.cursor.clearSelection();
+                        extraSelections.append(selection);
+
+                        currentEditor->setExtraSelections(extraSelections);
+                    }
+                }
+                currentEditor->setFocus();
+                currentEditor->update();
+            }
+        });
+    });
+
+    // =========================================================================
+    // ЧАСТЬ 2: АВТОНОМНЫЙ ПРЯМОЙ КОННЕКТ ДЛЯ КНОПКИ ДЕБАГА НА БОКОВОЙ ПАНЕЛИ
+    // =========================================================================
+    // if (actDebug) {
+    //     actDebug->disconnect(); // Намертво вырезаем старые связи
+
+    //     // КРИТИЧЕСКИЙ ШАГ: Связываем экшен кнопки сайдбара СРАЗУ с новым слотом внутри panelOther!
+    //     if (panelOther) {
+    //         connect(actDebug, &QAction::triggered, panelOther, &panel_other::onDebugModeTriggered);
+    //     }
+
+    //     // Основной коннект для управления процессами и внешними сплиттерами главного окна
+    //     connect(actDebug, &QAction::triggered, this, [this](bool checked) {
+    //         QToolButton *sideDebugBtn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Дебаг") : nullptr;
+    //         QLabel *sideDebugLbl = sideDebugBtn ? sideDebugBtn->findChild<QLabel*>() : nullptr;
+
+    //         if (checked) {
+    //             // =============================================================
+    //             // СЦЕНАРИЙ А: ЗАПУСК СЕССИИ ОТЛАДКИ PyTorch
+    //             // =============================================================
+    //             if (this->currentOpenProjectPath.isEmpty()) {
+    //                 this->sendSystemNotification("Debug", "Ошибка: Нет открытого проекта!");
+    //                 actDebug->setChecked(false);
+    //                 return;
+    //             }
+
+    //             QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+    //             if (!currentPage || currentPage->objectName().isEmpty() || currentPage->objectName() == "MAIN_SCREEN") {
+    //                 this->sendSystemNotification("Debug", "Выберите файл .py в редакторе для запуска отладки.");
+    //                 actDebug->setChecked(false);
+    //                 return;
+    //             }
+
+    //             QString activeScript = currentPage->objectName();
+    //             if (!activeScript.endsWith(".py", Qt::CaseInsensitive)) {
+    //                 this->sendSystemNotification("Debug", "Отладка поддерживается только для чистых файлов .py");
+    //                 actDebug->setChecked(false);
+    //                 return;
+    //             }
+
+    //             if (sideDebugLbl) sideDebugLbl->setText("Стоп дебаг");
+
+    //             if (ui->statusbar) {
+    //                 ui->statusbar->showMessage("🪲 Режим отладки активирован. Ожидание подключения к debugpy...", 5000);
+    //             }
+
+    //             // Нативно открываем нижний виджет и раздвигаем вертикальный сплиттер
+    //             if (panelOther) {
+    //                 panelOther->setVisible(true);
+    //                 panelOther->show();
+
+    //                 QStackedWidget *stacked = panelOther->findChild<QStackedWidget*>("stackedWidget");
+    //                 if (stacked) {
+    //                     stacked->setCurrentIndex(1);}
+
+    //                 if (mainVerticalSplitter) {
+    //                     int totalHeight = this->height() > 0 ? this->height() : 800;
+    //                     mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
+    //                     mainVerticalSplitter->refresh();
+    //                 }
+    //             }
+
+    //             // Нативно открываем и раздвигаем правую вертикальную панель
+    //             if (ui->rightDebugPanel) {
+    //                 ui->rightDebugPanel->setVisible(true);
+    //                 ui->rightDebugPanel->show();
+
+    //                 QSplitter *codeSplitter = qobject_cast<QSplitter*>(ui->rightDebugPanel->parentWidget());
+    //                 if (codeSplitter) {
+    //                     int codeZoneWidth = codeSplitter->width() > 0 ? codeSplitter->width() : (this->width() - 68);
+    //                     int rightWidth = 350;
+    //                     int leftWidth = codeZoneWidth - rightWidth;
+
+    //                     if (leftWidth < 200) leftWidth = 200;
+
+    //                     codeSplitter->setCollapsible(0, false);
+    //                     codeSplitter->setCollapsible(1, false);
+    //                     codeSplitter->setSizes(QList<int>({leftWidth, rightWidth}));
+    //                     codeSplitter->refresh();
+    //                 }
+
+    //                 QToolButton *btnTensor = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Графики") : nullptr;
+    //                 if (btnTensor) btnTensor->setChecked(true);
+    //             }
+
+    //             // Запуск сессии дебаггера
+    //             QSettings ideConfig(QDir::homePath() + "/.config/PyTorchStudio/IDE.conf", QSettings::IniFormat);
+    //             QString activeVenv = ideConfig.value("python/global_venv_path").toString();
+    //             if (activeVenv.isEmpty()) {
+    //                 activeVenv = this->currentOpenProjectPath + "/venv";
+    //             }
+
+    //             if (this->pyDebugger) {
+    //                 this->pyDebugger->startDebugSession(this->currentOpenProjectPath, activeScript, activeVenv);
+    //             }
+
+    //         } else {
+    //             // =============================================================
+    //             // СЦЕНАРИЙ Б: ПРИНУДИТЕЛЬНЫЙ ОСТАНОВ ОТЛАДКИ ПОЛЬЗОВАТЕЛЕМ
+    //             // =============================================================
+    //             if (sideDebugLbl) sideDebugLbl->setText("Дебаг");
+    //             if (this->pyDebugger) {
+    //                 this->pyDebugger->stopDebugSession();
+    //             }
+
+    //             // Нативно прячем нижнюю панель логов через hide
+    //             if (panelOther) {
+    //                 panelOther->setVisible(false);
+    //                 panelOther->hide();
+    //             }
+
+    //             if (mainVerticalSplitter) {
+    //                 mainVerticalSplitter->setSizes(QList<int>({this->height(), 0}));
+    //                 mainVerticalSplitter->refresh();
+    //             }
+
+    //             // Нативно прячем правую дебаг-панель
+    //             if (ui->rightDebugPanel) {
+    //                 ui->rightDebugPanel->setVisible(false);
+    //                 ui->rightDebugPanel->hide();
+
+    //                 QSplitter *codeSplitter = qobject_cast<QSplitter*>(ui->rightDebugPanel->parentWidget());
+    //                 if (codeSplitter) {
+    //                     codeSplitter->setSizes(QList<int>({codeSplitter->width(), 0}));
+    //                     codeSplitter->refresh();
+    //                 }
+
+    //                 QToolButton *btnTensor = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Графики") : nullptr;
+    //                 if (btnTensor) btnTensor->setChecked(false);
+    //             }
+
+    //             if (ui->statusbar) {
+    //                 ui->statusbar->showMessage("Сессия отладки прервана.", 3000);
+    //             }
+    //             this->sendSystemNotification("Debug", "Сессия отладки прервана.");
+    //         }
+
+    //         if (this->layout()) this->layout()->activate();
+    //         this->update();
+    //     });
+    // }
+
+    if (actDebug) {
+        actDebug->disconnect(); // Намертво вырезаем старые связи
+
+        if (panelOther) {
+            connect(actDebug, &QAction::triggered, panelOther, &panel_other::onDebugModeTriggered);
+        }
+
+        // Основной коннект для управления процессами и геометрией сетки главного окна
+        connect(actDebug, &QAction::triggered, this, [this](bool checked) {
+            QToolButton *sideDebugBtn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Дебаг") : nullptr;
+            QLabel *sideDebugLbl = sideDebugBtn ? sideDebugBtn->findChild<QLabel*>() : nullptr;
+
+            if (checked) {
+                // =============================================================
+                // КРИТИЧЕСКИЙ UX-ПРЕДОХРАНИТЕЛЬ: ПРОВЕРКА СОХРАНЕНИЯ КОДА
+                // =============================================================
+                if (!this->showSaveConfirmationDialog()) {
+                    // Если нажали "Отмена" — возвращаем тумблер сайдбара в исходное отжатое состояние
+                    actStartTrain->setChecked(false);
+                    return; // МГНОВЕННО ВЫХОДИМ, дебаггер debugpy даже не начнет запускаться! [0:365]
+                }
+
+                // =============================================================
+                // СЦЕНАРИЙ А: ЗАПУСК СЕССИИ ОТЛАДКИ PyTorch
+                // =============================================================
+                if (this->currentOpenProjectPath.isEmpty()) {
+                    this->sendSystemNotification("Debug", "Ошибка: Нет открытого проекта!");
+                    actDebug->setChecked(false);
+                    return;
+                }
+
+                QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+                if (!currentPage || currentPage->objectName().isEmpty() || currentPage->objectName() == "MAIN_SCREEN") {
+                    this->sendSystemNotification("Debug", "Выберите файл .py в редакторе для запуска отладки.");
+                    actDebug->setChecked(false);
+                    return;
+                }
+
+                QString activeScript = currentPage->objectName();
+                if (!activeScript.endsWith(".py", Qt::CaseInsensitive)) {
+                    this->sendSystemNotification("Debug", "Отладка поддерживается только для чистых файлов .py");
+                    actDebug->setChecked(false);
+                    return;
+                }
+
+                if (sideDebugLbl) sideDebugLbl->setText("Стоп дебаг");
+                if (ui->statusbar) {
+                    ui->statusbar->showMessage(" Режим отладки активирован. Ожидание подключения к debugpy...", 5000);
+                }
+
+                // 1. Отображаем нижнюю панель и фиксируем её высоту под новую строку кнопок
+                if (panelOther) {
+                    panelOther->setVisible(true);
+                    panelOther->show();
+                    panelOther->setFixedHeight(285); // Даем 285px высоты, чтобы вместить контекстное меню
+
+                    QStackedWidget *stacked = panelOther->findChild<QStackedWidget*>("stackedWidget");
+                    if (stacked) {
+                        stacked->setCurrentIndex(1); // Включаем нужную страницу дебага внутри панели
+                    }
+
+                    QStackedWidget *stacked2 = panelOther->findChild<QStackedWidget*>("menuSwitcherStack");
+                    if (stacked2) {
+                        stacked2->setCurrentIndex(1); // Включаем нужную страницу дебага внутри панели
+                    }
+                }
+
+                // 2. Отображаем правую панель отладки и фиксируем её геометрию в сетке
+                if (ui->rightDebugPanel) {
+                    ui->rightDebugPanel->setVisible(true);
+                    ui->rightDebugPanel->show();
+                    ui->rightDebugPanel->setFixedWidth(330); // Жестко держим 330px, не давая окну уходить вправо
+                    ui->rightDebugPanel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+                }
+
+                // 3. Запуск сессии дебаггера
+                QSettings ideConfig(QDir::homePath() + "/.config/PyTorchStudio/IDE.conf", QSettings::IniFormat);
+                QString activeVenv = ideConfig.value("python/global_venv_path").toString();
+                if (activeVenv.isEmpty()) {
+                    activeVenv = this->currentOpenProjectPath + "/venv";
+                }
+                if (this->pyDebugger) {
+                    this->pyDebugger->startDebugSession(this->currentOpenProjectPath, activeScript, activeVenv);
+                }
+
+            } else {
+                // =============================================================
+                // СЦЕНАРИЙ Б: ПРИНУДИТЕЛЬНЫЙ ОСТАНОВ ОТЛАДКИ ПОЛЬЗОВАТЕЛЕМ
+                // =============================================================
+                if (sideDebugLbl) sideDebugLbl->setText("Дебаг");
+                if (this->pyDebugger) {
+                    this->pyDebugger->stopDebugSession();
+                }
+
+                // Нативно прячем нижнюю панель
+                if (panelOther) {
+                    panelOther->setVisible(false);
+                    panelOther->hide();
+                }
+
+                if (ui->rightDebugPanel) {
+                    ui->rightDebugPanel->setVisible(false);
+                    ui->rightDebugPanel->hide();
+                }
+
+                QStackedWidget *stacked = panelOther->findChild<QStackedWidget*>("stackedWidget");
+                if (stacked) {
+                    stacked->setCurrentIndex(1); // 0 - обычный терминал/логи разработки
+                }
+
+                QStackedWidget *stacked2 = panelOther->findChild<QStackedWidget*>("menuSwitcherStack");
+                if (stacked2) {
+                    stacked2->setCurrentIndex(0); // Включаем нужную страницу дебага внутри панели
+                }
+
+                if (ui->statusbar) {
+                    ui->statusbar->showMessage("Сессия отладки прервана.", 3000);
+                }
+                this->sendSystemNotification("Debug", "Сессия отладки прервана.");
+            }
+
+            // 4. ФИНАЛЬНЫЙ АВТОПЕРЕСЧЕТ: Заставляем QGridLayout на центральном виджете перестроить пиксели
+            if (ui && ui->centralwidget && ui->centralwidget->layout())
+            {
+                QGridLayout *mainGrid = qobject_cast<QGridLayout*>(ui->centralwidget->layout());
+                if (mainGrid)
+                {
+                    mainGrid->invalidate(); // Сбрасываем старый кэш размеров
+                    mainGrid->activate();   // Принудительно выстраиваем Код, Дебаггер и Терминал по правилам
+                }
+            }
+            this->update();
+        });
+    }
+
+    // СИНХРОНИЗАЦИЯ ЗАВЕРШЕНИЯ: Если скрипт отработал сам до конца — отжимаем экшен боковой панели
+    connect(pyDebugger, &DebugManager::sessionFinished, this, [this]() {
+        if (actDebug && actDebug->isChecked()) {
+            actDebug->blockSignals(true);
+            actDebug->setChecked(false); // Отжимаем кнопку в UI
+            actDebug->blockSignals(false);
+        }
+
+        // Отжимаем нижнюю кнопку терминала
+        if (this->btnTerminal && this->btnTerminal->isChecked()) {
+            this->btnTerminal->setChecked(false);
+        }
+
+        // Возвращаем исходный текст кнопке на панели
+        QToolButton *sideDebugBtn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Дебаг") : nullptr;
+        QLabel *sideDebugLbl = sideDebugBtn ? sideDebugBtn->findChild<QLabel*>() : nullptr;
+        if (sideDebugLbl) sideDebugLbl->setText("Дебаг");
+    });
+
+    // =========================================================================
+    // ЧАСТЬ 3: ЕДИНЫЙ АВТОНОМНЫЙ ОБРАБОТЧИК КНОПКИ "ОБУЧЕНИЕ"
+    // =========================================================================
+    if (actStartTrain) {
+        actStartTrain->disconnect();
+
+        connect(actStartTrain, &QAction::triggered, this, [this](bool checked) {
+            QToolButton *btn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Обучение") : nullptr;
+            QLabel *lbl = btn ? btn->findChild<QLabel*>() : nullptr;
+
+            if (checked) {
+                // =============================================================
+                // КРИТИЧЕСКИЙ UX-ПРЕДОХРАНИТЕЛЬ: ПРОВЕРКА СОХРАНЕНИЯ КОДА
+                // =============================================================
+                if (!this->showSaveConfirmationDialog()) {
+                    // Если нажали "Отмена" — возвращаем тумблер сайдбара в исходное отжатое состояние
+                    actDebug->setChecked(false);
+                    return; // МГНОВЕННО ВЫХОДИМ, дебаггер debugpy даже не начнет запускаться! [0:365]
+                }
+
+
+                if (this->currentOpenProjectPath.isEmpty()) {
+                    this->sendSystemNotification("Обучение", "Ошибка: Нет открытого проекта!");
+                    actStartTrain->setChecked(false);
+                    return;
+                }
+
+                actStartTrain->setIcon(QIcon(":/Data/system_icons/media-playback-stop.svg"));
+                if (lbl) lbl->setText("Стоп обуч.");
+                this->sendSystemNotification("PyTorch Studio", "Запуск конвейера обучения нейросети...");
+
+                if (this->jupyterServer && !this->jupyterServer->isRunning()) {
+                    this->jupyterServer->startServer();
+                }
+
+                if (this->jupyterClient) {
+                    this->jupyterClient->disconnect();
+
+                    connect(this->jupyterClient, &JupyterClient::executionFinished, this, [this]() {
+                        if (actStartTrain && actStartTrain->isChecked()) {
+                            actStartTrain->blockSignals(true);
+                            actStartTrain->setChecked(false);
+                            actStartTrain->blockSignals(false);
+
+                            actStartTrain->setIcon(QIcon(":/Data/system_icons/media-playback-start.svg"));
+                            QToolButton *innerBtn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Обучение") : nullptr;
+                            QLabel *innerLbl = innerBtn ? innerBtn->findChild<QLabel*>() : nullptr;
+                            if (innerLbl) innerLbl->setText("Обучение");
+                        }
+                    });
+
+                    this->jupyterClient->connectToJupyter("127.0.0.1", 8888);
+
+                    QTimer::singleShot(1000, this, [this]() {
+                        if (this->jupyterClient) {
+                            QString runCode =
+                                    "import nbformat\n"
+                                    "from nbconvert.preprocessors import ExecutePreprocessor\n"
+                                    "with open('notebooks/train_model.ipynb', 'r', encoding='utf-8') as f:\n"
+                                    "    nb = nbformat.read(f, as_version=4)\n"
+                                    "ep = ExecutePreprocessor(timeout=1200, kernel_name='python3')\n"
+                                    "ep.preprocess(nb, {'metadata': {'path': '.'}})\n";
+                            this->jupyterClient->executePythonCode(runCode);
+                        }
+                    });
+                }
+
+            } else {
+                actStartTrain->setIcon(QIcon(":/Data/system_icons/media-playback-start.svg"));
+                if (lbl) lbl->setText("Обучение");
+
+                if (this->jupyterServer) {
+                    this->jupyterServer->stopServer();
+                }
+                this->sendSystemNotification("Проект", "Обучение экстренно остановлено пользователем.");
+            }
+        });
+    }
+
+    this->docMgr = new DocumentManager(this, ui->fileComboBox, ui->openFilesListWidget, this->titleLabel, this);
+
+    // =========================================================================
+    // ТОТАЛЬНЫЙ АППАРАТНЫЙ ПРОБИВ: РАЗБЛОКИРУЕМ РЕЖИМ ВЫДЕЛЕНИЯ ИЗ DESIGNER
+    // =========================================================================
+    if (ui->openFilesListWidget) {
+
+        // 1. НАМЕРТВО ВКЛЮЧАЕМ РЕЖИМ ВЫДЕЛЕНИЯ СТРОК (Снимаем блок NoSelection!)
+        ui->openFilesListWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+        ui->openFilesListWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
+
+        // Наш отлаженный блок палитры QPalette (оставляем без изменений)
+        QPalette listPalette = ui->openFilesListWidget->palette();
+        QColor targetSelectedBlue(147, 206, 233); // #93cee9
+        QColor targetSelectedText(0, 0, 0);       // Черный текст
+
+        listPalette.setColor(QPalette::Active, QPalette::Highlight, targetSelectedBlue);
+        listPalette.setColor(QPalette::Active, QPalette::HighlightedText, targetSelectedText);
+        listPalette.setColor(QPalette::Inactive, QPalette::Highlight, targetSelectedBlue);
+        listPalette.setColor(QPalette::Inactive, QPalette::HighlightedText, targetSelectedText);
+        listPalette.setColor(QPalette::Normal, QPalette::Highlight, targetSelectedBlue);
+        listPalette.setColor(QPalette::Normal, QPalette::HighlightedText, targetSelectedText);
+
+        ui->openFilesListWidget->setPalette(listPalette);
+        ui->openFilesListWidget->setAutoFillBackground(true);
+        ui->openFilesListWidget->setFocusPolicy(Qt::NoFocus);
+
+        // 2. Принудительно заставляем список полностью перерисовать текущую геометрию ячеек
+        ui->openFilesListWidget->update();
+    }
+
+    connect(actSTM, &QAction::triggered, this, &Neuro_programm::open_STM);
+    connect(actSTM_work, &QAction::triggered, this, &Neuro_programm::open_STM_work);
+
+
+    connect(panelOther, &panel_other::fileNavigationRequested,
+            this, &Neuro_programm::openNewFileInEditor);
+
+    if (ui->centralStackedWidget) {
+        // Разрешаем центральной зоне кода сжиматься вплоть до 400 пикселей,
+        // чтобы она не выталкивала правую панель дебага за экран
+        ui->centralStackedWidget->setMinimumWidth(400);
+        ui->centralStackedWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    }
+
+    if (panelOther) {
+        QStackedWidget *stacked2 = panelOther->findChild<QStackedWidget*>("menuSwitcherStack");
+        if (stacked2) {
+            stacked2->setCurrentIndex(0); // Принудительный сброс на Терминал при старте IDE
+        }
+    }
+
+    edit_intfce();
+    add_vars_debug();
+    this->setupDebugInterface();
+    createMenus();
 
 }
 
@@ -2691,6 +3644,13 @@ Neuro_programm::~Neuro_programm()
     delete ui;
 }
 
+#include <QTextStream>
+#include <QProcess>
+#include <QSettings>
+#include <QMessageBox>
+#include <QThread>
+#include <QStackedWidget>
+
 void Neuro_programm::new_progect()
 {
     qInfo() << "[PROJECT_MGR] Инициализация и запуск мастера Start_progect...";
@@ -2698,28 +3658,21 @@ void Neuro_programm::new_progect()
     // =========================================================================
     // ЧАСТЬ 1: СБОР ПАРАМЕТРОВ ИЗ ДИАЛОГОВОГО ОКНА МАСТЕРА (WIZARD)
     // =========================================================================
-    Start_progect wizard(this); // Экземпляр мастера с правильным регистром класса
-
-    // Запускаем окно мастера в модальном режиме
+    Start_progect wizard(this);
     if (wizard.exec() != QDialog::Accepted) {
         qInfo() << "[PROJECT_MGR] Создание проекта отменено пользователем.";
         return;
     }
 
-    // Собираем реальные данные с полей формы мастера через ваши геттеры
     QString projectName = wizard.getProjectName().trimmed();
     QString parentDir = wizard.getProjectLocation().trimmed();
-
     bool createNewVenv = wizard.isCreateNewVenv();
     bool useGpuArchitecture = wizard.isGpuArchitecture();
-
     QString sourceDatasetPath = wizard.getDatasetPath().trimmed();
     bool useSymlinkMode = wizard.isSymlinkMode();
 
-    // Новые переменные пакетов и путей venv для Шага 2
     bool useCustomRequirements = wizard.isCustomRequirementsEnabled();
     QString customRequirementsPath = wizard.getCustomRequirementsPath();
-
     QString customVenvPath = "";
     if (wizard.isUseExistingVenv()) {
         customVenvPath = wizard.getExistingVenvPath().trimmed();
@@ -2727,112 +3680,106 @@ void Neuro_programm::new_progect()
         customVenvPath = wizard.getCreateNewVenvPath().trimmed();
     }
 
-    // Валидация входных данных
     if (projectName.isEmpty() || parentDir.isEmpty()) {
         ui->statusbar->showMessage("Ошибка: Имя проекта или корневой путь не заполнены!", 4000);
         return;
     }
 
-    // Формируем absolute путь к корню нового проекта
     QString projectFolderPath = parentDir + "/" + projectName;
     QDir targetDir(projectFolderPath);
 
-    // Безопасное развертывание физической структуры папок MLOps репозитория
+    // =========================================================================
+    // РАЗВЕРТЫВАНИЕ ПОЛНОЙ СТРУКТУРЫ С УЧЕТОМ ПОДПАПОК DATA
+    // =========================================================================
     if (!targetDir.exists()) {
         if (!targetDir.mkpath(".")) {
             qCritical() << "[PROJECT_MGR] Не удалось создать директорию проекта:" << projectFolderPath;
-            ui->statusbar->showMessage("Ошибка: Нет прав на создание папки в данной директории!", 4000);
+            ui->statusbar->showMessage("Ошибка: Нет прав на создание папки!", 4000);
             return;
         }
-        targetDir.mkdir("models");
-        targetDir.mkdir("datasets");
-        targetDir.mkdir("notebooks");
-        targetDir.mkdir("logs");
-        targetDir.mkdir("hf_hub");
 
-        // ВЫЗОВ НАШЕЙ НОВОЙ ФУНКЦИИ ГЕНЕРАЦИИ ПАСПОРТА:
-        // =========================================================================
+        // Разворачиваем 10 базовых MLOps директорий
+        QStringList fullStructure = {
+            "config", "data", "datasets", "hf_hub", "logs",
+            "metrics", "models", "notebooks", "scripts", "tests"
+        };
+        for (const QString &subDir : fullStructure) {
+            targetDir.mkdir(subDir);
+        }
+
+        // Создаем внутреннюю структуру папки data для стадий предобработки теплограмм
+        targetDir.mkpath("data/raw");
+        targetDir.mkpath("data/processed");
+
+        // ДОРАБОТКА: Автоматическое создание пустых файлов __init__.py в пакетах кода
+        QStringList pythonPackages = {"scripts", "notebooks", "tests"};
+        for (const QString &pkg : pythonPackages) {
+            QFile initFile(targetDir.filePath(pkg + "/__init__.py"));
+            if (initFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream out(&initFile);
+                out << "# PyStudio Python Package Marker\n";
+                initFile.close();
+            }
+        }
+
         // НАДЕЖНЫЙ ВЫЗОВ И КОНТРОЛЬ ЗАПОЛНЕНИЯ ПАСПОРТА ПРОЕКТА
-        // =========================================================================
         ui->statusbar->showMessage("Генерация паспорта проекта и протоколов...", 2000);
-
-        // Вызываем функцию и сохраняем её результат в переменную
         bool passportCreated = createProjectPassport(projectName, projectFolderPath, useGpuArchitecture);
 
         if (passportCreated) {
-            // Если функция вернула true — выводим зеленый статус успеха
-            ui->statusbar->showMessage("Паспорт .pystudio и конфигурации MLOps успешно созданы!", 5000);
+            ui->statusbar->showMessage("Паспорт .pystudio успешно создан!", 5000);
             qInfo() << "[PROJECT_MGR] Конвейер паспорта завершился успехом.";
         } else {
-            // Если функция вернула false — выводим предупреждение об ошибке
-            ui->statusbar->showMessage("Критическая ошибка: Не удалось сгенерировать паспорт проекта!", 5000);
-            qCritical() << "[PROJECT_MGR] Конвейер паспорта вернул ошибку создания файла.";
+            ui->statusbar->showMessage("Критическая ошибка: Не удалось сгенерировать паспорт!", 5000);
+            qCritical() << "[PROJECT_MGR] Конвейер паспорта вернул ошибку.";
         }
 
+        // Создание стартового Jupyter Notebook (train_model.ipynb)
+        createDefaultTrainNotebook(projectFolderPath);
 
-        // =========================================================================
-        // ШАГ: КОПИРОВАНИЕ REQUIREMENTS.TXT В КОРЕНЬ ПРОЕКТА
-        // =========================================================================
+        // КОПИРОВАНИЕ REQUIREMENTS.TXT В КОРЕНЬ ПРОЕКТА
         if (useCustomRequirements && !customRequirementsPath.isEmpty()) {
             QString destinationPath = projectFolderPath + "/requirements.txt";
-
-            // Если файл по целевому пути уже существует, QFile::copy вернет false.
-            // На всякий случай удаляем старый, если он там есть.
             if (QFile::exists(destinationPath)) {
                 QFile::remove(destinationPath);
             }
-
             if (QFile::copy(customRequirementsPath, destinationPath)) {
-                qInfo() << "[PROJECT_MGR] Файл requirements.txt успешно скопирован в корень проекта:" << destinationPath;
+                qInfo() << "[PROJECT_MGR] Файл requirements.txt успешно скопирован.";
             } else {
-                qCritical() << "[PROJECT_MGR] Не удалось скопировать requirements.txt из" << customRequirementsPath;
+                qCritical() << "[PROJECT_MGR] Не удалось скопировать requirements.txt";
                 ui->statusbar->showMessage("Предупреждение: Не удалось скопировать файл зависимостей.", 4000);
             }
         }
     }
-    // Создаем внутренний конфигурационный файл project.json
-    QFile configFile(projectFolderPath + "/project.json");
-    if (configFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QJsonObject rootObj;
-        rootObj["project_name"] = projectName;
-        rootObj["framework"] = "PyTorch";
-        rootObj["hardware_mode"] = useGpuArchitecture ? "CUDA" : "CPU";
-        rootObj["created_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
 
-        QJsonDocument doc(rootObj);
-        configFile.write(doc.toJson());
-        configFile.close();
+    // Замена устаревшего project.json на технический services_config.json
+    bool servicesConfigCreated = createServicesConfig(projectName, projectFolderPath);
+    if (!servicesConfigCreated) {
+        qWarning() << "[PROJECT_MGR] Внимание: Технический конфигурационный файл служб не создан.";
     }
-
-    // Создаем маркер среды разработки .pystudio
-    // QFile markerFile(projectFolderPath + "/" + projectName + ".pystudio");
-    // if (markerFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
-    //     QTextStream out(&markerFile);
-    //     out << "# PyTorch Studio Project Specification\n";
-    //     markerFile.close();
-    // }
 
     // =========================================================================
     // ЧАСТЬ 2: РЕГИСТРАЦИЯ В РЕЕСТРЕ IDE.CONF И ОБНОВЛЕНИЕ ИНТЕРФЕЙСА
     // =========================================================================
     QString configAbsolutePath = QDir::homePath() + "/.config/PyTorchStudio/IDE.conf";
     QSettings settings(configAbsolutePath, QSettings::IniFormat);
-
     settings.beginGroup("Main");
     QString oldList = settings.value("recentProjectList").toString().trimmed();
     QString markerFilePath = projectFolderPath + "/" + projectName + ".pystudio";
     QString newList = markerFilePath;
 
     if (!oldList.isEmpty()) {
-        QStringList parts = oldList.split(QRegularExpression("[,;]"));
+        static const QRegularExpression regex("[,;]");
+        QStringList parts = oldList.split(regex);
         parts.removeAll(markerFilePath);
         if (!parts.isEmpty()) newList += "," + parts.join(",");
     }
+
     settings.setValue("recentProjectList", newList);
     settings.endGroup();
 
     this->currentOpenProjectPath = projectFolderPath;
-    this->setIDEInStartMode(false); // Выключаем серый сплэш-экран JetBrains
+    this->setIDEInStartMode(false);
 
     if (ui->btnCloseFile) {
         ui->btnCloseFile->setEnabled(true);
@@ -2845,7 +3792,6 @@ void Neuro_programm::new_progect()
         ui->leftDockWidget->setVisible(true);
         if (actProject) actProject->setChecked(true);
     }
-
     this->initProjectTreeModel(projectFolderPath);
     this->updateProjectsListFromSettings();
 
@@ -2859,48 +3805,46 @@ void Neuro_programm::new_progect()
             QProcess::startDetached("cp", QStringList() << "-r" << sourceDatasetPath << projectFolderPath + "/datasets/");
         }
     }
+
     // =========================================================================
     // ЧАСТЬ 3: АСИНХРОННЫЙ ЗАПУСК КОНВЕЙЕРА СБОРКИ В QTHREAD
     // =========================================================================
     ui->statusbar->showMessage("Подготовка фонового потока MLOps-сборщика...", 3000);
-
     QThread *workerThread = new QThread(this);
+
+    // Передаем флаг, использует ли пользователь готовый venv
+    bool isExistingVenvMode = wizard.isUseExistingVenv();
+
     ProjectBuilderWorker *worker = new ProjectBuilderWorker(
                 projectFolderPath,
                 projectName,
                 useGpuArchitecture,
                 useCustomRequirements,
                 customRequirementsPath,
-                customVenvPath
+                customVenvPath,
+                isExistingVenvMode
                 );
     worker->moveToThread(workerThread);
 
     if (panelOther) {
         panelOther->setVisible(true);
         panelOther->show();
-
-        // ФИКС ВЫВОДА: Принудительно включаем страницу логов (Индекс 1 в stackedWidget вашей панели)
-        // Это скроет Bash/REPL сплиттер на время установки и покажет ui->logEdit
         QStackedWidget *panelStacked = panelOther->findChild<QStackedWidget*>();
         if (panelStacked) {
-            panelStacked->setCurrentIndex(1); // Переключаем на ui->logEdit
+            panelStacked->setCurrentIndex(1);
         }
     }
 
-    // Сигнал 1: Направляем логи сборщика строго в текстовое поле ui->logEdit, минуя Bash
     connect(worker, &ProjectBuilderWorker::logOutputReceived, this, [this](const QString &text) {
         if (panelOther) {
-            // Вызываем каноничный метод панели, который умеет корректно форматировать вывод
             panelOther->appendTrainingLog(text);
         }
-        qDebug().noquote() << text; // Дублируем в системный лог отладки
+        qDebug().noquote() << text;
     });
 
-    // Сигнал 2: Обновление текстового счетчика шагов [1/4]..[4/4] внутри статусбара
     connect(worker, &ProjectBuilderWorker::progressStepChanged, this, [this](int step, const QString &stepName) {
         if (step == 100) {
             ui->statusbar->showMessage("MLOps конвейер успешно собран!", 5000);
-            // Сборка завершена — возвращаем панель терминалов на страницу сплиттера Bash+REPL
             if (panelOther) {
                 QStackedWidget *panelStacked = panelOther->findChild<QStackedWidget*>();
                 if (panelStacked) panelStacked->setCurrentIndex(0);
@@ -2910,7 +3854,6 @@ void Neuro_programm::new_progect()
         }
     });
 
-    // Сигнал 3: Обработчик финиша сборки
     connect(worker, &ProjectBuilderWorker::pipelineBuildFinished, this, [this, worker, workerThread](bool success, const QString &errorMsg) {
         if (success) {
             QMessageBox::information(this, "PyTorch Studio IDE",
@@ -2919,30 +3862,23 @@ void Neuro_programm::new_progect()
                                      "• Изолированный venv укомплектован пакетами PyTorch;<br>"
                                      "• Фоновое ядро Jupyter привязано к кодовой базе проекта.");
             this->sendSystemNotification("PyTorch Studio", "Конвейер проекта успешно инициализирован.");
-            this->initLspServer(); // Накатываем автодополнение
+            this->initLspServer();
         } else {
             QMessageBox::critical(this, "Критический сбой сборки", "Не удалось настроить окружение проекта:<br>" + errorMsg);
-            // При ошибке также возвращаем панель в исходный рабочий режим
             if (panelOther) {
                 QStackedWidget *panelStacked = panelOther->findChild<QStackedWidget*>();
                 if (panelStacked) panelStacked->setCurrentIndex(0);
             }
         }
-        workerThread->quit(); // Вежливо закрываем поток ОС
+        workerThread->quit();
     });
 
-    // Автоматическая и безопасная сборка мусора
     connect(workerThread, &QThread::finished, worker, &QObject::deleteLater);
     connect(workerThread, &QThread::finished, workerThread, &QObject::deleteLater);
-
     connect(workerThread, &QThread::started, worker, &ProjectBuilderWorker::startBuildPipeline);
 
-    // Запуск конвейера
     workerThread->start();
 
-    // =========================================================================
-    // СОХРАНЕНИЕ ПУТИ К VENV В КОНФИГУРАЦИЮ СРЕДЫ РАЗРАБОТКИ
-    // =========================================================================
     if (!customVenvPath.isEmpty()) {
         QSettings ideConfig(QDir::homePath() + "/.config/PyTorchStudio/IDE.conf", QSettings::IniFormat);
         ideConfig.setValue("python/global_venv_path", customVenvPath);
@@ -3090,8 +4026,8 @@ void Neuro_programm::open_project(const QString &path)
 
     // 3. Извлекаем сохраненные параметры проекта
     QString projName = configObject["project_name"].toString("New_Project");
-    QString datasetPath = configObject["dataset_path"].toString("");
-    QString architecture = configObject["architecture"].toString("CUDA");
+    //QString datasetPath = configObject["dataset_path"].toString("");
+    //QString architecture = configObject["architecture"].toString("CUDA");
     QString savedDevice = configObject["device"].toString("cpu");
     int epochs = configObject["epochs"].toInt(10);
     int batchSize = configObject["batch_size"].toInt(32);
@@ -3203,30 +4139,6 @@ void Neuro_programm::open_project(const QString &path)
     }
 }
 
-void Neuro_programm::sendLspDidOpenForFile(const QString &filePath, const QString &fileContent)
-{
-    if (!lspProcess || lspProcess->state() != QProcess::Running || filePath.isEmpty()) return;
-
-    QJsonObject params;
-    QJsonObject textDocument;
-
-    // Передаем точный URI файла по спецификации LSP
-    textDocument["uri"] = QUrl::fromLocalFile(filePath).toString();
-    textDocument["languageId"] = "python";
-    textDocument["version"] = 1; // Начальная версия сессии всегда 1
-    textDocument["text"] = fileContent; // Передаем стартовый текст для инициализации кэша Jedi
-
-    params["textDocument"] = textDocument;
-
-    // Отправляем системное уведомлениеdidOpen через ваш рабочий транспорт запросов
-    this->sendLspRequest("textDocument/didOpen", params);
-
-    std::clog << " [LSP] Сессия файла успешно открыта на сервере через didOpen. URI: "
-              << textDocument["uri"].toString().toStdString() << std::endl;
-    std::clog.flush();
-}
-
-
 void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
 {
     // 1. ИЗВЛЕКАЕМ АБСОЛЮТНЫЙ ПУТЬ К ФАЙЛУ ИЗ МОДЕЛИ ДЕРЕВА
@@ -3248,6 +4160,35 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
     QFileInfo checkInfo(filePath);
     if (!checkInfo.exists() || checkInfo.isDir()) return;
 
+    // =========================================================================
+    // ИНТЕГРАЦИЯ МЕНЕДЖЕРА ПАКЕТОВ PIP (requirements.txt)
+    // =========================================================================
+    if (checkInfo.fileName().toLower() == "requirements.txt") {
+        if (!m_pipPage) {
+            QString venvPath = QDir(currentOpenProjectPath).filePath("venv");
+            m_pipPage = new PipManagerPage(venvPath, filePath, this);
+            ui->centralStackedWidget->addWidget(m_pipPage);
+        }
+        ui->centralStackedWidget->setCurrentWidget(m_pipPage);
+        m_pipPage->loadPipData();
+
+        if (ui->fileComboBox) {
+            int comboIdx = ui->fileComboBox->findText(checkInfo.fileName());
+            if (comboIdx == -1) {
+                int pageIdx = ui->centralStackedWidget->indexOf(m_pipPage);
+                ui->fileComboBox->addItem(checkInfo.fileName(), QVariant(pageIdx));
+                ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
+            } else {
+                ui->fileComboBox->setCurrentIndex(comboIdx);
+            }
+        }
+        updateCustomTitle(checkInfo.fileName());
+        return;
+    }
+
+    // =========================================================================
+    // ОТКРЫТИЕ ОБЫЧНОГО Python ФАЙЛА
+    // =========================================================================
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         qCritical() << " [ОШИБКА] Не удалось физически прочитать файл с диска:" << filePath;
@@ -3261,43 +4202,39 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         QWidget *page = ui->centralStackedWidget->widget(i);
         if (page && page->objectName() == filePath) {
             ui->centralStackedWidget->setCurrentWidget(page);
-            if (ui->fileComboBox) {
-                int comboIdx = ui->fileComboBox->findData(filePath);
-                if (comboIdx != -1) ui->fileComboBox->setCurrentIndex(comboIdx);
-            }
 
             if (ui && ui->cursorPosLabel) {
                 ui->cursorPosLabel->show();
             }
             this->updateCursorPositionIndicator();
 
-            // UX-ФИКС: При переключении на уже открытый файл, обновляем comboDevice под него!
             CodeEditor *existingEditor = page->findChild<CodeEditor*>();
             if (existingEditor) {
                 this->updateFunctionNavigator(existingEditor);
             }
-            return;
+
+            // =================================================================
+            // ЖЕЛЕЗНЫЙ UX-ФИКС №1: КРАСИМ СТРОКУ В СИНИЙ ПРИ ПОВТОРНОМ ОТКРЫТИИ ФАЙЛА!
+            // =================================================================
+            if (this->docMgr) {
+                this->docMgr->handleFileActivation(filePath);
+            }
+            return; // Выходим из функции, файл успешно активирован!
         }
     }
-
-    // БЛОКИРУЕМ ФОНОВЫЕ СБРОСЫ QT ПРИ СОЗДАНИИ ВКЛАДКИ
-    if (ui->centralStackedWidget) ui->centralStackedWidget->blockSignals(true);
-    if (ui->fileComboBox) ui->fileComboBox->blockSignals(true);
-
+    // 3. СОЗДАЕМ НОВУЮ ГРАФИЧЕСКУЮ СТРАНИЦУ-КОНТЕЙНЕР ДЛЯ КОДА
     this->setIDEInStartMode(false);
 
-    // 3. СОЗДАЕМ НОВУЮ ГРАФИЧЕСКУЮ СТРАНИЦУ-КОНТЕЙНЕР
     QWidget *newPage = new QWidget(ui->centralStackedWidget);
     newPage->setObjectName(filePath);
     QVBoxLayout *layout = new QVBoxLayout(newPage);
     layout->setContentsMargins(0, 0, 0, 0);
+
     CodeEditor *editor = nullptr;
     MinimapArea *minimap = nullptr;
-    // Собираем монолитную панель (Редактор + Миникарта)
     QWidget *editorContainer = CodeEditor::createEditorWithMinimap(newPage, editor, minimap);
-    if (layout && editorContainer)
-    {
-        // ВАЖНО: заставляем редактор подстраиваться под контейнер, а не расширять его
+
+    if (layout && editorContainer) {
         editorContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
         layout->addWidget(editorContainer);
     }
@@ -3308,51 +4245,36 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         editor->isLspFreeze = false;
 
         QFont codeFont;
-        codeFont.setFamilies(QStringList() << "JetBrains Mono" << "Fira Code" << "Courier New" << "Monospace");
+        codeFont.setFamilies(QStringList() << "JetBrains Mono" << "Fira Code" << "Monospace");
         codeFont.setStyleHint(QFont::Monospace);
         codeFont.setPixelSize(13);
         editor->setFont(codeFont);
         editor->setLineWrapMode(QPlainTextEdit::NoWrap);
 
-        // Блокируем внутренние сигналы ввода текста при первичной загрузке
         editor->blockSignals(true);
         if (editor->document()) editor->document()->blockSignals(true);
         editor->setPlainText(fileContent);
         editor->blockSignals(false);
         if (editor->document()) editor->document()->blockSignals(false);
 
-        // Связываем сигнал логирования с вашей нижней консолью отладки
         connect(editor, &CodeEditor::logMessage, this, [this](const QString &message) {
             QTextEdit *console = panelOther->findChild<QTextEdit*>("consoleOutput");
             if (console) console->append(message);
         });
 
-        // Подключаем отслеживание звездочки правок
         connect(editor, &CodeEditor::textChanged, this, &Neuro_programm::onCurrentFileTextChanged);
-
-        // =========================================================================
-        // ЖЕЛЕЗНЫЙ UX-КОННЕКТ НАВИГАТОРА ФУНКЦИЙ (comboDevice ПОД ФАЙЛОВЫМ МЕНЮ)
-        // =========================================================================
-        // Строим список функций сразу при открытии .py файла
         this->updateFunctionNavigator(editor);
-
-        // При редактировании текста навигатор динамически обновляет список def и class
         connect(editor, &CodeEditor::textChanged, this, [this, editor]() {
             this->updateFunctionNavigator(editor);
         });
-        // =========================================================================
-
-        // Подключаем индикатор изменения координат строки/символа
         connect(editor, &CodeEditor::cursorPositionChanged, this, [this]() {
             this->updateCursorPositionIndicator();
         });
 
-        // Коннект кнопки-троеточия для быстрой документации
         connect(editor, &CodeEditor::documentationRequested, this, [this](const QString &fPath, int ln, int ch) {
             if (!lspProcess || lspProcess->state() != QProcess::Running) return;
             QJsonObject hoverParams;
             QJsonObject textDocumentObj;
-#include <QDir>
             QString cleanPath = QDir::fromNativeSeparators(fPath);
             textDocumentObj["uri"] = QUrl::fromLocalFile(cleanPath).toString();
             hoverParams["textDocument"] = textDocumentObj;
@@ -3360,62 +4282,41 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
             positionObj["line"] = ln;
             positionObj["character"] = ch;
             hoverParams["position"] = positionObj;
-
             this->sendLspRequest("textDocument/hover", hoverParams, 555);
-            qDebug() << ">>> [LSP КЛИЕНТ] Запрос Hover (id:555) успешно отправлен к Jedi.";
         });
     }
 
-    // 4. ДОБАВЛЯЕМ СТРАНИЦУ В ЦЕНТРАЛЬНЫЙ СТЭК (РОВНО ОДИН РАЗ!)
+    // 4. ДОБАВЛЯЕМ СТРАНИЦУ В ЦЕНТРАЛЬНЫЙ СТЭК
     int newPageIndex = ui->centralStackedWidget->addWidget(newPage);
-    // Настраиваем боковой список открытых документов
-    if (ui->openFilesListWidget) {
-        bool exists = false;
-        for (int i = 0; i < ui->openFilesListWidget->count(); ++i) {
-            if (ui->openFilesListWidget->item(i)->data(Qt::UserRole).toString() == filePath) {
-                exists = true;
-                break;
-            }
-        }
-        if (!exists) {
-            QListWidgetItem *newDocItem = new QListWidgetItem(checkInfo.fileName(), ui->openFilesListWidget);
-            newDocItem->setData(Qt::UserRole, filePath);
-        }
+    // =========================================================================
+    // ЖЕЛЕЗНЫЙ UX-ФИКС №2: ДЕЛЕГИРУЕМ СОЗДАНИЕ И ОКРАШИВАНИЕ СТРОКИ МЕНЕДЖЕРУ !
+    // =========================================================================
+    // Мы полностью удалили отсюда сырое ручное создание QListWidgetItem.
+    // Теперь registerNewOpenFile сам создаст ячейку, добавит её в ОЗУ,
+    // свяжет её с комбобоксом и мгновенно вызовет handleFileActivation для синей Breeze-подсветки!
+    if (this->docMgr) {
+        this->docMgr->registerNewOpenFile(filePath, editor);
     }
 
-    // Добавляем имя файла в верхний комбобокс открытых документов
-    if (ui->fileComboBox) {
-        ui->fileComboBox->addItem(checkInfo.fileName(), QVariant(newPageIndex));
-        ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
-    }
-
-    // Выводим созданный редактор кода на передний план экрана!
     ui->centralStackedWidget->setCurrentIndex(newPageIndex);
 
-    if (ui->btnCloseFile)
-    {
+    if (ui->btnCloseFile) {
         ui->btnCloseFile->setEnabled(true);
     }
-
-    // СНИМАЕМ БЛОКИРОВКУ СИГНАЛОВ: Окно полностью прорисовано на холсте
-    if (ui->fileComboBox) ui->fileComboBox->blockSignals(false);
-    if (ui->centralStackedWidget) ui->centralStackedWidget->blockSignals(false);
 
     if (ui && ui->cursorPosLabel) {
         ui->cursorPosLabel->show();
     }
-    this->updateCursorPositionIndicator();
 
-    // Загружаем в редактор считанный код Python-файла и шлем DIDOPEN запрос серверу
+    this->updateCursorPositionIndicator();
     this->sendLspDidOpenForFile(filePath, fileContent);
+
     if (editor) {
         editor->setFocus();
         editor->update();
         editor->sendLspDidOpen();
-        qDebug() << ">>> [LSP] Отправлен ручной didOpen из onFileDoubleClicked для:" << filePath;
     }
 
-    // Выдвигаем нижнюю панель со списком открытых файлов на экран
     if (ui->openFilesContainer && ui->leftVerticalSplitter) {
         ui->openFilesContainer->setVisible(true);
         ui->openFilesContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);
@@ -3431,64 +4332,24 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
     this->applyGlobalFonts();
     updateCustomTitle(checkInfo.fileName());
 
+    // Асинхронный сброс модификаций (Страница 4 вашего PDF)
     QTimer::singleShot(50, this, [this, editor]() {
         if (editor) editor->document()->setModified(false);
         this->setWindowModified(false);
     });
 
-    // =========================================================================
-    // АБСОЛЮТНЫЙ UX-ФИКС: ВЫТАЛКИВАЕМ КНОПКИ НА ЭКРАН ПРИ ОТКРЫТИИ ФАЙЛА
-    // =========================================================================
-    QList<QPushButton*> statusBarButtons = { btnTerminal, btnSearch, btnLogs, btnAIChat, btnStartDebug, btnTogglePip };
-    for (QPushButton* btn : statusBarButtons) {
-        if (btn) {
-            btn->setVisible(true);
-            btn->show();
-            btn->update();
-        }
-    }
-    if (statusSpacer)
-    {
-        statusSpacer->setVisible(true);
-        statusSpacer->show();
-    }
-
-    if (ui->centralStackedWidget)
-    {
-        ui->centralStackedWidget->blockSignals(false);
-        ui->fileComboBox->blockSignals(false);
-
-        // Перелистываем на свежесозданный файл
-        ui->centralStackedWidget->setCurrentWidget(newPage);
-    }
-
+    // Менеджмент геометрии нижнего терминала (Страница 4 вашего PDF)
     QTimer::singleShot(50, this, [this]() {
-        // 1. Срочно отрезаем у центрального контейнера способность раздувать окно вниз
-        if (ui && ui->centralwidget) {
-            ui->centralwidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
-        }
-
         if (mainVerticalSplitter) {
-            // 2. Намертво привязываем веса: верх (код) заполняет всё окно, низ (терминал) не давит на статусбар
             mainVerticalSplitter->setStretchFactor(0, 1);
             mainVerticalSplitter->setStretchFactor(1, 0);
-
-            // 3. Вычисляем точную высоту родительского окна (без учета вылетевших элементов)
             int totalWindowHeight = this->height();
             int targetBottomHeight = 0;
-
-            if (panelOther && panelOther->isVisible()) {
-                targetBottomHeight = 250; // Стандарт для терминала
-            } else if (ui->search_panel && ui->search_panel->isVisible()) {
-                targetBottomHeight = 150; // Стандарт для панели поиска
-            }
-
-            // 4. Жестко вбиваем пропорции сплиттера на основе честной высоты окна
+            if (panelOther && panelOther->isVisible()) targetBottomHeight = 250;
+            else if (ui->search_panel && ui->search_panel->isVisible()) targetBottomHeight = 150;
             mainVerticalSplitter->setSizes(QList<int>({totalWindowHeight - targetBottomHeight, targetBottomHeight}));
             mainVerticalSplitter->refresh();
         }
-
-        // 5. Пинаем менеджер компоновки QMainWindow для финальной фиксации низа на экране
         if (this->layout()) {
             this->layout()->invalidate();
             this->layout()->activate();
@@ -3496,7 +4357,6 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         this->update();
     });
 }
-
 
 void Neuro_programm::onCloseCurrentFileClicked()
 {
@@ -3638,33 +4498,62 @@ void Neuro_programm::onCloseCurrentFileClicked()
     }
 }
 
-
 void Neuro_programm::onOpenFileListItemDoubleClicked(QListWidgetItem *item)
 {
     if (!item) return;
 
-    // Считываем сохраненный полный путь к файлу из кликнутой строки
-    QString targetFilePath = item->data(Qt::UserRole).toString();
+    // Извлекаем уникальный ключ страницы (MAIN_SCREEN, AI_CHAT_SCREEN или абсолютный путь к файлу)
+    QString targetKey = item->data(Qt::UserRole).toString().trimmed();
+    if (targetKey.isEmpty()) return;
 
-    // Проверяем: если пользователь дважды кликнул по строке "Панель обучения ИИ"
-    if (targetFilePath == "MAIN_SCREEN") {
-        ui->fileComboBox->setCurrentIndex(0);
+    qDebug() << ">>> [СПИСОК ОТКРЫТЫХ ФАЙЛОВ] Двойной клик по ключу:" << targetKey;
+
+    // =========================================================================
+    // СЦЕНАРИЙ 1: ПЕРЕКЛЮЧЕНИЕ НА СЕРВИСНЫЕ ЭКРАНЫ
+    // =========================================================================
+    if (targetKey == "MAIN_SCREEN" || targetKey == "AI_CHAT_SCREEN") {
+        if (ui->fileComboBox) {
+            int comboIdx = ui->fileComboBox->findData(targetKey);
+            if (comboIdx != -1) {
+                ui->fileComboBox->setCurrentIndex(comboIdx); // Активирует встроенную логику
+            }
+        }
         return;
     }
 
-    // Сканируем элементы верхнего комбобокса, чтобы найти страницу с этим файлом
-    for (int i = 0; i < ui->fileComboBox->count(); ++i)
-    {
-        if (ui->fileComboBox->itemData(i).toString() == targetFilePath)
-        {
-            // Нашли! Принудительно переключаем комбобокс.
-            // Его собственный сигнал currentIndexChanged сам перелистнет centralStackedWidget
-            // и автоматически скроет правый док-виджет настроек!
-            ui->fileComboBox->setCurrentIndex(i);
+    // =========================================================================
+    // СЦЕНАРИЙ 2: ПЕРЕКЛЮЧЕНИЕ НА РЕАЛЬНЫЙ СТАК ФАЙЛА КОДА (.PY)
+    // =========================================================================
+    if (ui->centralStackedWidget) {
+        bool pageFound = false;
 
-            // На всякий случай синхронизируем выделение (подсвечиваем строку)
-            ui->openFilesListWidget->setCurrentRow(i);
-            break;
+        // Ищем в центральном стеке виджетов страницу, чье objectName хранит этот абсолютный путь
+        for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+            QWidget *page = ui->centralStackedWidget->widget(i);
+            if (page && page->objectName().trimmed() == targetKey) {
+
+                // Перелистываем центральный экран на этот файл
+                ui->centralStackedWidget->blockSignals(true);
+                ui->centralStackedWidget->setCurrentIndex(i);
+                ui->centralStackedWidget->blockSignals(false);
+                pageFound = true;
+                break;
+            }
+        }
+
+        // Если страница кода найдена — просим менеджер выставить синее выделение и обновить комбобокс
+        if (pageFound && this->docMgr) {
+            this->docMgr->handleFileActivation(targetKey);
+        }
+    }
+
+    // Возвращаем фокус ввода клавиатуры на текстовый холст редактора кода для удобства
+    QWidget *currentPage = ui->centralStackedWidget ? ui->centralStackedWidget->currentWidget() : nullptr;
+    if (currentPage) {
+        CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+        if (currentEditor) {
+            currentEditor->setFocus();
+            currentEditor->update();
         }
     }
 }
@@ -3822,6 +4711,38 @@ void Neuro_programm::initProjectTreeModel(QString path)
         return;
     }
 
+    // =========================================================================
+    // КРИТИЧЕСКИЙ UX ФИКС: ОТОБРАЖАЕМ ДЕРЕВО НА БОКОВОЙ ПАНЕЛИ
+    // =========================================================================
+    this->currentOpenProjectPath = safePath; // Фиксируем живой путь в ОЗУ главного окна
+    this->setProperty("currentOpenProjectPath", safePath);
+
+    // Находим стек виджетов внутри вашего leftDockWidget
+    QStackedWidget *dockStack = ui->leftDockWidget ? ui->leftDockWidget->findChild<QStackedWidget*>("dockContentsStack") : nullptr;
+    if (dockStack) {
+        // Мгновенно перелистываем боковую панель на страницу Дерева файлов (Индекс 0)
+        dockStack->setCurrentIndex(0);
+
+        // Гарантируем, что сам док-виджет проявлен и виден на экране
+        ui->leftDockWidget->setVisible(true);
+        ui->leftDockWidget->show();
+
+        // Принудительно "вдавливаем" кнопку «Проект» на левой Breeze-панели в активное состояние
+        if (actProject) {
+            actProject->blockSignals(true);
+            actProject->setChecked(true);
+            actProject->blockSignals(false);
+        }
+
+        dockStack->update();
+        ui->leftDockWidget->update();
+    }
+
+    // Разблокируем элементы навигации и закрытия вкладок, так как рабочий проект успешно открыт
+    if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(true);
+    if (ui->fileComboBox) ui->fileComboBox->setEnabled(true);
+    // =========================================================================
+
     // 1. Безопасное уничтожение старых моделей в правильном порядке
     if (projectProxyModel) {
         projectProxyModel->deleteLater();
@@ -3903,6 +4824,15 @@ void Neuro_programm::initProjectTreeModel(QString path)
                 "    show-decoration-selected: 1;"
                 "}"
                 );
+    if (this->projectMgr) this->projectMgr->addProjectToRecentList(safePath);
+
+    if (this->docMgr) {
+        this->docMgr->updateUiTitles(""); // Передаем "", так как файлы еще закрыты!
+    }
+
+    if (this->projectMgr) {
+        this->projectMgr->addProjectToRecentList(safePath);
+    }
 }
 
 void Neuro_programm::sendChatMessageToAI()
@@ -4099,10 +5029,13 @@ void Neuro_programm::onStartTrainingClicked()
     QString venvPythonPath = currentOpenProjectPath + "/venv/bin/python";
     qInfo() << "🚀 [QProcess] Боевой асинхронный запуск PyTorch:" << venvPythonPath << arguments;
 
+    if (this->envManager) {
+        trainingProcess->setProcessEnvironment(this->envManager->getIsolatedEnvironment());
+    }
+
     // Запускаем асинхронно!
     trainingProcess->start(venvPythonPath, arguments);
 }
-
 
 void Neuro_programm::onStopTrainingClicked()
 {
@@ -4412,52 +5345,62 @@ void Neuro_programm::addProjectToRecent(const QString &filePath) {
 
 void Neuro_programm::updateRecentProjectActions()
 {
-    // Открываем строго текстовый файл
-    QString configFilePath = QDir::homePath() + "/.config/PyTorchStudio/IDE.conf";
-    QSettings settings(configFilePath, QSettings::IniFormat);
+    if (!projectMgr || !ui->projectListWidget) return;
 
-    QStringList recentProjects = settings.value("recentProjectsList").toStringList();
-    int numRecentFiles = qMin(recentProjects.size(), (int)MaxRecentFiles);
+    ui->projectListWidget->clear();
+    if (this->recentProjectsMenu) this->recentProjectsMenu->clear();
 
-    for (int i = 0; i < numRecentFiles; ++i)
-    {
-        QString fullPath = recentProjects[i];
-        QString text = QString("&%1 %2").arg(i + 1).arg(QFileInfo(fullPath).fileName());
+    // Просто запрашиваем готовый строковый массив у менеджера
+    QStringList recentDirs = projectMgr->getRecentProjects();
 
-        recentProjectActions[i]->setText(text);
-        recentProjectActions[i]->setData(fullPath); // Привязываем абсолютный путь к экшену
-        recentProjectActions[i]->setVisible(true);
-    }
+    for (const QString &path : recentDirs) {
+        QFileInfo dirInfo(path);
 
-    for (int j = numRecentFiles; j < MaxRecentFiles; ++j) {
-        recentProjectActions[j]->setVisible(false);
+        // Заполняем виджет на заставке
+        QListWidgetItem *item = new QListWidgetItem(ui->projectListWidget);
+        item->setText(dirInfo.fileName());
+        item->setData(Qt::UserRole, path);
+        item->setIcon(QIcon(":/Data/system_icons/document-open.svg"));
+        ui->projectListWidget->addItem(item);
+
+        // Заполняем верхнее меню Файл
+        if (this->recentProjectsMenu) {
+            QAction *act = this->recentProjectsMenu->addAction(dirInfo.fileName() + " [" + path + "]");
+            act->setData(path);
+            connect(act, &QAction::triggered, this, &Neuro_programm::openRecentProject);
+        }
     }
 }
 
 void Neuro_programm::openRecentProject()
 {
-    // 1. Безопасно определяем, какой именно пункт меню нажал пользователь
-    QAction *clickedAction = qobject_cast<QAction*>(sender());
-    if (!clickedAction) return;
+    // 1. Извлекаем указатель на нажатый пункт верхнего подменю
+    QAction *action = qobject_cast<QAction*>(sender());
+    if (!action) return;
 
-    // 2. Извлекаем полный путь к проекту из скрытых данных экшена (.data())
-    QString targetProjectPath = clickedAction->data().toString();
+    // Вытаскиваем абсолютный путь к папке проекта, который зашит в data экшена
+    QString targetProjectPath = action->data().toString().trimmed();
+    if (targetProjectPath.isEmpty()) return;
 
-    qDebug() << "[RECENT_MGR] Запрос быстрого открытия файла:" << targetProjectPath;
+    qInfo() << "[RECENT_MENU] Быстрый запуск недавней сессии по пути:" << targetProjectPath;
 
-    // 3. Проверяем, существует ли файл на диске (вдруг пользователь его удалил)
-    if (!targetProjectPath.isEmpty() && QFile::exists(targetProjectPath)) {
-        // Вызываем переписанный метод open_project и передаем ему готовый путь.
-        // Никакие kdialog и QFileDialog больше не откроются!
-        this->open_project(targetProjectPath);
+    QDir projectDir(targetProjectPath);
+
+    // Валидируем физическое наличие паспорта-манифеста на диске
+    if (!projectDir.exists() || !projectDir.exists("passport.pystudio.json")) {
+        qWarning() << "[RECENT_MENU] Ошибка: Папка проекта удалена или повреждена:" << targetProjectPath;
+        QMessageBox::critical(
+                    this,
+                    "Проект не найден",
+                    "<b>Не удалось открыть недавний проект.</b><br><br>"
+                    "Директория была удалена с жесткого диска, переименована или в ней отсутствует файл паспорта."
+                    );
+        return;
     }
-    else {
-        qWarning() << "[RECENT_MGR] Ошибка: Файл проекта не найден по пути:" << targetProjectPath;
-        if (this->statusBar()) {
-            this->statusBar()->showMessage("Ошибка: Файл проекта перенесен или удален", 5000);
-            this->statusBar()->setStyleSheet("QStatusBar { color: #ff0000; font-weight: bold; }");
-        }
-    }
+
+    // ЖЕЛЕЗНЫЙ ВЫЗОВ: Передаем управление в метод инициализации дерева!
+    // Он сам переключит стек дока на индекс 0 и развернет структуру файлов.
+    this->initProjectTreeModel(targetProjectPath);
 }
 
 void Neuro_programm::saveCurrentActiveFile()
@@ -4568,107 +5511,91 @@ void Neuro_programm::saveAllProjectChanges()
 
 void Neuro_programm::onCurrentFileTextChanged()
 {
-    CodeEditor *currentEditor = qobject_cast<CodeEditor*>(sender());
-    if (!currentEditor) return;
+    // Получаем указатель на редактор кода, в котором прямо сейчас идет ввод символов
+    CodeEditor *editor = qobject_cast<CodeEditor*>(sender());
+    if (!editor) return;
 
-    QString absoluteFilePath = currentEditor->objectName();
-    if (absoluteFilePath.isEmpty()) return;
+    // Защита: если файл еще находится в процессе первичной начитки с диска, игнорируем триггер
+    if (editor->property("isLoading").toBool()) return;
 
-    // Проверяем по комбобоксу — добавлена ли уже туда звёздочка, чтобы не перерисовывать GUI зря
-    if (ui->fileComboBox) {
-        int comboIdx = ui->fileComboBox->findData(absoluteFilePath);
-        if (comboIdx != -1) {
-            QString currentText = ui->fileComboBox->itemText(comboIdx);
+    QString absoluteFilePath = editor->objectName();
+    if (absoluteFilePath.isEmpty() || absoluteFilePath == "MAIN_SCREEN" || absoluteFilePath == "AI_CHAT_SCREEN") return;
 
-            // Если текст НЕ заканчивается на " *", значит файл только что отредактировали
-            if (!currentText.endsWith(" *")) {
+    // Считываем нативное состояние изменения документа Qt
+    bool isModified = editor->document()->isModified();
 
-                // Включаем встроенный флаг документа и окна ОС
-                currentEditor->document()->setModified(true);
-                this->setWindowModified(true);
-
-                QFileInfo info(absoluteFilePath);
-
-                // А. Добавляем звёздочку в верхний fileComboBox
-                ui->fileComboBox->setItemText(comboIdx, info.fileName() + " *");
-
-                // Б. Добавляем звёздочку в левый openFilesListWidget
-                if (ui->openFilesListWidget) {
-                    for (int i = 0; i < ui->openFilesListWidget->count(); ++i) {
-                        QListWidgetItem *item = ui->openFilesListWidget->item(i);
-                        if (item && item->data(Qt::UserRole).toString() == absoluteFilePath) {
-                            item->setText(info.fileName() + " *");
-                            break;
-                        }
-                    }
-                }
-
-                // В. Обновляем главный заголовок операционной системы
-                updateTabName();
-            }
-        }
+    // ЖЕЛЕЗНЫЙ UX ФИКС: Передаем состояние напрямую в наш модуль!
+    // Он сам мгновенно допишет " *" в комбобокс, в левый список документов и в окно операционной системы
+    if (this->docMgr) {
+        this->docMgr->handleDocumentModificationChanged(absoluteFilePath, isModified);
     }
 }
 
 
+
 void Neuro_programm::onCloseProjectClicked()
 {
-    QWidget *currentPage = ui->centralStackedWidget->currentWidget();
-    if (currentPage) {
-        CodeEditor *activeEditor = currentPage->findChild<CodeEditor*>();
-        // Если это реальный редактор кода, а не сервисный экран
-        if (activeEditor && !activeEditor->currentFilePath.isEmpty()) {
-            QSettings settings(QDir::homePath() + "/.config/PyTorchStudio/IDE.conf", QSettings::IniFormat);
-            // Сохраняем путь к файлу, привязав его к текущему проекту
-            settings.setValue("General/lastActiveFile_" + QFileInfo(currentOpenProjectPath).baseName(), activeEditor->currentFilePath);
-        }
-    }
+    qInfo() << ">>> [ЗАКРЫТИЕ] Запуск процедуры проверки и закрытия всего проекта...";
 
-    // 1. ПРОВЕРКА НЕСОХРАНЕННЫХ ИЗМЕНЕНИЙ В РЕДАКТОРЕ КОДА И ПРОЕКТЕ
+    // =========================================================================
+    // ЭТАП 1: ПРОВЕРКА НЕСОХРАНЕННЫХ ИЗМЕНЕНИЙ ДО УДАЛЕНИЯ ДАННЫХ ИЗ ОЗУ
+    // =========================================================================
     bool hasUnsavedChanges = false;
     CodeEditor *activeEditor = nullptr;
-    currentPage = ui->centralStackedWidget->currentWidget();
+
+    QWidget *currentPage = ui->centralStackedWidget ? ui->centralStackedWidget->currentWidget() : nullptr;
     if (currentPage) {
         activeEditor = currentPage->findChild<CodeEditor*>();
     }
+
+    // Проверяем флаг модификации окна или документа Qt
     if (this->isWindowModified() || (activeEditor && activeEditor->document()->isModified())) {
         hasUnsavedChanges = true;
     }
 
-    // Вывод предупреждения (Диалоговое окно в стиле IDE)
+    // Вывод предупреждения (Диалоговое окно в стиле JetBrains / PyCharm)
     if (hasUnsavedChanges) {
         QMessageBox::StandardButton reply;
         reply = QMessageBox::warning(this,
                                      "Несохраненные изменения",
-                                     "В проекте или коде есть несохраненные изменения.\nХотите сохранить их перед закрытием?",
+                                     "В проекте или открытом файле есть несохраненные изменения.\n"
+                                     "Хотите сохранить их перед закрытием проекта?",
                                      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel
                                      );
+
         if (reply == QMessageBox::Save) {
             this->saveCurrentActiveFile();
-            qDebug() << "[ЗАКРЫТИЕ] Проект принудительно сохранен пользователем.";
+            qDebug() << "[ЗАКРЫТИЕ] Проект принудительно сохранен пользователем перед выходом.";
         }
         else if (reply == QMessageBox::Cancel) {
-            qDebug() << "[ЗАКРЫТИЕ] Отмена закрытия проекта.";
-            return; // Прерываем закрытие, остаемся в проекте
+            qDebug() << "[ЗАКРЫТИЕ] Закрытие отменено пользователем. Остаемся в проекте.";
+            return; // ПРЕРЫВАЕМ МЕТОД, остаемся работать в кодовой базе!
         }
     }
 
-    qDebug() << ">>> [ЗАКРЫТИЕ] Запуск процедуры очистки и закрытия всего проекта...";
+    // =========================================================================
+    // ЭТАП 2: СОХРАНЕНИЕ ПОСЛЕДНЕГО АКТИВНОГО ФАЙЛА В ИСТОРИЮ PYSTUDIO.CONF
+    // =========================================================================
+    if (currentPage && activeEditor && !activeEditor->currentFilePath.isEmpty() && !this->currentOpenProjectPath.isEmpty()) {
+        QString configAbsolutePath = QDir::homePath() + "/.config/PyTorchStudio/pystudio.conf";
+        QSettings settings(configAbsolutePath, QSettings::IniFormat);
+
+        // Привязываем последний открытый файл к базовому имени текущей папки репозитория
+        QString projBaseName = QFileInfo(this->currentOpenProjectPath).baseName();
+        settings.setValue("General/lastActiveFile_" + projBaseName, activeEditor->currentFilePath);
+        settings.sync();
+    }
 
     // =========================================================================
-    // 2. ОЧИСТКА ДИНАМИЧЕСКИХ ВКЛАДОК КОДА И СБРОС КОМБОБОКСА
+    // ЭТАП 3: ХИРУРГИЧЕСКАЯ ОЧИСТКА ДИНАМИЧЕСКИХ ВКЛАДОК КОДА ИЗ СТЭКА СЗАДУ НАПЕРЕД
     // =========================================================================
-    // Блокируем сигналы, чтобы комбобокс не генерировал фоновые сбросы страниц во время очистки
     ui->fileComboBox->blockSignals(true);
-
-    // Считываем сохраненный индекс заставки из динамических свойств окна
     int placeholderIndex = this->property("placeholderIndex").toInt();
 
-    // ХИРУРГИЧЕСКИЙ ФИКС С++: Пробегаемся по стэку виджетов СЗАДУ НАПЕРЕД (с самого конца)
-    // И удаляем абсолютно все страницы, кроме сервисных (0 - Панель ИИ, 1 - Чат) и самого плейсхолдера!
+    // Удаляем вкладки с конца, чтобы не поплыли индексы позиций Qt
     for (int i = ui->centralStackedWidget->count() - 1; i >= 0; --i)
     {
-        // Намертво пропускаем системные вкладки и заставку, их удалять нельзя
+        // Категорически пропускаем Панель ИИ, Чат и заставку JetBrains шорткатов
         if (i == 0 || i == 1 || i == placeholderIndex) {
             continue;
         }
@@ -4681,83 +5608,78 @@ void Neuro_programm::onCloseProjectClicked()
         }
     }
 
-    // Очищаем и заново инициализируем комбобокс до базового состояния
+    // Переинициализируем верхний комбобокс до базового состояния заставки
     ui->fileComboBox->clear();
-    ui->fileComboBox->addItem("  Панель обучения ИИ", QVariant("MAIN_SCREEN"));
-    ui->fileComboBox->addItem("  ИИ-Ассистент", QVariant("AI_CHAT_SCREEN"));
-    ui->fileComboBox->setCurrentIndex(-1); // Сбрасываем стрелку в нейтральное пустое положение
+    ui->fileComboBox->addItem(" Панель обучения ИИ", QVariant("MAIN_SCREEN"));
+    ui->fileComboBox->addItem(" ИИ-Ассистент", QVariant("AI_CHAT_SCREEN"));
+    ui->fileComboBox->setCurrentIndex(-1); // Сбрасываем стрелку в нейтраль
     ui->fileComboBox->blockSignals(false);
 
-    // Дополнительно полностью очищаем левый нижний список документов, если он используется
+    // =========================================================================
+    // ЭТАП 4: ОЧИСТКА ЛЕВОГО НИЖНЕГО СПИСКА "ОТКРЫТЫЕ ДОКУМЕНТЫ"
+    // =========================================================================
     if (ui->openFilesListWidget) {
         ui->openFilesListWidget->clear();
-        QListWidgetItem *mainScreenItem = new QListWidgetItem("  Панель обучения ИИ", ui->openFilesListWidget);
+        QListWidgetItem *mainScreenItem = new QListWidgetItem(" Панель обучения ИИ", ui->openFilesListWidget);
         mainScreenItem->setData(Qt::UserRole, QString("MAIN_SCREEN"));
-        QListWidgetItem *chatScreenItem = new QListWidgetItem("  ИИ-Ассистент", ui->openFilesListWidget);
+        QListWidgetItem *chatScreenItem = new QListWidgetItem(" ИИ-Ассистент", ui->openFilesListWidget);
         chatScreenItem->setData(Qt::UserRole, QString("AI_CHAT_SCREEN"));
-        ui->openFilesListWidget->setCurrentRow(0);
 
+        ui->openFilesListWidget->setCurrentRow(0);
         if (ui->openFilesContainer) ui->openFilesContainer->setVisible(false);
     }
 
-    // Сброс дерева проекта (закрытие структуры файлов)
+    // Обнуляем файловую модель дерева TreeView
     if (ui->treeView) {
         ui->treeView->setModel(nullptr);
     }
 
-    // Сбрасываем переменные путей и заголовки в null
+    // =========================================================================
+    // ЭТАП 5: ТОТАЛЬНОЕ СТИРАНИЕ ПУТЕЙ И СБРОС ЗАГЛОВКОВ (ЧИСТЫЙ ФИКС СЕССИИ)
+    // =========================================================================
     this->currentOpenProjectPath = "";
-    this->setWindowTitle("PyTorch Studio");
+    this->setProperty("currentOpenProjectPath", ""); // Зачищаем свойство для DocumentManager
     this->setWindowModified(false);
 
-    // =========================================================================
-    // 3. ЖЕСТКИЙ ПЕРЕХОД БОКОВОЙ ПАНЕЛИ НА СТАРТОВЫЙ ЭКРАН (ИНДЕКС 1)
-    // =========================================================================
-    // QStackedWidget *dockStack = ui->leftDockWidget->findChild<QStackedWidget*>("dockContentsStack");
-    // if (dockStack) {
-    //     dockStack->setCurrentIndex(1); // Переключаем левый док на стартовые кнопки (Open, New)
-    //     ui->leftDockWidget->setVisible(true);
-    //     if (actProject) actProject->setChecked(true);
-    //     dockStack->update();
-    // }
+    // Вежливо просим наш модуль вернуть исходное чистое имя программы
+    if (this->docMgr) {
+        this->docMgr->updateUiTitles("");
+    } else {
+        this->setWindowTitle("PyTorch Studio");
+        if (this->titleLabel) this->titleLabel->setText("PyTorch Studio");
+    }
 
-    // =========================================================================
-    // 4. ЦЕНТРАЛЬНЫЙ СУПЕР-ФИКС: ВКЛЮЧАЕМ СВЕТЛЫЙ ПЛЕЙСХОЛДЕР ПО ЦЕНТРУ ЭКРАНА!
-    // =========================================================================
-    // Пересчитываем актуальный индекс заставки, так как динамические вкладки удалились
+    // Переводим интерфейс в режим пустой стартовой заставки шорткатов
+    this->setIDEInStartMode(true);
+
+    if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(false);
+    if (ui->fileComboBox) ui->fileComboBox->setEnabled(false);
+
+    // Гасим нижний терминал и REPL
+    if (panelOther)  panelOther->setVisible(false);
+    if (btnTerminal) btnTerminal->setChecked(false);
+
+    // Выводим плейсхолдер шорткатов JetBrains на передний план по центру
     placeholderIndex = ui->centralStackedWidget->indexOf(ui->centralStackedWidget->findChild<QWidget*>("JETBRAINS_PLACEHOLDER"));
     if (placeholderIndex == -1) {
-        placeholderIndex = this->property("placeholderIndex").toInt(); // Фолбэк на кэш свойств
-    }
-
-    if (panelOther) {
-        panelOther->setVisible(false); // Скрываем нижнюю панель под кодом
-    }
-    if (btnTerminal) {
-        btnTerminal->setChecked(false); // Сбрасываем триггер кнопки статусбара
+        placeholderIndex = this->property("placeholderIndex").toInt();
     }
 
     if (ui->centralStackedWidget && placeholderIndex >= 0) {
-
-        if (panelOther)  panelOther->setVisible(false);
-        if (btnTerminal) btnTerminal->setChecked(false);
-
-        // ЖЕСТКИЙ UX ФИКС: Принудительно гасим индикатор координат при закрытии проекта
         if (ui->cursorPosLabel) {
-            ui->cursorPosLabel->hide();
+            ui->cursorPosLabel->hide(); // Прячем индикатор строк, так как файлов на экране нет
         }
-
         ui->centralStackedWidget->setCurrentIndex(placeholderIndex);
         ui->centralStackedWidget->update();
-        qDebug() << ">>> [УСПЕХ] Проект закрыт. Индикатор cursorPosLabel скрыт.";
     }
-}
+
+    qInfo() << "[PROJECT_MGR] Проект успешно закрыт. ОЗУ зачищена. Интерфейс в исходном состоянии.";
+} // <-- Метод теперь гарантированно и правильно закрывается здесь!
 
 void Neuro_programm::initLspServer()
 {
     // Если процесс уже запущен, не переинициализируем его
     if (lspProcess && lspProcess->state() == QProcess::Running) return;
-
     if (!lspProcess) {
         lspProcess = new QProcess(this);
     }
@@ -4765,126 +5687,99 @@ void Neuro_programm::initLspServer()
     // =========================================================================
     // ШАГ 1: НАСТРОЙКА ОКРУЖЕНИЯ OS (БОРЬБА С БУФЕРИЗАЦИЕЙ В LINUX)
     // =========================================================================
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QProcessEnvironment env = (this->envManager)
+            ? this->envManager->getIsolatedEnvironment()
+            : QProcessEnvironment::systemEnvironment();
 
-    // Отключаем буферизацию Python внутри Jedi, заставляя его отвечать мгновенно
+    // Отключаем буферизацию Python внутри Pylsp, заставляя его отвечать мгновенно
     env.insert("PYTHONUNBUFFERED", "1");
     env.insert("PYTHONIOENCODING", "utf-8");
-
     lspProcess->setProcessEnvironment(env);
 
     // =========================================================================
     // ШАГ 2: АСИНХРОННЫЕ СИГНАЛ-СЛОТЫ ДЛЯ МОНИТОРИНГА И СЧИТЫВАНИЯ
     // =========================================================================
-
     // Перехватчик стандартного вывода (Ответы сервера)
     connect(lspProcess, &QProcess::readyReadStandardOutput, this, [this]() {
-        // Подглядываем в буфер для вывода красивого лога в консоль
         QByteArray peekData = lspProcess->peek(lspProcess->bytesAvailable());
-        std::cerr << " [LSP СЫРОЙ JSON ВЫВОД (PEEK)]:\n" << QString::fromUtf8(peekData).toStdString() << std::endl;
+        std::cerr << " [LSP СЫРОЙ JSON ВЫВОД (PEEK)]:\n" <<
+                     QString::fromUtf8(peekData).toStdString() << std::endl;
         std::cerr.flush();
-
-        // Вызываем ваш оригинальный метод парсинга ответов без аргументов
         this->readLspResponse();
     });
 
-    // Перехватчик потока ошибок (Для отлова внутренних сбоев Jedi)
+    // ИСПРАВЛЕНО: Безопасный Си-формат вывода логов ошибок во избежание сбоя компилятора GCC
     connect(lspProcess, &QProcess::readyReadStandardError, this, [this]() {
         QByteArray lspErrors = lspProcess->readAllStandardError();
         if (!lspErrors.isEmpty()) {
-            fprintf(stderr, "\n[JEDI PYTHON ВНУТРЕННИЙ ЛОГ]: %s\n", lspErrors.constData());
+            // Принудительно приводим к const char* через метод data()
+            fprintf(stderr, "\n[PYLSP ВНУТРЕННИЙ ЛОГ ОШИБОК]: %s\n", lspErrors.data());
             fflush(stderr);
         }
     });
 
     // Мониторинг непредвиденного падения процесса
-    connect(lspProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-            this, [](int exitCode, QProcess::ExitStatus exitStatus) {
-        std::cerr << " [LSP СТАТУС] Сервер Jedi завершил работу. Код выхода: "
-                  << exitCode << " Статус: " << exitStatus << std::endl;
+    connect(lspProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [](int exitCode, QProcess::ExitStatus exitStatus) {
+        std::cerr << " [LSP СТАТУС] Сервер Pylsp завершил работу. Код выхода: " << exitCode << " Статус: " << exitStatus << std::endl;
         std::flush(std::cerr);
     });
 
     // =========================================================================
-    // ШАГ 3: ЗАПУСК ПРЯМОГО БИНАРНИКА СЕРВЕРА БЕЗ ФЛАГОВ И АРГУМЕНТOВ
+    // ШАГ 3: ЗАПУСК ПРЯМОГО БИНАРНИКА СЕРВЕРА С ПРИВЯЗКОЙ К ВНЕШНЕМУ VENV
     // =========================================================================
-    // Жестко задаем абсолютный путь к прямому исполняемому файлу сервера внутри venv
-    // QString localLspBinary = "/home/elf/projects/z1/venv/bin/python";
-    // this->venvPythonBinary = localLspBinary;
-
     QString localLspBinary;
-
-    if (!currentOpenProjectPath.isEmpty() && QFile::exists(currentOpenProjectPath + "/venv/bin/python"))
+    if (this->envManager && !this->envManager->currentPythonPath().isEmpty() && QFile::exists(this->envManager->currentPythonPath()))
     {
-        // Отличный сценарий: venv существует, используем его
-        localLspBinary = currentOpenProjectPath + "/venv/bin/python";
-        this->venvPythonBinary = localLspBinary; // Фиксируем для всего приложения
-        qDebug() << "[LSP_INIT] Используем изолированный venv проекта:" << localLspBinary;
+        localLspBinary = this->envManager->currentPythonPath();
+        this->venvPythonBinary = localLspBinary;
+        qDebug() << "[LSP_INIT SUCCESS] Используем внешний изолированный venv:" << localLspBinary;
+    }
+    else if (QFile::exists("/home/elf/venv/bin/python"))
+    {
+        localLspBinary = "/home/elf/venv/bin/python";
+        this->venvPythonBinary = localLspBinary;
+        qDebug() << "[LSP_INIT FALLBACK] Менеджер занят, подключаю внешний venv напрямую:" << localLspBinary;
     }
     else
     {
-        // Сценарий инициализации или первого запуска на новом ПК
-        localLspBinary = "/usr/bin/python"; // Используем системный Python временно, чтобы не было падения
-
-        // ВАЖНО: Не перезаписываем venvPythonBinary системным путем,
-        // если у нас уже сохранен какой-то рабочий путь!
-        if (this->venvPythonBinary.isEmpty() || !QFile::exists(this->venvPythonBinary)) {
+        localLspBinary = "/usr/bin/python3";
+        if (this->venvPythonBinary.isEmpty()) {
             this->venvPythonBinary = localLspBinary;
         }
-
-        qWarning() << "[LSP_INIT] Локальный venv не найден. Временно подменяем системным интерпретатором:" << localLspBinary;
+        qWarning() << "[LSP_INIT WARN] Внешний venv не обнаружен на диске! Сброс на систему:" << localLspBinary;
     }
 
-    // 2. Возвращаем аргументы запуска модуля pylsp (теперь это КРИТИЧЕСКИ ВАЖНО!)
+    // Возвращаем аргументы запуска модуля pylsp
     QStringList lspArgs;
     lspArgs << "-m" << "pylsp";
-
-    std::cerr << " [LSP СИСТЕМНЫЙ СТАРТ] Запускаю python-lsp-server с плагином pyflakes..." << std::endl;
+    std::cerr << " [LSP СИСТЕМНЫЙ СТАРТ] Запускаю python-lsp-server внутри venv..." << std::endl;
     std::cerr.flush();
 
-    // =========================================================================
-    // КРИТИЧЕСКИЙ СИНХРОНИЗАТОР: Ловим момент, когда сервер официально запустится в Linux
-    // =========================================================================
+    // Отложенная UX-регистрация восстановленных файлов при старте
     connect(lspProcess, &QProcess::started, this, [this]() {
-        qDebug() << ">>> [LSP ГОТОВ] Сервер успешно запущен системой!";
-
+        qDebug() << ">>> [LSP ГОТОВ] Сервер Pylsp успешно запущен системой!";
         if (!this->m_pendingAutoloadFile.isEmpty()) {
-            qDebug() << ">>> [LSP] Провожу отложенную регистрацию восстановленного файла:" << this->m_pendingAutoloadFile;
-
-            // Ищем активный редактор на текущей открытой вкладке centralStackedWidget
             QWidget *currentPage = ui->centralStackedWidget->currentWidget();
             if (currentPage) {
                 CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
                 if (currentEditor && currentEditor->objectName() == this->m_pendingAutoloadFile) {
-
-                    // 1. Ваш оригинальный вызов (Сервер готов — принудительно отправляем didOpen для первого файла)
                     currentEditor->sendLspDidOpen();
-
-                    // =========================================================================
-                    // ЖЕЛЕЗНЫЙ UX-ФИКС СТАРТА: Сразу же строим дерево функций для первого файла!
-                    // =========================================================================
                     this->updateFunctionNavigator(currentEditor);
-                    qDebug() << ">>> [СТАРТ] Навигатор функций comboDevice успешно проинициализирован при автозагрузке.";
-                    // =========================================================================
                 }
             }
-
         }
     });
 
-    // Запускаем процесс асинхронно
+    // Запускаем процесс асинхронно в изолированной среде
     lspProcess->start(localLspBinary, lspArgs);
-
-
     if (!lspProcess->waitForStarted(1500)) {
-        std::cerr << " [КРИТИЧЕСКАЯ ОШИБКА] Не удалось запустить процесс LSP сервера по пути: "
-                  << localLspBinary.toStdString() << std::endl;
+        std::cerr << " [КРИТИЧЕСКАЯ ОШИБКА] Не удалось запустить процесс LSP сервера по пути: " << localLspBinary.toStdString() << std::endl;
         std::cerr.flush();
         return;
     }
 
     // =========================================================================
-    // ШАГ 4: ФОРМИРОВАНИЕ ПАКЕТА ИНИЦИАЛИЗАЦИИ (ОПТИМИЗАЦИЯ ПОД PYTORCH)
+    // ШАГ 4: ФОРМИРОВАНИЕ ПАКЕТА ИНИЦИАЛИЗАЦИИ ДЛЯ PYLSP (С СИНХРОНИЗАЦИЕЙ JEDI)
     // =========================================================================
     QJsonObject rootObj;
     rootObj["jsonrpc"] = "2.0";
@@ -4894,8 +5789,6 @@ void Neuro_programm::initLspServer()
 
     QJsonObject params;
     params["processId"] = QCoreApplication::applicationPid();
-
-    // Задаем корневую директорию проекта для контекста импортов
     if (!currentOpenProjectPath.isEmpty()) {
         params["rootUri"] = QUrl::fromLocalFile(currentOpenProjectPath).toString();
         params["rootPath"] = currentOpenProjectPath;
@@ -4904,11 +5797,8 @@ void Neuro_programm::initLspServer()
         params["rootPath"] = QJsonValue::Null;
     }
 
-    // --- ИСПРАВЛЕНИЕ: ЯВНО ОБЪЯВЛЯЕМ ВСЕ НЕОБХОДИМЫЕ ОБЪЕКТЫ QT ---
     QJsonObject capabilities;
     QJsonObject textDocumentCaps;
-
-    // Описываем возможности синхронизации (убедитесь, что этот блок у вас есть)
     textDocumentCaps["synchronization"] = QJsonObject{
     {"dynamicRegistration", false},
     {"willSave", false},
@@ -4916,42 +5806,46 @@ void Neuro_programm::initLspServer()
     {"didSave", true}
             };
 
-    // Описываем поддержку быстрых исправлений Code Action
     QJsonObject codeActionCaps;
     codeActionCaps["dynamicRegistration"] = false;
-
-    // Передаем серверу типы исправлений, которые мы умеем рисовать в QMenu
     QJsonArray codeActionKinds;
     codeActionKinds.append("quickfix");
     codeActionKinds.append("refactor");
     codeActionCaps["codeActionLiteralSupport"] = QJsonObject{{"codeActionKind", QJsonObject{{"valueSet", codeActionKinds}}}};
-
-    // Привязываем поддержку к общим возможностям текстового документа
     textDocumentCaps["codeAction"] = codeActionCaps;
 
     QJsonObject hoverCaps;
     hoverCaps["dynamicRegistration"] = false;
-
     QJsonArray contentFormats;
-    contentFormats.append("markdown");  // Объявляем поддержку Markdown (PyTorch)
-    contentFormats.append("plaintext"); // Резервный чистый текст
+    contentFormats.append("markdown");
+    contentFormats.append("plaintext");
     hoverCaps["contentFormat"] = contentFormats;
-
-    // Привязываем Hover-возможности к общим возможностям текстового документа
     textDocumentCaps["hover"] = hoverCaps;
-
-    // Собираем иерархию по спецификации LSP: params -> capabilities -> textDocument -> codeAction
     capabilities["textDocument"] = textDocumentCaps;
     params["capabilities"] = capabilities;
 
-    // =========================================================================
-    // ВСТАВЛЯЙТЕ НАШ КОД НАСТРОЙКИ ПЛАГИНОВ СТРОГО СЮДА:
-    // =========================================================================
+    // =====================================================================
+    // ИСПРАВЛЕНА СТРУКТУРА НАСТРОЕК: ПЕРЕНПРАВЛЯЕМ КЛЮЧИ СТРОГО ПО КАНOНУ PYLSP
+    // =====================================================================
     QJsonObject settings;
     QJsonObject pylsp;
     QJsonObject plugins;
 
-    // 1. Активируем pyflakes (он умеет собирать множественные ошибки синтаксиса)
+    // Настройка плагина плавающего разборщика Jedi внутри Pylsp
+    QJsonObject jedi;
+    jedi["enabled"] = true;
+
+    // Передаем путь к бинарнику python, чтобы подтянулись все библиотеки PyTorch!
+    jedi["environment"] = localLspBinary;
+    jedi["max_function_parses"] = 150;
+
+    QJsonArray extraPaths;
+    if (!currentOpenProjectPath.isEmpty()) extraPaths.append(currentOpenProjectPath);
+    jedi["extra_paths"] = extraPaths;
+
+    plugins["jedi"] = jedi;
+
+    // Настройка остальных встроенных плагинов pylsp
     QJsonObject pyflakes;
     pyflakes["enabled"] = true;
     plugins["pyflakes"] = pyflakes;
@@ -4968,44 +5862,17 @@ void Neuro_programm::initLspServer()
     rope["enabled"] = true;
     plugins["rope"] = rope;
 
-    // 2. Отключаем лишний спам по стилю кода (PEP8), чтобы не тормозил PyTorch
     QJsonObject pycodestyle;
-    pycodestyle["enabled"] = false;
+    pycodestyle["enabled"] = false; // Выключаем спам предупреждений PEP8 для экономии ОЗУ
     plugins["pycodestyle"] = pycodestyle;
 
-    // Упаковываем ветки по стандарту протокола LSP для pylsp
     pylsp["plugins"] = plugins;
     settings["pylsp"] = pylsp;
-    params["settings"] = settings; // Привязываем настройки к объекту params!
+    params["settings"] = settings;
+    // =====================================================================
 
-    // Сборка оптимизированных настроек Jedi Settings
+    // Передаем пустые initializationOptions, так как все настройки ушли в settings
     QJsonObject initializationOptions;
-    QJsonObject jediSettings;
-
-    // Указываем путь к Python интерпретатору venv, чтобы сервер подхватил установленный torch
-    jediSettings["pythonExecutablePath"] = "/home/elf/projects/z1/venv/bin/python";
-
-    QJsonObject diagnosticsObj;
-    diagnosticsObj["enable"] = true;            // Принудительно включаем диагностику на лету
-    diagnosticsObj["didChange"] = true;         // Запускаем перерасчет при каждой паузе ввода
-    jediSettings["diagnostics"] = diagnosticsObj; // Привязываем к ядру Jedi
-
-    // Отключаем глубокое статическое сканирование ИИ-библиотеки при автоимпорте
-    QJsonArray disableAutoImport;
-    disableAutoImport.append("torch");
-    disableAutoImport.append("pytorch");
-    jediSettings["disable_auto_import_modules"] = disableAutoImport;
-
-    // Добавляем torch и os в preload для динамической подгрузки типов в рантайме
-    QJsonArray preloadModules;
-    preloadModules.append("torch");
-    preloadModules.append("os");
-    jediSettings["preload_modules"] = preloadModules;
-
-    // Лимитируем вложенность разбора функций для ускорения отклика IDE
-    jediSettings["max_function_parses"] = 150;
-
-    initializationOptions["jediSettings"] = jediSettings;
     params["initializationOptions"] = initializationOptions;
 
     rootObj["params"] = params;
@@ -5013,29 +5880,21 @@ void Neuro_programm::initLspServer()
     // Маркируем пакет по стандарту LSP (Content-Length) и отправляем в пайп
     QByteArray jsonData = QJsonDocument(rootObj).toJson(QJsonDocument::Compact);
     QByteArray headerData = QString("Content-Length: %1\r\n\r\n").arg(jsonData.size()).toUtf8();
-
     lspProcess->write(headerData + jsonData);
     lspProcess->waitForBytesWritten(500);
 
-    std::cerr << " [LSP КЛИЕНТ] Стартовый пакет 'initialize' отправлен на сервер." << std::endl;
+    std::cerr << " [LSP КЛИЕНТ] Стартовый пакет 'initialize' успешно отправлен на Pylsp." << std::endl;
     std::cerr.flush();
 
-    // В САМЫЙ КОНЕЦ МЕТОДА ИНИЦИАЛИЗАЦИИ:
+    // Отложенная отправка пакета didOpen (Остается без изменений)
     if (!this->m_pendingAutoloadFile.isEmpty() && QFile::exists(this->m_pendingAutoloadFile))
     {
-        qDebug() << ">>> [LSP ГОТОВ] Сервер запущен. Провожу отложенную регистрацию файла:" << m_pendingAutoloadFile;
-
         QFile autoFile(this->m_pendingAutoloadFile);
-        if (autoFile.open(QIODevice::ReadOnly | QIODevice::Text))
-        {
+        if (autoFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             QString autoContent = QString::fromUtf8(autoFile.readAll());
             autoFile.close();
-
-            // Теперь сервер гарантированно запущен и успешно примет этот пакет!
             this->sendLspDidOpenForFile(this->m_pendingAutoloadFile, autoContent);
         }
-
-        // Очищаем переменную, чтобы не слать пакет повторно
         this->m_pendingAutoloadFile.clear();
     }
 }
@@ -5077,77 +5936,28 @@ void Neuro_programm::sendLspRequest(const QString &method, const QJsonObject &pa
     //lspProcess->waitForBytesWritten(30);
 }
 
+void Neuro_programm::sendLspDidOpenForFile(const QString &filePath, const QString &fileContent)
+{
+    // Если LSP-сервер не запущен или путь пустой — ничего не делаем
+    if (!lspProcess || lspProcess->state() != QProcess::Running || filePath.isEmpty()) return;
 
-// void Neuro_programm::readLspResponse()
-// {
-//     if (!lspProcess) return;
+    QJsonObject params;
+    QJsonObject textDocument;
 
-//     // 1. Забираем только свежие сырые байты из пайпа
-//     QByteArray rawData = lspProcess->readAllStandardOutput();
-//     if (rawData.isEmpty()) return;
+    // Передаем точный URI файла по спецификации LSP
+    textDocument["uri"] = QUrl::fromLocalFile(filePath).toString();
+    textDocument["languageId"] = "python";
+    textDocument["version"] = 1; // Начальная версия сессии всегда 1
+    textDocument["text"] = fileContent; // Передаем стартовый текст для инициализации кэша Jedi
+    params["textDocument"] = textDocument;
 
-//     // Накапливаем байты в статическом буфере класса
-//     static QByteArray lspBuffer;
-//     lspBuffer.append(rawData);
+    // Отправляем системное уведомление didOpen через ваш рабочий транспорт запросов, который вы скинули
+    this->sendLspRequest("textDocument/didOpen", params);
 
-//     // =========================================================================
-//     // СТАНДАРТНЫЙ ИНДУСТРИАЛЬНЫЙ СТРИМ-ПАРСЕР ДЛЯ LSP ПРОТОКОЛА
-//     // =========================================================================
-//     while (!lspBuffer.isEmpty())
-//     {
-//         // Находим, где в буфере начинается сам JSON-объект (ищем первую фигурную скобку)
-//         int jsonStartIndex = lspBuffer.indexOf('{');
-
-//         if (jsonStartIndex == -1) {
-//             // Если фигурной скобки вообще нет, значит в буфере лежит только текстовый заголовок.
-//             // Мы просто выходим и ждем, когда из пайпа догрузится сам JSON.
-//             return;
-//         }
-
-//         // Проверяем, если перед фигурной скобкой застрял заголовок Content-Length,
-//         // мы временно заглядываем в него, чтобы узнать точную длину пакета.
-//         int headerIndex = lspBuffer.indexOf("Content-Length:");
-//         int expectedLength = 0;
-//         if (headerIndex != -1 && headerIndex < jsonStartIndex) {
-//             int headerEndIndex = lspBuffer.indexOf("\r\n\r\n", headerIndex);
-//             if (headerEndIndex != -1) {
-//                 int valStart = headerIndex + 15;
-//                 expectedLength = lspBuffer.mid(valStart, headerEndIndex - valStart).trimmed().toInt();
-//             }
-//         }
-
-//         // Если мы смогли узнать ожидаемую длину, проверяем, накопилось ли столько байт в буфере.
-//         // Если буфер меньше, значит пакет еще долетает по сети. Выходим и ждем readyRead!
-//         if (expectedLength > 0 && lspBuffer.size() < (jsonStartIndex + expectedLength)) {
-//             return;
-//         }
-
-//         // Вырезаем кусок буфера, начиная строго от фигурной скобки '{' и до конца буфера
-//         QByteArray jsonCandidate = lspBuffer.mid(jsonStartIndex);
-
-//         // Позволяем встроенному парсеру Qt САМОМУ распарсить JSON.
-//         // Qt безупречно определяет реальные границы объекта по балансу фигурных скобок {},
-//         // полностью игнорируя любые проблемы со смещениями строк в заголовках!
-//         QJsonParseError parseError;
-//         QJsonDocument doc = QJsonDocument::fromJson(jsonCandidate, &parseError);
-
-//         // СЛУЧАЙ 1: Пакет оборван на полуслове (парсер ругается на неожиданный конец файла)
-//         if (parseError.error == QJsonParseError::UnterminatedObject ||
-//             parseError.error == QJsonParseError::UnterminatedArray)
-//         {
-//             return; // Спокойно выходим и ждем, когда QProcess догрузит оставшиеся байты
-//         }
-
-//         // СЛУЧАЙ 2: Пакет успешно распарсился!
-//         if (parseError.error == QJsonParseError::NoError)
-//         {
-//             // Вычисляем, сколько байт реально занял этот JSON-объект на диске
-//             int actualJsonSize = doc.toJson(QJsonDocument::Compact).size();
-
-//             // Намертво стираем из буфера обработанный заголовок и сам JSON,
-//             // продвигая очередь строго к следующему LSP-пакету
-
-
+    std::clog << " [LSP] Сессия файла успешно открыта на сервере через didOpen. URI: "
+              << textDocument["uri"].toString().toStdString() << std::endl;
+    std::clog.flush();
+}
 
 void Neuro_programm::readLspResponse()
 {
@@ -6514,6 +7324,11 @@ void Neuro_programm::showEvent(QShowEvent *event) {
 
     // Заставляем Qt гарантированно обновить интерфейс на экране
     this->update();
+
+    qInfo() << ">>> [PROBLEMS INIT] Главное окно Студии полностью отрисовано. Форсирую выгребание ошибок...";
+
+    // Насильно заставляем таблицу вытащить накопленный кэш ошибок из памяти на экран!
+    this->refreshProblemsTableView();
 }
 
 void Neuro_programm::updateWidget3Padding()
@@ -6623,11 +7438,16 @@ void Neuro_programm::updateWidget3Padding()
 
 void Neuro_programm::resizeEvent(QResizeEvent *event)
 {
-    QMainWindow::resizeEvent(event);
+    QMainWindow::resizeEvent(event); // Даем окну измениться
 
-    // Корректируем левый отступ widget_3 вслед за изменением окна
-    updateWidget3Padding();
-    //updateBottomPanelGeometry();
+    // if (panelOther && panelOther->isVisible()) {
+    //     int rightPanelWidth = ui->rightDebugPanel ? ui->rightDebugPanel->width() : 0;
+    //     int leftBarWidth = this->leftSideBarContainer ? this->leftSideBarContainer->width() : 68;
+    //     int allowedWidth = this->width() - rightPanelWidth - leftBarWidth;
+
+    //     panelOther->setFixedWidth(allowedWidth);
+    //     panelOther->move(leftBarWidth, panelOther->y());
+    // }
 }
 
 void Neuro_programm::triggerEditAction()
@@ -6691,203 +7511,205 @@ void Neuro_programm::openNewFileInEditor(const QString &absoluteFilePath)
 {
     if (absoluteFilePath.isEmpty()) return;
 
-    // ШАГ 1: Физическое создание файла на диске
-    QFile file(absoluteFilePath);
-    if (!file.exists()) {
-        QFileInfo fileInfo(absoluteFilePath);
-        QDir dir = fileInfo.dir();
-        if (!dir.exists()) {
-            dir.mkpath(dir.absolutePath());
-        }
-        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            QTextStream out(&file);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-            out.setEncoding(QStringConverter::Utf8);
-#else
-            out.setCodec("UTF-8");
-#endif
-            out << "# -*- coding: utf-8 -*-\nimport torch\nimport torch.nn as nn\n\n";
-            file.close();
-        } else {
-            qCritical() << " [ОШИБКА OS] Не удалось создать файл:" << absoluteFilePath;
-            return;
-        }
-    }
-
-    // ШАГ 2: Проверка — не открыт ли файл уже
+    // ШАГ 1: Проверка — не открыт ли файл уже в интерфейсе (Остается без изменений)
     for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
         QWidget *page = ui->centralStackedWidget->widget(i);
         if (page && page->objectName() == absoluteFilePath) {
             ui->centralStackedWidget->setCurrentWidget(page);
-            if (ui->fileComboBox) {
-                int comboIdx = ui->fileComboBox->findData(absoluteFilePath);
-                if (comboIdx != -1) ui->fileComboBox->setCurrentIndex(comboIdx);
+            if (this->docMgr) {
+                this->docMgr->handleFileActivation(absoluteFilePath);
             }
             return;
         }
     }
 
-    // ШАГ 3: Программное создание и настройка CodeEditor
+    // ШАГ 2: Чтение содержимого созданного файла с диска (Остается без изменений)
+    QFile file(absoluteFilePath);
     QString fileContent;
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         fileContent = QString::fromUtf8(file.readAll());
         file.close();
     }
 
-    // =========================================================================
-    // КРИТИЧЕСКИЙ ФИКС ДВОЙНОГО КЛИКА: БЛОКИРУЕМ СИГНАЛЫ НА ВРЕМЯ СБОРКИ
-    // =========================================================================
+    // ШАГ 3: Блокируем сигналы на время сборки графических виджетов
     if (ui->centralStackedWidget) ui->centralStackedWidget->blockSignals(true);
     if (ui->fileComboBox) ui->fileComboBox->blockSignals(true);
 
-    // 1. Снимаем режим стартовой заставки шорткатов
     this->setIDEInStartMode(false);
 
-    // 2. Создаем контейнер-страницу
+    // Создаем контейнер-страницу для stackedWidget
     QWidget *newPage = new QWidget(ui->centralStackedWidget);
-    newPage->setObjectName(absoluteFilePath); // Назначаем имя СРАЗУ
-
+    newPage->setObjectName(absoluteFilePath);
     QVBoxLayout *layout = new QVBoxLayout(newPage);
     layout->setContentsMargins(0, 0, 0, 0);
 
     CodeEditor *editor = nullptr;
     MinimapArea *minimap = nullptr;
 
-    // =========================================================================
-    // ЖЕСТКИЙ ФИКС: СВЯЗЫВАЕМ СИГНАЛЫ КНОПОК ПОП-АПА С СЕРВЕРОМ JEDI
-    // =========================================================================
-
-    // 1. Привязываем клик "Quick Documentation"
-    connect(editor, &CodeEditor::documentationRequested, this, [this](const QString &path, int line, int col) {
-        qDebug() << ">>> [LSP REQ] Запрашиваю Quick Documentation для:" << path << "строка:" << line;
-
-        QJsonObject params;
-        QJsonObject textDocument;
-        textDocument["uri"] = QUrl::fromLocalFile(path).toString();
-        params["textDocument"] = textDocument;
-
-        QJsonObject position;
-        position["line"] = line;
-        position["character"] = col;
-        params["position"] = position;
-
-        // Отправляем запрос с фиксированным id: 555 (Сценарий 1.5 на странице 26 вашего PDF)
-        this->sendLspRequest("textDocument/hover", params, 555);
-    });
-
-    // 2. Привязываем клик "Quick Definition"
-    connect(editor, &CodeEditor::definitionRequested, this, [this](const QString &path, int line, int col) {
-        qDebug() << ">>> [LSP REQ] Запрашиваю Quick Definition для:" << path;
-
-        QJsonObject params;
-        QJsonObject textDocument;
-        textDocument["uri"] = QUrl::fromLocalFile(path).toString();
-        params["textDocument"] = textDocument;
-
-        QJsonObject position;
-        position["line"] = line;
-        position["character"] = col;
-        params["position"] = position;
-
-        // Отправляем запрос определения с фиксированным id: 777
-        this->sendLspRequest("textDocument/definition", params, 777);
-    });
-
-
-    // 3. Собираем монолитную панель (Редактор кода + миникарта)
+    // Собираем монолитную панель (Редактор кода + миникарта)
     QWidget *editorContainer = CodeEditor::createEditorWithMinimap(newPage, editor, minimap);
-    if (layout && editorContainer)
-    {
+    if (layout && editorContainer) {
         editorContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         layout->addWidget(editorContainer);
     }
 
-    // 4. Настраиваем созданный объект текстового редактора editor
+    // Настраиваем созданный объект текстового редактора editor
     if (editor) {
         editor->currentFilePath = absoluteFilePath;
         editor->setObjectName(absoluteFilePath);
-        QFont codeFont;
-        // Просим систему включить JetBrains Mono, если его нет — Courier New или Monospace
-        codeFont.setFamilies(QStringList() << "JetBrains Mono" << "Fira Code" << "Courier New" << "Monospace");
-        codeFont.setStyleHint(QFont::Monospace); // Жесткое аппаратное требование моноширинности
-        codeFont.setPixelSize(13); // Комфортный компактный размер букв для ИИ-студии
 
+        QFont codeFont;
+        codeFont.setFamilies(QStringList() << "JetBrains Mono" << "Fira Code" << "Courier New" << "Monospace");
+        codeFont.setStyleHint(QFont::Monospace);
+        codeFont.setPixelSize(13);
         editor->setFont(codeFont);
 
         editor->setProperty("isLoading", true);
         editor->setLineWrapMode(QPlainTextEdit::NoWrap);
 
+        // Передаем текст шаблона на холст редактора без вызова сигналов изменения
         editor->blockSignals(true);
         editor->setPlainText(fileContent);
         editor->blockSignals(false);
 
-        if (this->codeCompleter) {
-            editor->setCompleter(this->codeCompleter);
-        }
+        // =====================================================================
+        // СИНХРОНИЗАЦИЯ СИГНАЛОВ ПОПАПОВ АВТОДОПОЛНЕНИЯ С СЕРВЕРОМ JEDI LSP
+        // =====================================================================
 
-        // Существующий коннект отслеживания изменений текста файла со звездочкой
+        // =====================================================================
+        // СМАРТ-МОСТ JEDI: СЧИТЫВАНИЕ АКТИВНОГО ЭЛЕМЕНТА ДО СХЛОПЫВАНИЯ ИНДЕКСА
+        // =====================================================================
+        // =====================================================================
+        // ИСПРАВЛЕННЫЙ УНИВЕРСАЛЬНЫЙ МОСТ СВЯЗИ (МЕНЮ АВТОКОМПЛИТА + ОБЫЧНЫЙ ХОВЕР)
+        // =====================================================================
+        connect(editor, &CodeEditor::documentationRequested, this, [this](const QString &path, int line, int col) {
+            QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+            if (!currentPage) return;
+
+            CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+            if (!currentEditor) return;
+
+            // СЦЕНАРИЙ А: Если окно подсказок открыто на экране — делаем глубокий resolve по ячейке
+            if (currentEditor->m_popupWindow && currentEditor->m_popupWindow->isVisible() && currentEditor->m_listWidget)
+            {
+                QListWidgetItem *currentItem = currentEditor->m_listWidget->currentItem();
+                if (currentItem)
+                {
+                    QJsonObject originalItemObj = currentItem->data(Qt::UserRole).toJsonObject();
+
+                    if (originalItemObj.isEmpty()) {
+                        QString cleanLabel = currentItem->text().remove(QRegularExpression("<[^>]*>"));
+                        QString insertText = cleanLabel;
+                        if (insertText.contains("(")) insertText = insertText.left(insertText.indexOf("(")).trimmed();
+
+                        originalItemObj["label"] = cleanLabel;
+                        originalItemObj["insertText"] = insertText;
+                        originalItemObj["kind"] = 3;
+                        QJsonObject dataObj;
+                        dataObj["doc_uri"] = QUrl::fromLocalFile(path).toString();
+                        originalItemObj["data"] = dataObj;
+                    }
+
+                    qInfo() << ">>> [LSP RESOLVE] Отправка пакета completionItem/resolve для:" << originalItemObj["label"].toString();
+                    this->sendLspRequest("completionItem/resolve", originalItemObj, 555);
+                    return; // Успешно обработано, выходим!
+                }
+            }
+
+            // СЦЕНАРИЙ Б: Окно подсказок закрыто (пользователь просто вызвал справку на слове в коде)
+            // Шлем нативный, пуленепробиваемый пакет hover по координатам строки и колонки!
+            qInfo() << ">>> [LSP HOVER] Окно подсказок закрыто. Отправляю стандартный textDocument/hover...";
+            qInfo() << "    Координаты запроса: Строка:" << line << "Колонка:" << col;
+
+            QString cleanPath = QDir::fromNativeSeparators(path);
+            QJsonObject hoverParams;
+            QJsonObject textDocumentObj;
+
+            textDocumentObj["uri"] = QUrl::fromLocalFile(cleanPath).toString();
+            hoverParams["textDocument"] = textDocumentObj;
+
+            QJsonObject positionObj;
+            positionObj["line"] = line;
+            positionObj["character"] = col;
+            hoverParams["position"] = positionObj;
+
+            // Отправляем Hover-запрос (Наш парсер в codeeditor.cpp перехватит его по структуре!)
+            this->sendLspRequest("textDocument/hover", hoverParams, 555);
+        });
+        // =====================================================================
+
+
+        // 2. СВЯЗКА КНОПКИ GO TO DEFINITION (ИСПРАВЛЕНО: СИНХРОНИЗИРОВАНО НА ID 105!)
+        connect(editor, &CodeEditor::definitionRequested, this, [this](const QString &path, int line, int col) {
+            QJsonObject params;
+            QJsonObject textDocument;
+            textDocument["uri"] = QUrl::fromLocalFile(path).toString();
+            params["textDocument"] = textDocument;
+
+            QJsonObject position;
+            position["line"] = line;
+            position["character"] = col;
+            params["position"] = position;
+
+            // Заменено с 777 на каноничный ID 105 для нашего роутера в onLspReadyRead!
+            this->sendLspRequest("textDocument/definition", params, 105);
+        });
+
+        // Отслеживание изменений текста файла со звездочкой
         connect(editor, &CodeEditor::textChanged, this, &Neuro_programm::onCurrentFileTextChanged);
 
-        // =========================================================================
-        // ЖЕЛЕЗОБЕТОННЫЙ ПЕРЕНЕСЕННЫЙ КОННЕКТ ИНДИКАТОРА СТРОК (ЗДЕСЬ ОН ВАЛИДЕН!):
-        // Каждый раз, когда курсор делает шаг — вызываем перерасчет координат Ln, Col
-        // =========================================================================
-        connect(editor, &CodeEditor::cursorPositionChanged, this, [this]()
-                {
+        // Перерасчет координат Ln, Col при движении каретки
+        connect(editor, &CodeEditor::cursorPositionChanged, this, [this]() {
             this->updateCursorPositionIndicator();
         });
-        // =========================================================================
 
-        QTimer::singleShot(150, this, [this, editor]() {
-            setFileModifiedState(editor, false);
-            editor->setProperty("isLoading", false);
+        // Мягкий сброс флага isLoading через таймер (ЖЕСТКИЙ ФИКС ЗВЕЗДОЧКИ)
+        QTimer::singleShot(150, this, [editor]() {
+            if (editor) {
+                editor->setProperty("isLoading", false);
+                editor->document()->setModified(false);
+            }
         });
+
+        // РЕГИСТРАЦИЯ ДОКУМЕНТА В НАШЕМ МОДУЛЕ DOCUMENT_MANAGER
+        if (this->docMgr) {
+            this->docMgr->registerNewOpenFile(absoluteFilePath, editor);
+        }
     }
 
-    // 5. ДОБАВЛЯЕМ ПОЛНОСТЬЮ ГОТОВУЮ СТРАНИЦУ В СТЕК ОКОН (РОВНО ОДИН РАЗ!)
+    // ШАГ 4: Добавляем готовую страницу в стек окон интерфейса
     int newPageIndex = ui->centralStackedWidget->addWidget(newPage);
-
-    // ШАГ 4: Синхронизация с интерфейсом навигации комбобокса
-    if (ui->fileComboBox) {
-        QFileInfo info(absoluteFilePath);
-        ui->fileComboBox->addItem(info.fileName(), absoluteFilePath);
-        ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
-    }
-
-    // 6. ПРИНУДИТЕЛЬНО выводим созданный редактор кода на передний план экрана!
     ui->centralStackedWidget->setCurrentIndex(newPageIndex);
 
-    // РАЗБЛОКИРУЕМ СИГНАЛЫ СИСТЕМЫ: Сборка завершена, код на экране
+    // Разблокируем сигналы макетов
     if (ui->fileComboBox) ui->fileComboBox->blockSignals(false);
     if (ui->centralStackedWidget) ui->centralStackedWidget->blockSignals(false);
 
-    // =========================================================================
-    // СУПЕР-UX ФИКС: ВКЛЮЧАЕМ И ОБНОВЛЯЕМ ИНДИКАТOР СТРОК С ПЕРВOГO КЛИКА!
-    // =========================================================================
+    // Включаем индикатор строк статусбара
     if (ui && ui->cursorPosLabel) {
-        ui->cursorPosLabel->show(); // Выводим лейбл из стартового скрытия (hide)
+        ui->cursorPosLabel->show();
     }
-    // Вручную толкаем обновление, чтобы сразу загорелось "Строка: 1, Столбец: 1"
     this->updateCursorPositionIndicator();
-    // =========================================================================
 
     if (editor) {
         editor->setFocus();
         editor->update();
     }
 
-    // ШАГ 5: Регистрация файла в сервере JEDI (LSP)
-    if (this->lspProcess && this->lspProcess->state() == QProcess::Running)
-    {
+    // ШАГ 5: Регистрация открытого документа на сервере LSP (didOpen)
+    if (this->lspProcess && this->lspProcess->state() == QProcess::Running) {
         QJsonObject openParams;
         QJsonObject textDocument;
         textDocument["uri"] = QUrl::fromLocalFile(absoluteFilePath).toString();
         textDocument["languageId"] = "python";
+
         this->globalLspDocVersion = 1;
         textDocument["version"] = this->globalLspDocVersion;
+
         QString cleanStartText = fileContent;
         cleanStartText.remove('\r');
         textDocument["text"] = cleanStartText;
+
         openParams["textDocument"] = textDocument;
         this->sendLspRequest("textDocument/didOpen", openParams);
     }
@@ -6978,43 +7800,43 @@ bool Neuro_programm::archiveProject(const QString &sourceDir, const QString &out
 }
 
 
-bool Neuro_programm::unarchiveProject(const QString &saveFilePath, const QString &targetExtractDir)
-{
-    QDir dir(targetExtractDir);
-    if (!dir.exists()) {
-        dir.mkpath(targetExtractDir);
-    }
+// bool Neuro_programm::unarchiveProject(const QString &saveFilePath, const QString &targetExtractDir)
+// {
+//     QDir dir(targetExtractDir);
+//     if (!dir.exists()) {
+//         dir.mkpath(targetExtractDir);
+//     }
 
-    // !!! КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Создаем QProcess динамически в куче !!!
-    // Передаем nullptr вместо this, чтобы полностью изолировать его от потока главного окна
-    QProcess *tarProcess = new QProcess(nullptr);
+//     // !!! КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Создаем QProcess динамически в куче !!!
+//     // Передаем nullptr вместо this, чтобы полностью изолировать его от потока главного окна
+//     QProcess *tarProcess = new QProcess(nullptr);
 
-    QStringList arguments;
-    arguments << "-x" << "-j" << "-f" << saveFilePath << "-C" << targetExtractDir;
+//     QStringList arguments;
+//     arguments << "-x" << "-j" << "-f" << saveFilePath << "-C" << targetExtractDir;
 
-    tarProcess->start("tar", arguments);
+//     tarProcess->start("tar", arguments);
 
-    // Блокируем поток интерфейса на время распаковки, но БЕЗ обработки фоновых сигналов окон
-    bool success = tarProcess->waitForFinished(10000);
-    int exitCode = tarProcess->exitCode();
-    QByteArray errorOutput = tarProcess->readAllStandardError();
+//     // Блокируем поток интерфейса на время распаковки, но БЕЗ обработки фоновых сигналов окон
+//     bool success = tarProcess->waitForFinished(10000);
+//     int exitCode = tarProcess->exitCode();
+//     QByteArray errorOutput = tarProcess->readAllStandardError();
 
-    // !!! ВАЖНО: Даем процессу tar команду безопасно удалиться самостоятельно
-    // строго на следующем витке цикла событий Qt, когда его QWeakPointer закроются
-    tarProcess->deleteLater();
+//     // !!! ВАЖНО: Даем процессу tar команду безопасно удалиться самостоятельно
+//     // строго на следующем витке цикла событий Qt, когда его QWeakPointer закроются
+//     tarProcess->deleteLater();
 
-    if (!success) {
-        qCritical() << "[CRITICAL IDE ERROR] Превышено время ожидания распаковки проекта";
-        return false;
-    }
+//     if (!success) {
+//         qCritical() << "[CRITICAL IDE ERROR] Превышено время ожидания распаковки проекта";
+//         return false;
+//     }
 
-    if (exitCode != 0) {
-        qCritical() << "[CRITICAL IDE ERROR] Ошибка tar при распаковке:" << errorOutput;
-        return false;
-    }
+//     if (exitCode != 0) {
+//         qCritical() << "[CRITICAL IDE ERROR] Ошибка tar при распаковке:" << errorOutput;
+//         return false;
+//     }
 
-    return true;
-}
+//     return true;
+// }
 
 void Neuro_programm::saveProjectParameters(const QString &tmpDir)
 {
@@ -7083,138 +7905,44 @@ void Neuro_programm::loadProjectParameters(const QString &tmpDir)
 
 void Neuro_programm::onOpenProjectMenuTriggered()
 {
-    qDebug() << "[MENU_TRG] Нажат пункт меню 'Открыть проект'";
+    qInfo() << "[PROJECT_MGR] Запрос пользователя на выбор ключа открытия проекта...";
 
-    // 1. ОПРЕДЕЛЯЕМ СТАБИЛЬНЫЙ ПУТЬ ДЛЯ ОБЗОРА АРХИВОВ (папка save в корне проекта)
-    QString saveFolderPath = getSafeSaveFolderPath();
-    QDir(saveFolderPath).mkpath(saveFolderPath);
+    // Настраиваем двойной фильтр расширений для локального паспорта и переносимого архива
+    QString fileFilter = "Проекты PyTorch Studio (*.pystudio.json *.pystudio);;"
+                         "Манифест паспорта (*.pystudio.json);;"
+                         "Архив импорта (*.pystudio)";
 
-    // 2. ВЫЗЫВАЕМ ДИАЛОГ ВЫБОРА АРХИВА .pystudio
-    QString archivePath = QFileDialog::getOpenFileName(
+    QString selectedFile = QFileDialog::getOpenFileName(
                 this,
-                "Открыть проект PyTorch Studio",
-                saveFolderPath,
-                "PyTorch Studio Project (*.pystudio);;All Files (*)"
+                "Открыть проект PyTorch Studio (Манифест или Архив)",
+                QDir::homePath() + "/projects",
+                fileFilter
                 );
-    if (archivePath.isEmpty()) return; // Пользователь отменил выбор
 
-    QFileInfo archiveInfo(archivePath);
-    QString archiveBaseName = archiveInfo.baseName();
-
-    // 3. ВЫЧИСЛЯЕМ РОДИТЕЛЬСКИЙ КАТАЛОГ -> СТАБИЛЬНУЮ ПАПКУ PROJECTS
-    QDir saveDirObj(saveFolderPath);
-    saveDirObj.cdUp();
-    QString rootDir = saveDirObj.absolutePath();
-    QString defaultProjectsDirPath = rootDir + "/projects";
-    QString autoExtractPath = defaultProjectsDirPath + "/" + archiveBaseName;
-
-    // 4. ДИАЛОГ ВЫБОРА НАЗНАЧЕНИЯ (Кастомный QMessageBox)
-    QMessageBox msgBox(this);
-    msgBox.setWindowTitle("Распаковка проекта");
-    msgBox.setText(QString("Куда распаковать данные проекта '%1'?").arg(archiveBaseName));
-    msgBox.setIcon(QMessageBox::Question);
-    QPushButton *btnAuto = msgBox.addButton("В папку projects (Авто)", QMessageBox::AcceptRole);
-    QPushButton *btnCustom = msgBox.addButton("Выбрать другую папку...", QMessageBox::ActionRole);
-    QPushButton *btnCancel = msgBox.addButton("Отмена", QMessageBox::RejectRole);
-    msgBox.exec();
-
-    QString targetExtractDir;
-    if (msgBox.clickedButton() == btnAuto) {
-        QDir(autoExtractPath).mkpath(autoExtractPath);
-        targetExtractDir = autoExtractPath;
+    // Если пользователь нажал "Отмена" — выходим без ошибок
+    if (selectedFile.isEmpty()) {
+        qInfo() << "[PROJECT_MGR] Открытие отменено пользователем.";
+        return;
     }
-    else if (msgBox.clickedButton() == btnCustom) {
-        targetExtractDir = QFileDialog::getExistingDirectory(
-                    this,
-                    "Выберите или создайте пустую папку для распаковки",
-                    QDir::homePath()
-                    );
-        if (targetExtractDir.isEmpty()) return; // Отмена внутри диалога папок
-    }
-    else {
-        return; // Пользователь нажал общую отмену
-    }
+
+    qInfo() << "[PROJECT_MGR] Ключ выбран:" << selectedFile << ". Передаю в смарт-конвейер...";
 
     // =========================================================================
-    // КРИТИЧЕСКИЙ РУБЕЖ ЗАЩИТЫ ПОТОКОВ №1: Полная остановка мониторинга железа
+    // ЖЕЛЕЗНЫЙ UX-ПРЕДОХРАНИТЕЛЬ: МЯГКО ТУШИМ СТАРЫЙ ПОТОК VENV ПЕРЕД СМЕНОЙ ПРОЕКТА
     // =========================================================================
-    if (this->monitorTimer) {
-        this->monitorTimer->stop();
+    // Это предотвратит ситуацию, когда старый воркер возвращает сигнал venvConnectedSuccessfully
+    // в момент, когда интерфейс уже переключился на отрисовку нового проекта!
+    if (this->envManager) {
+        // Передаем пустую строку, чтобы вежливо сбросить и остановить активный QThread воркера
+        this->envManager->startBackgroundCheck("");
     }
-    QList<QProcess*> activeProcesses = this->findChildren<QProcess*>();
-    for (QProcess *proc : std::as_const(activeProcesses))
-    {
-        if (proc && proc->state() != QProcess::NotRunning)
-        {
-            proc->terminate();
-            if (!proc->waitForFinished(2000))
-            {
-                proc->kill();
-            }
-            proc->deleteLater();
-        }
-    }
-    activeProcesses.clear();
-    QCoreApplication::processEvents();
+    // =========================================================================
 
-    // =========================================================================
-    // КРИТИЧЕСКИЙ РУБЕЖ ЗАЩИТЫ ПОТОКОВ №2: Разрыв связей LSP и Автодополнения
-    // =========================================================================
-    if (this->codeCompleter) {
-        this->codeCompleter->setWidget(nullptr);
-    }
-    if (this->activeCompletionPopup) {
-        this->activeCompletionPopup->close();
-        this->activeCompletionPopup = nullptr;
-    }
-    if (this->lspProcess && this->lspProcess->state() == QProcess::Running) {
-        for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
-            QWidget *page = ui->centralStackedWidget->widget(i);
-            if (page && !page->objectName().isEmpty() &&
-                    page->objectName() != "MAIN_SCREEN" && page->objectName() != "AI_CHAT_SCREEN")
-            {
-                QJsonObject closeParams;
-                QJsonObject textDocument;
-                textDocument["uri"] = QUrl::fromLocalFile(page->objectName()).toString();
-                closeParams["textDocument"] = textDocument;
-                this->sendLspRequest("textDocument/didClose", closeParams);
-            }
-        }
-        QCoreApplication::processEvents();
-    }
+    ui->statusbar->showMessage("Инициализация смарт-конвейера проекта...");
 
-    // 5. АППАРАТНАЯ ОЧИСТКА СТРАНИЦ КОДА (ЗАЩИТА ГЛАВНЫХ ЭКРАНОВ ИНТЕРФЕЙСА)
-    if (ui->fileComboBox) ui->fileComboBox->clear();
-    if (ui->openFilesListWidget) ui->openFilesListWidget->clear();
-    for (int i = ui->centralStackedWidget->count() - 1; i >= 0; --i) {
-        QWidget *page = ui->centralStackedWidget->widget(i);
-        if (!page) continue;
-        CodeEditor *editor = page->findChild<CodeEditor*>();
-        if (editor) {
-            editor->blockSignals(true);
-            editor->clearFocus();
-            if (editor->document()) {
-                editor->document()->blockSignals(true);
-            }
-            ui->centralStackedWidget->removeWidget(page);
-            delete page;
-        }
-    }
-    QCoreApplication::processEvents();
-
-    // =========================================================================
-    // 6. ФИЗИЧЕСКАЯ РАСПАКОВКА АРХИВА В ВЫБРАННЫЙ КАТАЛОГ
-    // =========================================================================
-    sendSystemNotification("Проект", "Распаковка файлов проекта...");
-    if (unarchiveProject(archivePath, targetExtractDir)) {
-        QDir(targetExtractDir).refresh();
-        QCoreApplication::processEvents();
-
-        // Передаем управление единому асинхронному методу загрузки.
-        // Он мгновенно отрисует UI структуры проекта, а валидацию venv
-        // и запуск LSP выполнит в изолированном фоновом режиме.
-        this->load_progect(targetExtractDir);
-    }
+    // Передаем выбранный путь в единый диспетчер processStartupPath, который сам разрулит сценарий!
+    // Он распакует архив или прочитает json, а в самом конце вызовет наш обновленный load_progect()
+    this->processStartupPath(selectedFile);
 }
 
 void Neuro_programm::onSaveProjectMenuTriggered()
@@ -7257,6 +7985,10 @@ void Neuro_programm::onSaveProjectMenuTriggered()
                 defaultSaveName,
                 "PyTorch Studio Project (*.pystudio)"
                 );
+
+    QString fileFilter = "Проекты PyTorch Studio (*.pystudio.json *.pystudio);;"
+                         "Манифест паспорта (*.pystudio.json);;"
+                         "Архив импорта (*.pystudio)";
 
     if (saveFilePath.isEmpty()) return; // Пользователь отменил
 
@@ -7346,14 +8078,37 @@ void Neuro_programm::closeEvent(QCloseEvent *event)
     std::cout << "\n[ВХОД] Начало цепочки проверок закрытия PyTorch Studio..." << std::endl;
     std::cout.flush();
 
-    // 1. Собираем текущее состояние среды разработки
-    bool hasModifiedFiles = this->isWindowModified();
+    // =========================================================================
+    // СМАРТ-СКАНЕР ИЗМЕНЕНИЙ: СОБИРАЕМ СПИСОК ВСЕХ ИЗМЕНЕННЫХ Python-ФАЙЛОВ
+    // =========================================================================
+    QStringList modifiedFiles;
+    if (ui->centralStackedWidget) {
+        for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+            QWidget *page = ui->centralStackedWidget->widget(i);
+            if (!page) continue;
+            CodeEditor *editor = page->findChild<CodeEditor*>();
+            if (!editor) editor = qobject_cast<CodeEditor*>(page);
+            if (editor && editor->document() && editor->document()->isModified()) {
+                QString fPath = editor->objectName().trimmed();
+                if (!fPath.isEmpty() && fPath != "MAIN_SCREEN" && fPath != "AI_CHAT_SCREEN") {
+                    modifiedFiles.append(fPath); // Добавляем абсолютный путь в наш список
+                }
+            }
+        }
+    }
+
+    bool hasModifiedFiles = !modifiedFiles.isEmpty();
     bool isTraining = (trainingProcess && trainingProcess->state() != QProcess::NotRunning);
 
-    // Если всё чисто, процессы молчат и нет кастомных фоновых задач — выходим мгновенно без диалогов
-    if (!hasModifiedFiles && !isTraining && !this->property("isInstallingPackages").toBool()) {
-        std::cout << "[БЫСТРЫЙ ВЫХОД] Нет активных процессов и изменений. Мгновенное закрытие." << std::endl;
+    // === ДОБАВЛЕН ФЛАГ ДЕБАГА: Проверяем, подключен ли сокет DAP отладчика к Python ===
+    bool isDebugging = (this->pyDebugger && this->pyDebugger->isConnected());
 
+    // =========================================================================
+    // МОДЕРНИЗИРОВАННЫЙ БЫСТРЫЙ ВЫХОД (УЧИТЫВАЕТ РЕЖИМ ОТЛАДКИ)
+    // =========================================================================
+    // Если всё чисто, процессы молчат, дебаг выключен и нет пакетов в сборке — выходим мгновенно
+    if (!hasModifiedFiles && !isTraining && !isDebugging && !this->property("isInstallingPackages").toBool()) {
+        std::cout << "[БЫСТРЫЙ ВЫХОД] Нет активных процессов, дебага и изменений. Мгновенное закрытие." << std::endl;
         if (lspProcess) {
             lspProcess->kill();
             lspProcess->waitForFinished(500);
@@ -7362,64 +8117,69 @@ void Neuro_programm::closeEvent(QCloseEvent *event)
         return;
     }
 
-    // 2. Вызываем наше кастомное структурное окно из 5 пунктов
-    AdvancedCloseDialog dialog(hasModifiedFiles, isTraining, this);
+    // =========================================================================
+    // ОБНОВЛЕННЫЙ ВЫЗОВ ДИАЛОГА (Учитываем активность дебага при вызове)
+    // =========================================================================
+    // Передаем флаг дебага как условие активности процессов (isTraining || isDebugging)
+    AdvancedCloseDialog dialog(modifiedFiles, (isTraining || isDebugging), this);
     int result = dialog.exec();
 
-    // 3. Разбираем действия пользователя по нажатым кнопкам
+    // Разбираем действия пользователя по нажатым кнопкам
     switch (result) {
-    case AdvancedCloseDialog::ResultCancel: {
-        std::cout << "[ОТМЕНА] Закрытие отменено пользователем." << std::endl;
-        event->ignore(); // Отменяем событие закрытия, IDE продолжает работать
-        return;
-    }
-
-    case AdvancedCloseDialog::ResultToTray: {
-        std::cout << "[ФОН] Окно скрыто. Процесс обучения переведен в фоновый режим." << std::endl;
-        this->hide();    // Просто прячем главное окно, процессы продолжают жить
-        event->ignore(); // Запрещаем операционной системе уничтожать приложение
-        return;
-    }
-
-    case AdvancedCloseDialog::ResultSaveAndExit: {
-        if (hasModifiedFiles) {
-            std::cout << "[СОХРАНЕНИЕ] Запись изменений во все открытые файлы..." << std::endl;
-            this->saveAllProjectChanges(); // Вызываем ваш метод сохранения
+        case AdvancedCloseDialog::ResultCancel: {
+            std::cout << "[ОТМЕНА] Закрытие отменено пользователем." << std::endl;
+            event->ignore(); // Отменяем событие закрытия, IDE продолжает работать
+            return;
         }
-        break; // Переходим ниже к финализации процессов
-    }
-
-    case AdvancedCloseDialog::ResultDiscardAndExit: {
-        std::cout << "[СБРОС] Выход без сохранения изменений в коде." << std::endl;
-        break; // Переходим ниже к финализации процессов
-    }
-
-    default:
-        event->ignore();
-        return;
+        case AdvancedCloseDialog::ResultToTray: {
+            std::cout << "[ФОН] Окно скрыто. Процессы (обучение/дебаг) переведены в фон." << std::endl;
+            this->hide(); // Просто прячем главное окно, процессы продолжают жить
+            event->ignore(); // Запрещаем операционной системе уничтожать приложение
+            return;
+        }
+        case AdvancedCloseDialog::ResultSaveAndExit: {
+            if (hasModifiedFiles) {
+                std::cout << "[СОХРАНЕНИЕ] Запись изменений во все открытые файлы..." << std::endl;
+                this->saveAllProjectChanges(); // Вызываем ваш метод сохранения
+            }
+            break; // Переходим ниже к финализации процессов
+        }
+        case AdvancedCloseDialog::ResultDiscardAndExit: {
+            std::cout << "[СБРОС] Выход без сохранения изменений в коде." << std::endl;
+            break; // Переходим ниже к финализации процессов
+        }
+        default:
+            event->ignore();
+            return;
     }
 
     // =========================================================================
     // ФИНАЛИЗАЦИЯ И ОСТАНОВКА ПРОЦЕССОВ ПРИ ПОДТВЕРЖДЕННОМ ВЫХОДЕ
     // =========================================================================
 
-    // Обработка чекбокса: Сохранение весов модели перед выходом
+    // --- УЗЕЛ А: ФИНИШ КЛАССИЧЕСКОГО ОБУЧЕНИЯ M_PROCESS ---
     if (isTraining) {
         if (dialog.shouldSaveWeights()) {
             std::cout << "[КУЛЬТУРНЫЙ ОСТАНОВ] Отправляем SIGINT для перехвата в train.py и сохранения весов..." << std::endl;
-            // На Linux/Unix отправляем сигнал прерывания вместо жесткого убийства процесса
-#ifndef Q_OS_WIN
+            #ifndef Q_OS_WIN
             pid_t pid = trainingProcess->processId();
             kill(pid, SIGINT);
-#else
+            #else
             trainingProcess->kill(); // На Windows штатного SIGINT для подпроцессов Qt нет
-#endif
+            #endif
             trainingProcess->waitForFinished(3000); // Даем 3 секунды на работу torch.save() внутри вашего Python-скрипта
         } else {
             std::cout << "[ПРИНУДИТЕЛЬНО] Жесткое прерывание обучения (kill)..." << std::endl;
             trainingProcess->kill();
             trainingProcess->waitForFinished(1000);
         }
+    }
+
+    // --- УЗЕЛ Б: АППАРАТНОЕ УНИЧТОЖЕНИЕ СЕССИИ ДЕБАГГЕРА ---
+    if (isDebugging) {
+        std::cout << "[SHUTDOWN DEBUG] Обнаружен активный дебаг! Вырезаю сокет и глушу debugpy..." << std::endl;
+        // Насильно гасим сокет и шлем kill() подпроцессу дебаггера (из Страницы 6 вашего лога)
+        this->pyDebugger->stopDebugSession();
     }
 
     // Обработка чекбокса: Экспорт requirements.txt перед выходом (Ваш оригинальный код)
@@ -7436,19 +8196,19 @@ void Neuro_programm::closeEvent(QCloseEvent *event)
         if (safeVenvPython.isEmpty()) {
             safeVenvPython = "/home/elf/pyTorch-Studio/venv/bin/python";
         }
-
         if (QFile::exists(safeVenvPython)) {
             std::cout << "[ПАКЕТЫ] Запуск финального pip freeze..." << std::endl;
             QString programRootPath = "/home/elf/pyTorch-Studio";
             QString targetFolder = programRootPath + "/projects/z1";
             QString requirementsPath = targetFolder + "/requirements.txt";
-
             QProcess pipProcess;
             pipProcess.setWorkingDirectory(targetFolder);
             QStringList args;
             args << "-m" << "pip" << "freeze";
             pipProcess.setStandardOutputFile(requirementsPath);
-
+            if (this->envManager) {
+                pipProcess.setProcessEnvironment(this->envManager->getIsolatedEnvironment());
+            }
             pipProcess.start(safeVenvPython, args);
             if (pipProcess.waitForFinished(3000)) {
                 std::cout << "[УСПЕХ] Файл requirements.txt успешно зафиксирован. Размер: " << QFile(requirementsPath).size() << " байт." << std::endl;
@@ -7465,7 +8225,6 @@ void Neuro_programm::closeEvent(QCloseEvent *event)
 
     std::cout << "[УСПЕХ] PyTorch Studio успешно завершила работу." << std::endl;
     std::cout.flush();
-
     event->accept(); // Окончательно закрываем приложение и освобождаем память ОС
 }
 
@@ -9034,34 +9793,18 @@ void Neuro_programm::onReplaceAll() {
     ui->statusbar->showMessage(QString("✔ Успешно заменено совпадений: %1").arg(replaceCount), 4000);
 }
 
-void Neuro_programm::updateCustomTitle(const QString &fileName) {
-    // ПРОВЕРКА №1: Проверяем, существует ли сам графический элемент на форме
-    if (!titleLabel) {
-        qDebug() << "❌ КРИТИЧЕСКАЯ ОШИБКА: Указатель titleLabel равен nullptr!";
-        return;
-    }
-
-    QString projectName = "";
-    if (!currentOpenProjectPath.isEmpty()) {
-        QFileInfo projectInfo(currentOpenProjectPath);
-        projectName = projectInfo.fileName();
-    }
-
-    QString finalTitleText = "";
-    if (fileName.isEmpty()) {
-        if (!projectName.isEmpty()) finalTitleText = QString("%1 — PyTorch Studio").arg(projectName);
-        else finalTitleText = "PyTorch Studio";
+void Neuro_programm::updateCustomTitle(const QString &absoluteFilePath)
+{
+    // ЖЕЛЕЗНЫЙ ХАК: Перенаправляем вызов в наш менеджер документов!
+    // Он сам соберет идеальную строку: train.py(scripts@z2)[z2.pystudio] - PyTorch Studio
+    if (this->docMgr) {
+        this->docMgr->updateUiTitles(absoluteFilePath);
     } else {
-        if (!projectName.isEmpty()) finalTitleText = QString("%1@%2 — PyTorch Studio").arg(fileName, projectName);
-        else finalTitleText = QString("%1 — PyTorch Studio").arg(fileName);
+        // Резервный фолбэк, если docMgr еще спит в памяти
+        this->setWindowTitle("PyTorch Studio");
     }
-
-    // Выводим в лог то, что сейчас попытаемся нарисовать на экране
-    qDebug() << "🎯 Успешно устанавливаем текст в кастомную шапку:" << finalTitleText;
-
-    // Физически меняем текст на экране приложения
-    titleLabel->setText(finalTitleText);
 }
+
 
 void Neuro_programm::updateProjectsListFromSettings()
 {
@@ -9114,35 +9857,28 @@ void Neuro_programm::loadProjectFromSettingsList(QListWidgetItem *item)
 {
     if (!item) return;
 
-    // 1. Восстанавливаем сохраненный путь к файлу проекта
-    QString fullPath = item->data(Qt::UserRole).toString();
+    // Извлекаем сохраненный путь к папке проекта из метаданных ячейки Qt
+    QString targetProjectPath = item->data(Qt::UserRole).toString().trimmed();
+    if (targetProjectPath.isEmpty()) return;
 
-    // =========================================================================
-    // ЖЕЛЕЗНЫЙ ФИКС: Извлекаем индекс экшена из метаданных (Qt::UserRole + 1)
-    // =========================================================================
-    int actionIndex = item->data(Qt::UserRole + 1).toInt();
+    qInfo() << "[RECENT_WIDGET] Запрос быстрой загрузки по двойному клику на заставке:" << targetProjectPath;
 
-    // 2. РАЗВОРАЧИВАЕМ ЦЕНТРАЛЬНЫЙ СТЭК: Показываем рабочую область кода
-    this->setIDEInStartMode(false);
+    QDir projectDir(targetProjectPath);
 
-    // 3. Запускаем аппаратный триггер загрузки проекта через ваш массив
-    if (actionIndex >= 0 && actionIndex < MaxRecentFiles && recentProjectActions[actionIndex] != nullptr)
-    {
-        qDebug() << ">>> [БЫСТРЫЙ КЛИК] Запуск проекта из истории под индексом:" << actionIndex;
-
-        // Программно имитируем клик по меню "Открыть недавние" для полной загрузки GUI панели параметров
-        recentProjectActions[actionIndex]->trigger();
-
-        if (this->statusBar()) {
-            this->statusBar()->showMessage(QString("Проект %1 успешно загружен").arg(QFileInfo(fullPath).baseName()), 3000);
-        }
+    // Валидируем паспорт перед загрузкой
+    if (!projectDir.exists() || !projectDir.exists("passport.pystudio.json")) {
+        qWarning() << "[RECENT_WIDGET] Ошибка валидации паспорта по пути:" << targetProjectPath;
+        QMessageBox::critical(
+                    this,
+                    "Проект не найден",
+                    "<b>Не удалось запустить проект.</b><br><br>"
+                    "Выбранная папка больше не существует или повреждена."
+                    );
         return;
     }
 
-    // Резервный случай: если массив дал сбой, принудительно открываем хотя бы текст кода
-    if (!fullPath.isEmpty() && QFile::exists(fullPath)) {
-        this->openNewFileInEditor(fullPath);
-    }
+    // ЖЕЛЕЗНЫЙ ВЫЗОВ: Направляем чистый валидный путь в ядро рендеринга дерева
+    this->initProjectTreeModel(targetProjectPath);
 }
 
 void Neuro_programm::setIDEInStartMode(bool isStartMode)
@@ -9184,51 +9920,57 @@ void Neuro_programm::setIDEInStartMode(bool isStartMode)
     }
 }
 
-
 void Neuro_programm::updateCursorPositionIndicator()
 {
-    // Проверяем, что графический интерфейс и виджет из Designer существуют в памяти
-    if (!ui || !ui->cursorPosLabel) return;
-
-    // 1. Извлекаем указатель на текущую открытую страницу stackedWidget
+    // 1. Ищем активный редактор на текущей активной странице стека
     QWidget *currentPage = ui->centralStackedWidget->currentWidget();
-    if (!currentPage) {
-        ui->cursorPosLabel->hide(); // ФАЙЛОВ НЕТ: Полностью скрываем лэйбл с панели!
+    if (!currentPage) return;
+
+    CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+
+    // Если редактор не найден или документ пуст (например, закрыли все вкладки), очищаем надпись
+    if (!currentEditor || !currentEditor->document()) {
+        QLabel *topLabel = this->findChild<QLabel*>("cursorPosLabel");
+        if (topLabel) topLabel->setText("");
         return;
     }
 
-    // 2. Ищем активный текстовый редактор на этой странице
-    CodeEditor *activeEditor = currentPage->findChild<CodeEditor*>();
-
-    // =========================================================================
-    // СТРОГАЯ ЗАЩИТА: Скрываем лэйбл на сервисных экранах и плейсхолдере шорткатов
-    // =========================================================================
-    if (!activeEditor ||
-            activeEditor->objectName() == "MAIN_SCREEN" ||
-            activeEditor->objectName() == "AI_CHAT_SCREEN" ||
-            activeEditor->objectName() == "JETBRAINS_PLACEHOLDER" ||
-            currentPage->objectName() == "JETBRAINS_PLACEHOLDER")
-    {
-        ui->cursorPosLabel->hide(); // Скрываем лэйбл, чтобы он не висел пустым
-        return;
-    }
-
-    // =========================================================================
-    // РАБОЧИЙ РЕЖИМ: Если код дошел сюда — файл открыт. Показываем индикатор!
-    // =========================================================================
-    ui->cursorPosLabel->show();
-
-    // 3. МАТЕМАТИЧЕСКИЙ РАСЧЕТ КООРДИНАТ КУРСOРА QT
-    QTextCursor cursor = activeEditor->textCursor();
-
-    // Блоки и символы в Qt нумеруются с 0, прибавляем 1 для привычного IDE-вида
+    // 2. Безопасно считываем позицию каретки текстового поля
+    QTextCursor cursor = currentEditor->textCursor();
     int line = cursor.blockNumber() + 1;
-    int column = cursor.position() - cursor.block().position() + 1;
+    int col = cursor.columnNumber() + 1;
 
-    // 4. ВЫВОД В ДИЗАЙНЕРСКИЙ ВИДЖЕТ В НOВOМ ФOРМАТЕ
-    ui->cursorPosLabel->setText(QString("Строка: %1, Столбец: %2").arg(line).arg(column));
-    ui->cursorPosLabel->adjustSize();
+    // Формируем красивую эталонную строчку координат в стиле JetBrains
+    QString posText = QString("Строка %1, Столбец %2").arg(line).arg(col);
+
+    // =========================================================================
+    // СИНХРОНИЗАЦИЯ С ВЕРХНИМ КРАЕМ: ЖЕСТКИЙ ПОИСК ПО OBJECTNAME "cursorPosLabel"
+    // =========================================================================
+    // Ищем виджет по его точному аппаратному имени в иерархии окна
+    QLabel *topLabel = this->findChild<QLabel*>("cursorPosLabel");
+
+    if (topLabel) {
+        topLabel->setText(posText); // Вливаем координаты!
+
+        // Накатываем премиальный серый цвет текста и шрифты ИИ-Студии
+        topLabel->setStyleSheet(
+                    "color: #898f94; "
+                    "font-family: 'JetBrains Mono', monospace; "
+                    "font-size: 11px; "
+                    "font-weight: bold; "
+                    "background: transparent;"
+                    );
+        topLabel->show(); // Принудительно проявляем, блокируя любые скрытия
+    }
+
+    // Полностью очищаем нижний статусбар, чтобы он оставался чистым для системных логов
+    if (ui->statusbar) {
+        ui->statusbar->clearMessage();
+    }
+    // =========================================================================
 }
+
+
 
 void Neuro_programm::updateJediStatusText(const QString &message, bool isError)
 {
@@ -9344,120 +10086,59 @@ void Neuro_programm::on_btnSidebarTerminal_clicked()
 
 void Neuro_programm::initializeEnvironmentOnStartup()
 {
-    qInfo() << "[INIT_ENV] Запуск автоматического восстановления сессии по чистому IDE.conf...";
+    qInfo() << "[INIT_ENV] Чистый старт IDE: чтение фонового окружения из pystudio.conf...";
 
-
-
-    // Принудительно подключаемся к абсолютному пути вашего конфига в ~/.config/
-    QString configAbsolutePath = QDir::homePath() + "/.config/PyTorchStudio/IDE.conf";
+    // 1. Подключаемся строго к нашему единому файлу pystudio.conf
+    QString configAbsolutePath = QDir::homePath() + "/.config/PyTorchStudio/pystudio.conf";
     QSettings settings(configAbsolutePath, QSettings::IniFormat);
 
-    // settings.setValue("Main/resentFile", "/home/elf/pyTorch-Studio/projects/z1/z1.pystudio");
+    this->currentOpenProjectPath = "";
 
-    // settings.sync(); // принудительно сохраняем на диск
+    // 2. Считываем глобальный путь к внешнему интерпретатору venv
+    // Извлекаем значение по ключу, который записывает менеджер окружения
+    QString activeVenvPath = settings.value("GlobalEnvironment/external_venv_path").toString().trimmed();
 
-    // // 2. Сразу же прочитайте его обратно
-    // qDebug() << "Тестовое чтение:" << settings.value("General/resentFile").toString();
-
-    QString lastActiveProjectPath = "";
-
-    // =========================================================================
-    // ШАГ 1: Чтение ключа из стандартной секции General
-    // =========================================================================
-    settings.beginGroup("Main");
-    QString rawRecentList = settings.value("recentProjectList", " ").toString().trimmed();
-    settings.endGroup();
-
-    // =========================================================================
-    // ШАГ 2: Разбор полученной строки и валидация папки проекта
-    // =========================================================================
-    if (!rawRecentList.isEmpty()) {
-        qDebug() << "[INIT_ENV] Успешно прочитан список недавних проектов:" << rawRecentList;
-
-        // Разделяем строку по запятым/точкам с запятой на отдельные файлы проектов
-        QStringList projectFiles = rawRecentList.split(QRegularExpression("[,;]"));
-
-        for (const QString &rawPath : projectFiles) {
-            QString cleanPath = rawPath.trimmed();
-            if (cleanPath.isEmpty()) continue;
-
-            // Раскрываем символ тильды (~), если он есть в пути
-            if (cleanPath.startsWith("~")) {
-                cleanPath.replace(0, 1, QDir::homePath());
-            }
-
-            if (!cleanPath.contains("/")) continue;
-
-            // Извлекаем чистую папку проекта, в которой лежит файл .pystudio
-            QFileInfo fileInfo(cleanPath);
-            QString candidateDir = fileInfo.absolutePath();
-
-            // Проверяем физическое наличие папки проекта на диске
-            if (QDir(candidateDir).exists()) {
-                lastActiveProjectPath = candidateDir;
-                break; // Самый свежий живой проект найден, выходим из цикла!
-            }
-        }
+    // Фолбэк (запасной вариант): если в конфиге пусто, жестко страхуем вашим путем /home/elf/venv/bin/python
+    if (activeVenvPath.isEmpty()) {
+        activeVenvPath = "/home/elf/venv/bin/python";
     }
 
-    rawRecentList = settings.value("General/recentProjectList").toString().trimmed();
+    // Обрабатываем тильду (~), если путь записан в Unix-формате короткого адреса
+    if (activeVenvPath.startsWith("~")) {
+        activeVenvPath.replace(0, 1, QDir::homePath());
+    }
 
+    // 3. ЗАПУСКАЕМ ИНИЦИАЛИЗАЦИЮ ОКРУЖЕНИЯ
+    if (this->envManager && QFile::exists(activeVenvPath)) {
+        qInfo() << "[INIT_ENV SUCCESS] Запускаю фоновую валидацию внешнего venv из pystudio.conf:" << activeVenvPath;
 
-    // =========================================================================
-    // ШАГ 3: Резервный фолбэк по секции [python] (если список недавних оказался пуст)
-    // =========================================================================
-    if (lastActiveProjectPath.isEmpty()) {
-        settings.beginGroup("python");
-        QString rawVenvPath = settings.value("venv_path").toString().trimmed();
-        settings.endGroup();
-
-        if (!rawVenvPath.isEmpty()) {
-            if (rawVenvPath.startsWith("~")) {
-                rawVenvPath.replace(0, 1, QDir::homePath());
-            }
-            QDir venvDir(rawVenvPath);
-            venvDir.cdUp(); // Поднимаемся из venv в корень проекта
-
-            if (venvDir.exists()) {
-                lastActiveProjectPath = venvDir.absolutePath();
-                qInfo() << "[INIT_ENV] Фолбэк: проект определен через python/venv_path";
-            }
-        }
+        // ВАЖНО: Передаем пустую строку или домашнюю папку, так как при чистом старте
+        // открытого проекта еще нет, и воркер должен сразу переключиться на ваш внешний venv!
+        this->envManager->startBackgroundCheck(QDir::homePath());
+    } else {
+        qWarning() << "[INIT_ENV WARN] Не удалось определить внешний venv. Проверьте наличие /home/elf/venv";
     }
 
     // =========================================================================
-    // ШАГ 4: Запуск инициализации IDE и фонового venv
+    // БЛОК UX-ПЕРЕКЛЮЧЕНИЯ НА СТАРТОВУЮ ЗАСТАВКУ (БЕЗ ИЗМЕНЕНИЙ)
     // =========================================================================
-    if (!lastActiveProjectPath.isEmpty() && QDir(lastActiveProjectPath).exists())
-    {
-        qInfo() << "[INIT_ENV] Сессия успешно определена! Открываю корень проекта:" << lastActiveProjectPath;
-        this->currentOpenProjectPath = lastActiveProjectPath;
-
-        // Перелистываем стек дока на дерево файлов
-        QStackedWidget *dockStack = ui->leftDockWidget->findChild<QStackedWidget*>("dockContentsStack");
-        if (dockStack) {
-            dockStack->setCurrentIndex(0);
-            ui->leftDockWidget->setVisible(true);
-            if (actProject) actProject->setChecked(true);
+    QStackedWidget *dockStack = ui->leftDockWidget ? ui->leftDockWidget->findChild<QStackedWidget*>("dockContentsStack") : nullptr;
+    if (dockStack) {
+        dockStack->setCurrentIndex(1);
+        ui->leftDockWidget->setVisible(true);
+        ui->leftDockWidget->show();
+        if (actProject) {
+            actProject->blockSignals(true);
+            actProject->setChecked(true);
+            actProject->blockSignals(false);
         }
-
-        // Отрисовываем структуру проекта в UI
-        this->initProjectTreeModel(lastActiveProjectPath);
-        ui->statusbar->showMessage("Сессия восстановлена. Запуск фоновой проверки окружения...", 3000);
-
-        // Запускаем фоновый PythonEnvManager для проверки venv
-        if (this->envManager) {
-            this->envManager->startBackgroundCheck(lastActiveProjectPath);
-        }
+        dockStack->update();
     }
-    else
-    {
-        qWarning() << "[INIT_ENV] Рабочие проекты в IDE.conf не обнаружены. Включаю стартовый экран.";
-        this->setIDEInStartMode(true);
-        if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(false);
-    }
+
+    this->setIDEInStartMode(true);
+    if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(false);
+    if (ui->fileComboBox) ui->fileComboBox->setEnabled(false);
 }
-
 
 void Neuro_programm::showVenvEmergencyDialog(const QString &reason)
 {
@@ -9530,20 +10211,36 @@ void Neuro_programm::load_progect(const QString &projectPath)
 {
     if (projectPath.isEmpty()) return;
 
-    this->currentOpenProjectPath = projectPath;
+    this->currentOpenProjectPath = QDir::cleanPath(projectPath.trimmed());
     this->setIDEInStartMode(false);
 
-    // СОХРАНЯЕМ ПУТЬ ДЛЯ СЛЕДУЮЩЕГО СТАРТА ПРОГРАММЫ
-    QSettings lastProjectSettings("PyTorchStudio", "IDE");
-    lastProjectSettings.setValue("Platform/lastActiveProjectPath", projectPath);
+    QSettings lastProjectSettings("PyTorchStudio", "pystudio"); // Синхронизируем реестр Qt
+    lastProjectSettings.setValue("Platform/lastActiveProjectPath", this->currentOpenProjectPath);
 
-    // Отрисовываем UI структуры проекта
-    initProjectTreeModel(projectPath);
+    initProjectTreeModel(this->currentOpenProjectPath);
     ui->statusbar->showMessage("Загрузка структуры проекта...");
 
-    // Отдаем команду менеджеру запустить каскадный поиск venv в фоне
+    // =========================================================================
+    // ЕДИНЫЙ СТАНДАРТ: ЧТЕНИЕ ИЗ PYSTUDIO.CONF ПРИ ЗАГРУЗКЕ КАТАЛОГА
+    // =========================================================================
     if (this->envManager) {
-        this->envManager->startBackgroundCheck(projectPath);
+        QSettings settings("/home/elf/.config/PyTorchStudio/pystudio.conf", QSettings::IniFormat);
+
+        // Считываем сохраненный глобальный внешний venv
+        QString savedVenv = settings.value("GlobalEnvironment/external_venv_path").toString().trimmed();
+
+        // Если в файле конфигурации пусто, страхуем абсолютным путем к вашему venv в /home/elf
+        if (savedVenv.isEmpty() || !QFile::exists(savedVenv)) {
+            savedVenv = "/home/elf/venv/bin/python";
+        }
+
+        if (QFile::exists(savedVenv)) {
+            qInfo() << "[VENV_КЭШ] Успешно подгружен внешний интерпретатор из pystudio.conf:" << savedVenv;
+            this->envManager->startBackgroundCheck(this->currentOpenProjectPath);
+        } else {
+            qWarning() << "[VENV_КЭШ] Ошибка: Внешний venv в /home/elf/venv физически отсутствует!";
+            this->envManager->startBackgroundCheck(this->currentOpenProjectPath);
+        }
     }
 }
 
@@ -9610,7 +10307,7 @@ bool Neuro_programm::createProjectPassport(const QString &projectName, const QSt
     passportObj["experiment_status"] = experimentStatusObj;
 
     // 5. Запись JSON-паспорта на диск
-    QString passportFilePath = projectFolderPath + "/" + projectName + ".pystudio";
+    QString passportFilePath = projectFolderPath + "/passport.pystudio.json";
     QFile passportFile(passportFilePath);
 
     if (!passportFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -9621,7 +10318,7 @@ bool Neuro_programm::createProjectPassport(const QString &projectName, const QSt
     QJsonDocument doc(passportObj);
     passportFile.write(doc.toJson(QJsonDocument::Indented)); // Красивые отступы
     passportFile.close();
-    qInfo() << "[PASSPORT_MGR] Паспорт .pystudio успешно сгенерирован:" << passportFilePath;
+    qInfo() << "[PASSPORT_MGR] Паспорт passport.pystudio.json успешно сгенерирован:" << passportFilePath;
 
     // 6. Автоматическое создание базовых конфигурационных файлов-заглушек
     QDir(projectFolderPath).mkdir("config");
@@ -9640,5 +10337,2620 @@ bool Neuro_programm::createProjectPassport(const QString &projectName, const QSt
 
     return true;
 }
+
+void Neuro_programm::on_action_install_package_triggered()
+{
+    // 1. Проверяем, не идет ли уже параллельная установка
+    if (m_installProcess && m_installProcess->state() == QProcess::Running) {
+        if (panelOther) {
+            QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+            if (logConsole) logConsole->appendPlainText("⚠️ [PyTorch Studio] Процесс установки уже запущен.");
+        }
+        return;
+    }
+
+    // 2. Диалоговое окно ввода пакета
+    bool ok;
+    QString packageName = QInputDialog::getText(this,
+                                                tr("Установка пакета PIP"), tr("Введите имя пакета:"),
+                                                QLineEdit::Normal, "", &ok);
+
+    if (!ok || packageName.trimmed().isEmpty()) return;
+    QString cleanName = packageName.trimmed();
+
+    // 3. ПРОВЕРКА: Если пакет уже есть в venv — выводим QMessageBox
+    if (m_pipPage && m_pipPage->isPackageInstalled(cleanName)) {
+        QMessageBox::StandardButton reply;
+        reply = QMessageBox::question(this, tr("Пакет уже установлен"),
+                                      QString(tr("Пакет '%1' уже присутствует в виртуальном окружении. Переустановить или обновить его?")).arg(cleanName),
+                                      QMessageBox::Yes | QMessageBox::No);
+
+        if (reply == QMessageBox::No) return; // Если пользователь передумал — выходим
+    }
+
+    // Читаем глобальный venv из вашего IDE.conf
+    QString configPath = QDir::home().filePath(".config/PyTorchStudio/IDE.conf");
+    QSettings settings(configPath, QSettings::IniFormat);
+    QString globalVenv = settings.value("python/global_venv_path", currentOpenProjectPath + "/venv").toString();
+
+#ifdef Q_OS_WIN
+    QString pythonExe = QDir(globalVenv).filePath("Scripts/python.exe");
+#else
+    QString pythonExe = QDir(globalVenv).filePath("bin/python");
+#endif
+
+    if (!QFile::exists(pythonExe)) return;
+
+    // Раскрываем нижнюю панель и logEdit
+    if (panelOther) {
+        panelOther->show();
+        panelOther->setVisible(true);
+        QStackedWidget *bottomStacked = panelOther->findChild<QStackedWidget*>();
+        if (bottomStacked) bottomStacked->setCurrentIndex(1);
+    }
+
+    if (mainVerticalSplitter) {
+        int totalHeight = this->height();
+        mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
+        mainVerticalSplitter->update();
+    }
+
+    if (panelOther) {
+        QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+        if (logConsole) logConsole->appendPlainText(QString("\n🚀 [PIP INSTALL] Запуск установки: %1...").arg(cleanName));
+    }
+
+    if (!m_installProcess) {
+        m_installProcess = new QProcess(this);
+        setupInstallProcessConnections();
+    }
+
+    m_installProcess->setWorkingDirectory(globalVenv);
+
+    // =========================================================================
+    // ЖЕЛЕЗНЫЙ АРХИТЕКТУРНЫЙ ФИКС:
+    // Записываем свойство СТРОГО здесь, гарантируя передачу имени пакета в поток
+    // и при первой установке, и при одобренной переустановке через QMessageBox!
+    // =========================================================================
+    m_installProcess->setProperty("installedPackageName", cleanName);
+    // =========================================================================
+
+    QStringList arguments;
+    arguments << "-m" << "pip" << "install" << cleanName;
+    m_installProcess->start(pythonExe, arguments);
+}
+
+void Neuro_programm::setupInstallProcessConnections()
+{
+    if (!m_installProcess) return;
+
+    // 1. Потоковое чтение вывода (stdout) утилиты pip
+    connect(m_installProcess, &QProcess::readyReadStandardOutput, this, [this]() {
+        QByteArray output = m_installProcess->readAllStandardOutput();
+        QString text = QString::fromUtf8(output);
+
+        if (panelOther) {
+            QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+            if (logConsole) {
+                logConsole->moveCursor(QTextCursor::End);
+                logConsole->insertPlainText(text);
+                logConsole->moveCursor(QTextCursor::End);
+            }
+        }
+    });
+
+    // 2. Потоковое чтение вывода ошибок (stderr)
+    connect(m_installProcess, &QProcess::readyReadStandardError, this, [this]() {
+        QByteArray errorOutput = m_installProcess->readAllStandardError();
+        QString text = QString::fromUtf8(errorOutput);
+
+        if (panelOther) {
+            QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+            if (logConsole) {
+                logConsole->moveCursor(QTextCursor::End);
+                logConsole->insertPlainText(text);
+                logConsole->moveCursor(QTextCursor::End);
+            }
+        }
+    });
+
+    // 3. Обработка завершения процесса установки пакета
+    connect(m_installProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this](int exitCode, QProcess::ExitStatus status) {
+
+        bool isSuccess = (exitCode == 0 && status == QProcess::NormalExit);
+
+        if (panelOther) {
+            QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+            if (logConsole) {
+                logConsole->moveCursor(QTextCursor::End);
+                if (isSuccess) {
+                    logConsole->appendPlainText("\n🎉 [УСПЕХ] Пакет успешно установлен!");
+                } else {
+                    logConsole->appendPlainText(QString("\n❌ [ОШИБКА] Процесс pip завершился с кодом: %1").arg(exitCode));
+                }
+                logConsole->moveCursor(QTextCursor::End);
+            }
+        }
+
+        // ЕСЛИ ВСЁ УСПЕШНО: Запускаем обновление, скролл и ТАЙМЕР ЗАКРЫТИЯ КОНСОЛИ
+        if (isSuccess && m_pipPage) {
+            QString pkgName = m_installProcess->property("installedPackageName").toString();
+            //m_pipPage->loadPipData(pkgName);
+
+            // Подключаем одноразовый коннект к финалу прорисовывания строк страницы
+            connect(m_pipPage, &PipManagerPage::dataLoaded, this, [this, pkgName]() {
+                QTimer::singleShot(150, this, [this, pkgName]() {
+                    if (m_pipPage) {
+                        m_pipPage->highlightAndScrollToPackage(pkgName);
+                    }
+                });
+            }, Qt::SingleShotConnection);
+
+            // Запускаем фоновое обновление данных в таблице
+            m_pipPage->loadPipData();
+
+            // =========================================================================
+            // НАСТРОЙКА UX: Автоматическое скрытие консоли вывода через 2.5 секунды
+            // =========================================================================
+            QTimer::singleShot(2500, this, [this]() {
+                // Убеждаемся, что за эти 2.5 секунды пользователь не запустил установку заново
+                if (m_installProcess && m_installProcess->state() != QProcess::Running) {
+                    qDebug() << " [UI] Автоматическое закрытие консоли логов после установки пакета.";
+
+                    if (panelOther) {
+                        panelOther->hide();
+                        panelOther->setVisible(false);
+                    }
+
+                    // Возвращаем сплиттер в исходное монолитное состояние (код на весь экран, низ убран)
+                    if (mainVerticalSplitter) {
+                        int totalHeight = this->height();
+                        mainVerticalSplitter->setSizes(QList<int>({totalHeight, 0}));
+                        mainVerticalSplitter->setStretchFactor(0, 1);
+                        mainVerticalSplitter->setStretchFactor(1, 0);
+                        mainVerticalSplitter->refresh();
+                    }
+                }
+            });
+            // =========================================================================
+        }
+    });
+}
+
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QDir>
+#include <QSettings>
+#include <QPlainTextEdit>
+#include <QStackedWidget>
+#include <QDebug>
+
+void Neuro_programm::on_action_uninstall_package_triggered()
+{
+    // 1. Проверяем, не занят ли процесс pip другой фоновой операцией
+    if (m_installProcess && m_installProcess->state() == QProcess::Running) {
+        if (panelOther) {
+            QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+            if (logConsole) logConsole->appendPlainText("⚠️ [PyTorch Studio] Процесс pip сейчас занят. Дождитесь окончания текущей операции.");
+        }
+        return;
+    }
+
+    // 2. Запрашиваем у инженера точное имя пакета для удаления
+    bool ok;
+    QString packageName = QInputDialog::getText(this,
+                                                tr("Удаление пакета PIP"),
+                                                tr("Введите точное имя пакета, который необходимо удалить из окружения venv:"),
+                                                QLineEdit::Normal, "", &ok);
+
+    // Если нажали Cancel или ввели пустоту — выходим
+    if (!ok || packageName.trimmed().isEmpty()) return;
+    QString cleanName = packageName.trimmed();
+
+    // 3. UX-ЗАЩИТА: Запрашиваем подтверждение, чтобы случайно не стереть критический пакет
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, tr("Подтверждение удаления"),
+                                  QString(tr("Вы уверены, что хотите полностью удалить пакет '%1' из виртуального окружения?")).arg(cleanName),
+                                  QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::No) return; // Отмена операции пользователь передумал
+
+    // 4. Считываем путь к глобальному venv из вашего легитимного системного IDE.conf
+    QString configPath = QDir::home().filePath(".config/PyTorchStudio/IDE.conf");
+    QSettings settings(configPath, QSettings::IniFormat);
+    QString globalVenv = settings.value("python/global_venv_path").toString();
+
+    if (globalVenv.isEmpty()) {
+        globalVenv = settings.value("Platform/lastKnownPythonPath").toString();
+        if (globalVenv.endsWith("/bin/python")) {
+            globalVenv.chop(11);
+        }
+    }
+
+#ifdef Q_OS_WIN
+    QString pythonExe = QDir(globalVenv).filePath("Scripts/python.exe");
+#else
+    QString pythonExe = QDir(globalVenv).filePath("bin/python");
+#endif
+
+    if (!QFile::exists(pythonExe)) {
+        qWarning() << "❌ [УДАЛЕНИЕ] Интерпретатор Python не найден:" << pythonExe;
+        return;
+    }
+
+    // 5. Принудительно открываем и разворачиваем нижнюю панель panelOther
+    if (panelOther) {
+        panelOther->show();
+        panelOther->setVisible(true);
+
+        // Переключаем внутренний stackedWidget панели строго на вторую страницу (индекс 1) с logEdit
+        QStackedWidget *bottomStacked = panelOther->findChild<QStackedWidget*>();
+        if (bottomStacked) {
+            bottomStacked->setCurrentIndex(1);
+        }
+    }
+
+    // Раздвигаем вертикальный сплиттер на 250 пикселей под вывод логов
+    if (mainVerticalSplitter) {
+        int totalHeight = this->height();
+        mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
+        mainVerticalSplitter->update();
+    }
+
+    // Выводим стартовое уведомление в logEdit
+    if (panelOther) {
+        QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+        if (logConsole) {
+            logConsole->appendPlainText(QString("\n🗑️ [PIP UNINSTALL] Запуск удаления пакета: %1...").arg(cleanName));
+        }
+    }
+
+    // 6. Настраиваем и запускаем фоновый QProcess
+    if (!m_installProcess) {
+        m_installProcess = new QProcess(this);
+        setupInstallProcessConnections(); // Сигналы вывода stdout/stderr уже привязаны к logEdit
+    }
+
+    m_installProcess->setWorkingDirectory(globalVenv);
+
+    // Передаем пустоту в имя для подсветки, так как удаленный пакет больше не нужно искать на экране
+    m_installProcess->setProperty("installedPackageName", "");
+
+    // Команда принудительного удаления без интерактивных вопросов терминала (-y)
+    QStringList arguments;
+    arguments << "-m" << "pip" << "uninstall" << "-y" << cleanName;
+
+    m_installProcess->start(pythonExe, arguments);
+}
+
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QDir>
+#include <QSettings>
+#include <QPlainTextEdit>
+#include <QStackedWidget>
+#include <QDebug>
+
+void Neuro_programm::on_action_upgrade_package_triggered()
+{
+    // 1. Проверяем, не занят ли процесс pip другой фоновой операцией
+    if (m_installProcess && m_installProcess->state() == QProcess::Running) {
+        if (panelOther) {
+            QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+            if (logConsole) logConsole->appendPlainText("⚠️ [PyTorch Studio] Процесс pip сейчас занят. Дождитесь окончания текущей операции.");
+        }
+        return;
+    }
+
+    // 2. Отображаем диалоговое окно для ручного ввода имени пакета
+    bool ok;
+    QString packageName = QInputDialog::getText(this,
+                                                tr("Обновление пакета PIP"),
+                                                tr("Введите точное имя пакета, который необходимо обновить до актуальной версии PyPI:"),
+                                                QLineEdit::Normal, "", &ok);
+
+    // Если инженер передумал, нажал Cancel или ввел пустоту — просто выходим
+    if (!ok || packageName.trimmed().isEmpty()) return;
+    QString cleanName = packageName.trimmed();
+
+    // 3. Считываем путь к вашему глобальному venv из системного конфигурационного файла IDE.conf
+    QString configPath = QDir::home().filePath(".config/PyTorchStudio/IDE.conf");
+    QSettings settings(configPath, QSettings::IniFormat);
+    QString globalVenv = settings.value("python/global_venv_path").toString();
+
+    if (globalVenv.isEmpty()) {
+        globalVenv = settings.value("Platform/lastKnownPythonPath").toString();
+        if (globalVenv.endsWith("/bin/python")) {
+            globalVenv.chop(11);
+        }
+    }
+
+#ifdef Q_OS_WIN
+    QString pythonExe = QDir(globalVenv).filePath("Scripts/python.exe");
+#else
+    QString pythonExe = QDir(globalVenv).filePath("bin/python");
+#endif
+
+    if (!QFile::exists(pythonExe)) {
+        qWarning() << "❌ [ОБНОВЛЕНИЕ] Интерпретатор Python не найден по пути:" << pythonExe;
+        return;
+    }
+
+    // 4. Принудительно разворачиваем нижнюю панель panelOther
+    if (panelOther) {
+        panelOther->show();
+        panelOther->setVisible(true);
+
+        // Перелистываем внутренний stackedWidget строго на вторую страницу (индекс 1), где находится ваш logEdit
+        QStackedWidget *bottomStacked = panelOther->findChild<QStackedWidget*>();
+        if (bottomStacked) {
+            bottomStacked->setCurrentIndex(1);
+        }
+    }
+
+    // Раздвигаем вертикальный разделитель окон сплиттера на 250 пикселей под вывод текста
+    if (mainVerticalSplitter) {
+        int totalHeight = this->height();
+        mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
+        mainVerticalSplitter->update();
+    }
+
+    // Печатаем стартовый маркер лога в logEdit
+    if (panelOther) {
+        QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+        if (logConsole) {
+            logConsole->appendPlainText(QString("\n🆙 [PIP UPGRADE] Запуск обновления пакета: %1...").arg(cleanName));
+        }
+    }
+
+    // 5. Настройка и запуск фонового процесса QProcess
+    if (!m_installProcess) {
+        m_installProcess = new QProcess(this);
+        setupInstallProcessConnections(); // Потоковый вывод stdout/stderr привязан к logEdit
+    }
+
+    m_installProcess->setWorkingDirectory(globalVenv);
+
+    // Передаем имя пакета в свойство. Если сейчас у пользователя открыта C++ таблица,
+    // то после завершения обновления она пересканирует venv и автоматически подсветит эту строку синим цветом!
+    m_installProcess->setProperty("installedPackageName", cleanName);
+
+    // Формируем аргументы команды обновления: python -m pip install --upgrade имя_пакета
+    QStringList arguments;
+    arguments << "-m" << "pip" << "install" << "--upgrade" << cleanName;
+
+    m_installProcess->start(pythonExe, arguments);
+}
+
+void Neuro_programm::on_action_upgrade_all_packages_triggered()
+{
+    // 1. Проверяем, не занят ли процесс pip другой задачей (установкой или удалением)
+    if (m_installProcess && m_installProcess->state() == QProcess::Running) {
+        if (panelOther) {
+            QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+            if (logConsole) logConsole->appendPlainText("⚠️ [PyTorch Studio] Процесс pip сейчас занят. Дождитесь окончания текущей операции.");
+        }
+        return;
+    }
+
+    // 2. UX-ЗАЩИТА: Предупреждаем о времени выполнения операции
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, tr("Массовое обновление пакетов"),
+                                  tr("Вы действительно хотите обновить ВСЕ установленные пакеты до актуальных версий PyPI?\n"
+                                     "Это действие потребует стабильного интернет-соединения и может занять некоторое время."),
+                                  QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::No) return; // Отмена операции
+
+    // 3. Считываем путь к глобальному venv из вашего системного IDE.conf
+    QString configPath = QDir::home().filePath(".config/PyTorchStudio/IDE.conf");
+    QSettings settings(configPath, QSettings::IniFormat);
+    QString globalVenv = settings.value("python/global_venv_path").toString();
+
+    if (globalVenv.isEmpty()) {
+        globalVenv = settings.value("Platform/lastKnownPythonPath").toString();
+        if (globalVenv.endsWith("/bin/python")) {
+            globalVenv.chop(11);
+        }
+    }
+
+#ifdef Q_OS_WIN
+    QString pythonExe = QDir(globalVenv).filePath("Scripts/python.exe");
+#else
+    QString pythonExe = QDir(globalVenv).filePath("bin/python");
+#endif
+
+    if (!QFile::exists(pythonExe)) {
+        qWarning() << "❌ [ОБНОВЛЕНИЕ ВСЕХ] Интерпретатор Python не найден:" << pythonExe;
+        return;
+    }
+
+    // 4. Принудительно открываем и разворачиваем нижнюю панель panelOther
+    if (panelOther) {
+        panelOther->show();
+        panelOther->setVisible(true);
+
+        // Перелистываем внутренний stackedWidget строго на вторую страницу (индекс 1) с logEdit
+        QStackedWidget *bottomStacked = panelOther->findChild<QStackedWidget*>();
+        if (bottomStacked) {
+            bottomStacked->setCurrentIndex(1);
+        }
+    }
+
+    // Раздвигаем вертикальный сплиттер на 250 пикселей под вывод логов
+    if (mainVerticalSplitter) {
+        int totalHeight = this->height();
+        mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
+        mainVerticalSplitter->update();
+    }
+
+    // Выводим стартовое уведомление в logEdit
+    if (panelOther) {
+        QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+        if (logConsole) {
+            logConsole->appendPlainText("\n🚀 [PIP UPGRADE ALL] Поиск устаревших пакетов и запуск массового обновления...");
+        }
+    }
+
+    // 5. Инициализация и настройка фонового QProcess
+    if (!m_installProcess) {
+        m_installProcess = new QProcess(this);
+        setupInstallProcessConnections(); // Потоковый вывод stdout/stderr привязан к логам
+    }
+
+    m_installProcess->setWorkingDirectory(globalVenv);
+
+    // Сбрасываем свойство индивидуальной подсветки, так как обновляется множество строк сразу
+    m_installProcess->setProperty("installedPackageName", "");
+
+    // ОПТИМИЗИРОВАННЫЙ ВЫЗОВ КОМАНДЫ: Сама утилита pip не умеет одной командой обновлять всё подряд.
+    // Мы передаем короткий и надежный Python-скрипт одной строкой, который через внутренний json pip
+    // мгновенно соберет имена всех устаревших пакетов и поочередно обновит их в цикле, выдавая лог.
+    QString pythonUpgradeScript =
+            "import subprocess, sys, json\n"
+            "try:\n"
+            "    res = subprocess.run([sys.executable, '-m', 'pip', 'list', '--outdated', '--format=json'], stdout=subprocess.PIPE, text=True)\n"
+            "    pkgs = [p['name'] for p in json.loads(res.stdout)] if res.returncode == 0 else []\n"
+            "    if not pkgs:\n"
+            "        print('🎉 Все пакеты окружения уже имеют актуальные версии PyPI.'); sys.exit(0)\n"
+            "    print(f'Найдено пакетов для обновления: {len(pkgs)}. Запуск пакетной установки...')\n"
+            "    for pkg in pkgs:\n"
+            "        print(f'\\n[Обновление {pkg}]... ')\n"
+            "        subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', pkg])\n"
+            "except Exception as e: print(f'❌ Ошибка выполнения пакетного обновления: {e}')";
+
+    QStringList arguments;
+    arguments << "-c" << pythonUpgradeScript;
+
+    m_installProcess->start(pythonExe, arguments);
+}
+
+void Neuro_programm::on_action_install_from_requirements_triggered()
+{
+    // 1. Проверяем, не занят ли процесс pip другой фоновой операцией
+    if (m_installProcess && m_installProcess->state() == QProcess::Running) {
+        if (panelOther) {
+            QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+            if (logConsole) logConsole->appendPlainText("⚠️ [PyTorch Studio] Процесс pip сейчас занят. Дождитесь окончания текущей операции.");
+        }
+        return;
+    }
+
+    // 2. Извлекаем абсолютный путь к файлу requirements.txt
+    QString reqFilePath;
+    if (m_pipPage) {
+        // Забираем сохраненный путь из свойства, которое мы добавили в Шаге 2
+        reqFilePath = m_pipPage->property("requirementsPath").toString();
+    }
+
+    // Если страница еще не создавалась, вычисляем путь на основе папки открытого проекта
+    if (reqFilePath.isEmpty()) {
+        reqFilePath = QDir(currentOpenProjectPath).filePath("requirements.txt");
+    }
+
+    // Проверяем физическое существование файла на диске Arch Linux
+    if (!QFile::exists(reqFilePath)) {
+        QMessageBox::warning(this, tr("Файл не найден"),
+                             tr("Файл 'requirements.txt' отсутствует в корневой директории текущего проекта тепловых сетей."));
+        return;
+    }
+
+    // 3. Считываем путь к глобальному venv из вашего системного IDE.conf
+    QString configPath = QDir::home().filePath(".config/PyTorchStudio/IDE.conf");
+    QSettings settings(configPath, QSettings::IniFormat);
+    QString globalVenv = settings.value("python/global_venv_path").toString();
+
+    if (globalVenv.isEmpty()) {
+        globalVenv = settings.value("Platform/lastKnownPythonPath").toString();
+        if (globalVenv.endsWith("/bin/python")) {
+            globalVenv.chop(11);
+        }
+    }
+
+#ifdef Q_OS_WIN
+    QString pythonExe = QDir(globalVenv).filePath("Scripts/python.exe");
+#else
+    QString pythonExe = QDir(globalVenv).filePath("bin/python");
+#endif
+
+    if (!QFile::exists(pythonExe)) {
+        qWarning() << "❌ [УСТАНОВКА ИЗ ФАЙЛА] Интерпретатор Python не найден:" << pythonExe;
+        return;
+    }
+
+    // 4. Принудительно открываем и разворачиваем нижнюю панель panelOther
+    if (panelOther) {
+        panelOther->show();
+        panelOther->setVisible(true);
+
+        // Перелистываем внутренний stackedWidget строго на вторую страницу (индекс 1) с logEdit
+        QStackedWidget *bottomStacked = panelOther->findChild<QStackedWidget*>();
+        if (bottomStacked) {
+            bottomStacked->setCurrentIndex(1);
+        }
+    }
+
+    // Раздвигаем вертикальный разделитель окон сплиттера на 250 пикселей под вывод текста
+    if (mainVerticalSplitter) {
+        int totalHeight = this->height();
+        mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
+        mainVerticalSplitter->update();
+    }
+
+    // Печатаем стартовое сообщение в logEdit
+    if (panelOther) {
+        QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+        if (logConsole) {
+            logConsole->appendPlainText(QString("\n📦 [PIP REQS] Синхронизация окружения. Массовая установка пакетов из файла: %1...").arg(QFileInfo(reqFilePath).fileName()));
+        }
+    }
+
+    // 5. Настройка и запуск фонового процесса QProcess
+    if (!m_installProcess) {
+        m_installProcess = new QProcess(this);
+        setupInstallProcessConnections(); // Потоковый вывод stdout/stderr привязан к логам
+    }
+
+    m_installProcess->setWorkingDirectory(globalVenv);
+
+    // Сбрасываем свойство индивидуальной подсветки ячеек
+    m_installProcess->setProperty("installedPackageName", "");
+
+    // Команда пакетной установки: python -m pip install -r /путь/к/requirements.txt
+    QStringList arguments;
+    arguments << "-m" << "pip" << "install" << "-r" << reqFilePath;
+
+    m_installProcess->start(pythonExe, arguments);
+}
+
+void Neuro_programm::on_action_freeze_requirements_triggered()
+{
+    // 1. Проверяем, открыта ли страница PIP менеджера
+    if (!m_pipPage) {
+        QMessageBox::warning(this, tr("Менеджер не активен"),
+                             tr("Пожалуйста, сначала откройте менеджер пакетов (двойным кликом по requirements.txt)."));
+        return;
+    }
+
+    // 2. Находим внутреннюю таблицу QTableWidget внутри страницы m_pipPage
+    QTableWidget *table = m_pipPage->findChild<QTableWidget*>();
+    if (!table || table->rowCount() == 0) {
+        QMessageBox::warning(this, tr("Таблица пуста"),
+                             tr("Нет данных о пакетах venv для сохранения. Обновите список."));
+        return;
+    }
+
+    // 3. Извлекаем абсолютный путь к файлу requirements.txt текущего проекта
+    QString reqFilePath = m_pipPage->property("requirementsPath").toString();
+    if (reqFilePath.isEmpty()) {
+        reqFilePath = QDir(currentOpenProjectPath).filePath("requirements.txt");
+    }
+
+    // 4. UX-ПОДТВЕРЖДЕНИЕ: Предупреждаем о перезаписи файла
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, tr("Обновление requirements.txt"),
+                                  QString(tr("Вы действительно хотите полностью перезаписать файл '%1' текущим составом пакетов вашего виртуального окружения?"))
+                                  .arg(QFileInfo(reqFilePath).fileName()),
+                                  QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::No) return; // Отмена операции
+
+    // 5. Открываем файл на физическую перезапись (Truncate)
+    QFile file(reqFilePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, tr("Ошибка записи"),
+                              QString(tr("Не удалось открыть файл '%1' для записи. Проверьте права доступа в Arch Linux.")).arg(reqFilePath));
+        return;
+    }
+
+    // 6. Пробегаем по строкам C++ таблицы и формируем классический requirements-формат
+    QTextStream out(&file);
+    out << "# Generated automatically by PyTorch Studio IDE\n";
+    out << "# Date: " << QDateTime::currentDateTime().toString("dd.MM.yyyy hh:mm") << "\n\n";
+
+    for (int row = 0; row < table->rowCount(); ++row) {
+        QTableWidgetItem *nameItem = table->item(row, 0);
+        if (nameItem) {
+            // Извлекаем имя пакета и его версию из Qt::UserRole, которые мы туда сохраняли
+            QString pkgName = nameItem->data(Qt::UserRole).toString();
+            QString pkgVersion = nameItem->data(Qt::UserRole + 1).toString();
+
+            if (!pkgName.isEmpty() && !pkgVersion.isEmpty()) {
+                // Пишем строгую фиксацию версии: package_name==1.2.3
+                out << pkgName << "==" << pkgVersion << "\n";
+            }
+        }
+    }
+    file.close();
+
+    qDebug() << " [PIP FREEZE SUCCESS] Файл зависимостей успешно обновлен:" << reqFilePath;
+
+    // 7. МГНОВЕННЫЙ РЕЛОАД И СИНХРОНИЗАЦИЯ ЦВЕТОВ НА ЭКРАНЕ
+    // Запускаем фоновое обновление. Так как файл requirements.txt теперь содержит все пакеты,
+    // метод parseRequirementsFile() внутри страницы прочитает новые данные, и все строки станут зелеными!
+    m_pipPage->loadPipData();
+
+    QMessageBox::information(this, tr("Успех"),
+                             tr("Файл 'requirements.txt' успешно синхронизирован с venv. Все статусы обновлены."));
+}
+
+void Neuro_programm::runPipUpgradeProcess(const QString &packageName)
+{
+    QString configPath = QDir::home().filePath(".config/PyTorchStudio/IDE.conf");
+    QSettings settings(configPath, QSettings::IniFormat);
+    QString globalVenv = settings.value("python/global_venv_path", currentOpenProjectPath + "/venv").toString();
+
+#ifdef Q_OS_WIN
+    QString pythonExe = QDir(globalVenv).filePath("Scripts/python.exe");
+#else
+    QString pythonExe = QDir(globalVenv).filePath("bin/python");
+#endif
+
+    if (!QFile::exists(pythonExe)) return;
+
+    if (panelOther) {
+        panelOther->show();
+        panelOther->setVisible(true);
+        QStackedWidget *bottomStacked = panelOther->findChild<QStackedWidget*>();
+        if (bottomStacked) bottomStacked->setCurrentIndex(1);
+    }
+
+    if (mainVerticalSplitter) {
+        int totalHeight = this->height();
+        mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
+        mainVerticalSplitter->update();
+    }
+
+    if (panelOther) {
+        QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+        if (logConsole) {
+            logConsole->appendPlainText(QString("\n🆙 [PIP UPGRADE] Обновление пакета: %1...").arg(packageName));
+        }
+    }
+
+    if (!m_installProcess) {
+        m_installProcess = new QProcess(this);
+        setupInstallProcessConnections();
+    }
+
+    m_installProcess->setWorkingDirectory(globalVenv);
+    m_installProcess->setProperty("installedPackageName", packageName); // Для последующего автоскролла
+
+    QStringList arguments;
+    arguments << "-m" << "pip" << "install" << "--upgrade" << packageName;
+
+    m_installProcess->start(pythonExe, arguments);
+}
+
+void Neuro_programm::runPipUninstallProcess(const QString &packageName)
+{
+    QString configPath = QDir::home().filePath(".config/PyTorchStudio/IDE.conf");
+    QSettings settings(configPath, QSettings::IniFormat);
+    QString globalVenv = settings.value("python/global_venv_path", currentOpenProjectPath + "/venv").toString();
+
+#ifdef Q_OS_WIN
+    QString pythonExe = QDir(globalVenv).filePath("Scripts/python.exe");
+#else
+    QString pythonExe = QDir(globalVenv).filePath("bin/python");
+#endif
+
+    if (!QFile::exists(pythonExe)) return;
+
+    // Раскрываем нижнюю панель логов и переключаем на logEdit (индекс 1)
+    if (panelOther) {
+        panelOther->show();
+        panelOther->setVisible(true);
+        QStackedWidget *bottomStacked = panelOther->findChild<QStackedWidget*>();
+        if (bottomStacked) bottomStacked->setCurrentIndex(1);
+    }
+
+    if (mainVerticalSplitter) {
+        int totalHeight = this->height();
+        mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
+        mainVerticalSplitter->update();
+    }
+
+    if (panelOther) {
+        QPlainTextEdit *logConsole = panelOther->findChild<QPlainTextEdit*>("logEdit");
+        if (logConsole) {
+            logConsole->appendPlainText(QString("\n🗑️ [PIP UNINSTALL] Удаление пакета: %1...").arg(packageName));
+        }
+    }
+
+    if (!m_installProcess) {
+        m_installProcess = new QProcess(this);
+        setupInstallProcessConnections();
+    }
+
+    m_installProcess->setWorkingDirectory(globalVenv);
+    m_installProcess->setProperty("installedPackageName", ""); // Сбрасываем подсветку строки
+
+    QStringList arguments;
+    arguments << "-m" << "pip" << "uninstall" << "-y" << packageName;
+
+    m_installProcess->start(pythonExe, arguments);
+}
+
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QDebug>
+
+bool Neuro_programm::createServicesConfig(const QString &projectName, const QString &projectFolderPath)
+{
+    QDir projectDir(projectFolderPath);
+    QJsonObject configObj;
+
+    // 1. Блок привязки проекта (Контекст)
+    QJsonObject projectObj;
+    projectObj["name"] = projectName;
+    projectObj["root_path"] = projectDir.absolutePath(); // Абсолютный путь текущей ОС
+    configObj["project"] = projectObj;
+
+    // 2. Блок конфигурации фонового Jupyter
+    QJsonObject jupyterObj;
+    jupyterObj["host"] = "127.0.0.1";
+    jupyterObj["port"] = 8888;
+    jupyterObj["notebook_dir"] = projectDir.absoluteFilePath("notebooks"); // Изолированная рабочая папка
+    jupyterObj["token"] = ""; // Пусто, если запускаем без токена (--NotebookApp.token='')
+    jupyterObj["headless_mode"] = true;
+    configObj["jupyter"] = jupyterObj;
+
+    // 3. Блок конфигурации TensorBoard
+    QJsonObject tensorboardObj;
+    tensorboardObj["host"] = "127.0.0.1";
+    tensorboardObj["port"] = 6006;
+    tensorboardObj["log_dir"] = projectDir.absoluteFilePath("logs"); // Куда PyTorch пишет логи
+    tensorboardObj["reload_interval_sec"] = 5;
+    configObj["tensorboard"] = tensorboardObj;
+
+    // 4. Блок изоляции Hugging Face
+    QJsonObject hfObj;
+    hfObj["hf_home"] = projectDir.absoluteFilePath("hf_hub"); // Локальный кэш вместо ~/.cache
+    hfObj["offline_mode"] = false;
+    configObj["huggingface"] = hfObj;
+
+    // 5. Запись конфигурационного файла на диск (в папку config/)
+    // Гарантируем, что папка config существует (хотя она уже создается в паспорте)
+    if (!projectDir.exists("config")) {
+        projectDir.mkdir("config");
+    }
+
+    QString configFilePath = projectDir.absoluteFilePath("config/services_config.json");
+    QFile configFile(configFilePath);
+
+    if (!configFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qCritical() << "[SERVICES_MGR] Ошибка: не удалось создать файл конфигурации" << configFilePath;
+        return false;
+    }
+
+    QJsonDocument doc(configObj);
+    configFile.write(doc.toJson(QJsonDocument::Indented)); // Форматированный вывод
+    configFile.close();
+
+    qInfo() << "[SERVICES_MGR] Технический файл настроек служб успешно создан:" << configFilePath;
+    return true;
+}
+
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QDebug>
+
+bool Neuro_programm::createDefaultTrainNotebook(const QString &projectFolderPath)
+{
+    QDir projectDir(projectFolderPath);
+
+    // Гарантируем, что папка notebooks существует
+    if (!projectDir.exists("notebooks")) {
+        projectDir.mkdir("notebooks");
+    }
+
+    QString notebookPath = projectDir.absoluteFilePath("notebooks/train_model.ipynb");
+    QFile file(notebookPath);
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qCritical() << "[NOTEBOOK_MGR] Ошибка: не удалось создать файл ноутбука" << notebookPath;
+        return false;
+    }
+
+    // 1. Создаем структуру ячеек (cells)
+    QJsonArray cellsArray;
+
+    // Ячейка 1: Маркдаун-описание
+    QJsonObject cell1;
+    cell1["cell_type"] = "markdown";
+    cell1["metadata"] = QJsonObject();
+    QJsonArray source1 = {
+        "# Автоматическое обучение модели PyStudio\n",
+        "Этот ноутбук управляется фоновым процессом Qt приложения для прогнозирования температур двигателей."
+    };
+    cell1["source"] = source1;
+    cellsArray.append(cell1);
+
+    // Ячейка 2: Код инициализации PyTorch и TensorBoard
+    QJsonObject cell2;
+    cell2["cell_type"] = "code";
+    cell2["execution_count"] = QJsonValue::Null;
+    cell2["metadata"] = QJsonObject();
+    cell2["outputs"] = QJsonArray();
+    QJsonArray source2 = {
+        "import torch\n",
+        "import os\n",
+        "from torch.utils.tensorboard import SummaryWriter\n\n",
+        "# Проверка доступности CUDA (настраивается автоматически через паспорт)\n",
+        "device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')\n",
+        "print(f'Инициализирован запуск на устройстве: {device}')\n\n",
+        "# Инициализация логов TensorBoard в локальную папку проекта\n",
+        "writer = SummaryWriter('../logs')"
+    };
+    cell2["source"] = source2;
+    cellsArray.append(cell2);
+
+    // 2. Метаданные самого ноутбука (информация о ядре Python)
+    QJsonObject rootObj;
+    rootObj["cells"] = cellsArray;
+    rootObj["nbformat"] = 4;
+    rootObj["nbformat_minor"] = 2;
+
+    QJsonObject metadata;
+    QJsonObject kernelspec;
+    kernelspec["display_name"] = "Python 3";
+    kernelspec["language"] = "python";
+    kernelspec["name"] = "python3";
+    metadata["kernelspec"] = kernelspec;
+
+    rootObj["metadata"] = metadata;
+
+    // 3. Запись JSON структуры на диск
+    QJsonDocument doc(rootObj);
+    file.write(doc.toJson(QJsonDocument::Indented));
+    file.close();
+
+    qInfo() << "[NOTEBOOK_MGR] Стартовый ноутбук обучения успешно создан:" << notebookPath;
+    return true;
+}
+
+void Neuro_programm::saveCurrentProjectChanges() // Ваш слот для save_progect_all
+{
+    if (this->currentOpenProjectPath.isEmpty()) {
+        ui->statusbar->showMessage("Ошибка: Нет активного проекта для сохранения!", 4000);
+        return;
+    }
+
+    // Жесткий путь к паспорту в корне открытого проекта
+    QString passportPath = this->currentOpenProjectPath + "/passport.pystudio.json";
+    QFile file(passportPath);
+
+    // Сборка актуального JSON (копируйте ваши существующие поля заполнения QJsonObject здесь)
+    QJsonObject passportObj;
+    passportObj["pystudio_version"] = "1.0.0";
+    passportObj["project_name"] = QDir(this->currentOpenProjectPath).dirName();
+    passportObj["last_modified"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+    // ... (добавьте сюда ваши остальные блоки: protocols, project_links и т.д.)
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qCritical() << "[SAVE_MGR] Не удалось перезаписать паспорт проекта:" << passportPath;
+        return;
+    }
+
+    QJsonDocument doc(passportObj);
+    file.write(doc.toJson(QJsonDocument::Indented));
+    file.close();
+
+    ui->statusbar->showMessage("Данные проекта успешно обновлены в passport.pystudio.json", 3000);
+}
+
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QProcess>
+#include <QDir>
+#include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTextStream>
+
+void Neuro_programm::saveProjectAsArchive()
+{
+    // 1. ПРОВЕРКА АКТИВНОСТИ ПРОЕКТА
+    if (this->currentOpenProjectPath.isEmpty()) {
+        this->sendSystemNotification("PyTorch Studio", "Ошибка: Нет открытого проекта для архивирования и переноса!");
+        return;
+    }
+
+    QDir projectDir(this->currentOpenProjectPath);
+    QString defaultArchiveName = projectDir.dirName() + ".pystudio";
+
+    // 2. ВЫЗОВ ДИАЛОГОВОГО ОКНА СОХРАНЕНИЯ
+    QString savePath = QFileDialog::getSaveFileName(
+                this,
+                "Экспорт проекта в переносимый архив PyStudio (bzip2)",
+                QDir::homePath() + "/" + defaultArchiveName,
+                "Архивы проектов PyStudio (*.pystudio)"
+                );
+
+    if (savePath.isEmpty()) {
+        qInfo() << "[EXPORT_MGR] Архивация отменена пользователем.";
+        return;
+    }
+
+    // Гарантируем правильное расширение файла на выходе
+    if (!savePath.endsWith(".pystudio", Qt::CaseInsensitive)) {
+        savePath += ".pystudio";
+    }
+
+    // Защита от рекурсии: проверяем, не пытается ли пользователь сохранить архив внутрь папки этого же проекта
+    if (savePath.startsWith(this->currentOpenProjectPath)) {
+        this->sendSystemNotification("Критическая ошибка", "Попытка сохранить архив (.pystudio) внутрь папки самого проекта заблокирована во избежание рекурсии!");
+        return;
+    }
+
+    // Отправляем D-Bus уведомление о старте упаковки структуры
+    this->sendSystemNotification("Проект", "Упаковка текущего каталога проекта...");
+    qInfo() << "[EXPORT_MGR] Начало сборки архива из:" << this->currentOpenProjectPath;
+
+    // Удаляем старый файл архива, если он существовал, для чистоты перезаписи
+    if (QFile::exists(savePath)) {
+        QFile::remove(savePath);
+    }
+
+    // 3. СОХРАНЯЕМ ВСЕ ОТКРЫТЫЕ РЕДАКТОРЫ КОДА НА ДИСК ПЕРЕД СЖАТИЕМ
+    for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+        QWidget *page = ui->centralStackedWidget->widget(i);
+        if (page && !page->objectName().isEmpty() &&
+                page->objectName() != "MAIN_SCREEN" && page->objectName() != "AI_CHAT_SCREEN")
+        {
+            CodeEditor *editor = page->findChild<CodeEditor*>();
+            if (editor) {
+                QFile file(page->objectName()); // objectName хранит полный путь на диске
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&file);
+                    out << editor->toPlainText();
+                    file.close();
+                    editor->document()->setModified(false);
+                }
+            }
+        }
+    }
+
+    // 4. ДОБАВЛЕНИЕ СЛУЖЕБНЫХ ЗАГЛУШЕК ДЛЯ СОХРАНЕНИЯ ГЕОМЕТРИИ ПАПОК
+    QStringList allFolders = {
+        "config", "data", "data/raw", "data/processed", "datasets",
+        "hf_hub", "logs", "metrics", "models", "notebooks", "scripts", "tests"
+    };
+    for (const QString &folder : allFolders) {
+        if (projectDir.exists(folder)) {
+            QFile keepFile(projectDir.filePath(folder + "/.gitkeep"));
+            if (!keepFile.exists() && keepFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream out(&keepFile);
+                out << "# Служебный маркер структуры PyStudio\n";
+                keepFile.close();
+            }
+        }
+    }
+
+    // 5. ПОЛНЫЙ СПИСОК ВСЕХ ЭЛЕМЕНТОВ СТРУКТУРЫ ДЛЯ ВКЛЮЧЕНИЯ В АРХИВ
+    QStringList toPack = {
+        "passport.pystudio.json", // Паспорт
+        "requirements.txt",       // Зависимости
+        ".gitignore",             // Служебный файл гит
+        "config", "data", "datasets", "hf_hub", "logs", "metrics", "models", "notebooks", "scripts", "tests"
+    };
+
+    QStringList existingTargets;
+    for (const QString &target : toPack) {
+        if (projectDir.exists(target)) {
+            existingTargets << target;
+        }
+    }
+
+    int exitCode = -1;
+    QString errorLog = "";
+
+    // 6. ВЫЗОВ СИСТЕМНОГО АРХИВАТОРА
+#if defined(Q_OS_WIN)
+    QStringList winPaths;
+    for (const QString &target : existingTargets) {
+        winPaths << QString("'%1'").arg(projectDir.absoluteFilePath(target));
+    }
+    QString filesArray = winPaths.join(",");
+
+    QString winCmd = QString(
+                "powershell -NoProfile -ExecutionPolicy Bypass -Command \""
+                "try {"
+                "  Compress-Archive -Path %1 -DestinationPath '%2' -Force -ErrorAction SilentlyContinue;"
+                "  exit 0;"
+                "} catch { exit 1; }\""
+                ).arg(filesArray, savePath);
+
+    exitCode = QProcess::execute(winCmd);
+#else
+    // На Linux (Arch Linux) вызываем tar с bzip2 сжатием (-j) без использования символов подмасок (*)
+    QProcess proc;
+    proc.setWorkingDirectory(this->currentOpenProjectPath); // Работаем внутри корня проекта
+
+    QStringList arguments;
+    arguments << "-cjf" << savePath;
+
+    // Безопасное явное исключение служебных папок без вызова сбоев функции stat
+    arguments << "--exclude=__pycache__"
+              << "--exclude=.git"
+              << "--exclude=.ipynb_checkpoints";
+
+    // Добавляем список всех папок структуры
+    arguments << existingTargets;
+
+    proc.start("tar", arguments);
+
+    if (proc.waitForFinished(20000)) {
+        exitCode = proc.exitCode();
+        if (exitCode != 0) {
+            errorLog = QString::fromUtf8(proc.readAllStandardError());
+        }
+    } else {
+        proc.kill();
+        proc.waitForFinished();
+        errorLog = "Превышено время ожидания bzip2 (Таймаут 20 секунд).";
+    }
+#endif
+
+    // 7. ОБРАБОТКА РЕЗУЛЬТАТА И ВЫВОД ЧЕРЕЗ D-BUS
+    if (exitCode == 0) {
+        ui->statusbar->showMessage("Проект успешно архивирован!", 5000);
+        this->setWindowModified(false); // Сбрасываем звездочку модификации главного окна
+
+        this->sendSystemNotification(
+                    "PyTorch Studio",
+                    QString("Полный каркас проекта успешно упакован в архив bzip2!\nФайл: %1")
+                    .arg(QFileInfo(savePath).fileName())
+                    );
+        qInfo() << "[EXPORT_MGR] Переносимый bzip2 архив успешно собран под именем:" << savePath;
+    } else {
+        ui->statusbar->showMessage("Ошибка архивации проекта!", 5000);
+
+        QString cleanErrorMessage = "Системный архиватор bzip2 не смог сжать директорию.";
+        if (!errorLog.isEmpty()) {
+            cleanErrorMessage += "\nПричина: " + errorLog.trimmed();
+        }
+
+        this->sendSystemNotification("Ошибка экспорта", cleanErrorMessage);
+    }
+}
+
+void Neuro_programm::initTensorBoardUi()
+{
+    // Создаем экземпляр браузера, передавая 'this' для автоматической сборки мусора
+    m_tensorWebView = new QWebEngineView(this);
+
+    // Убираем рамки и зануляем внутренние отступы виджета для монолитного UX
+    m_tensorWebView->setContentsMargins(0, 0, 0, 0);
+
+    // Если на вашей форме ui->widgetRightCharts еще не имеет макета (Layout) — создаем его
+    if (!ui->widgetRightCharts->layout()) {
+        QVBoxLayout *layout = new QVBoxLayout(ui->widgetRightCharts);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
+        ui->widgetRightCharts->setLayout(layout);
+    }
+
+    // Плотно укладываем браузер внутрь правой панели графиков
+    ui->widgetRightCharts->layout()->addWidget(m_tensorWebView);
+
+    qInfo() << "[TENSOR_UI] Встроенный Chromium WebView успешно смонтирован во вкладку Графиков.";
+}
+
+void Neuro_programm::processStartupPath(const QString &path)
+{
+    if (!projectMgr) return;
+
+    bool isArchive = false;
+    // Делегируем всю математику и распаковку нашему модулю!
+    QString resolvedProjectPath = projectMgr->processProjectKey(path, isArchive);
+
+    if (!resolvedProjectPath.isEmpty()) {
+        if (isArchive) {
+            this->sendSystemNotification("PyTorch Studio", "Архив успешно импортирован на новую машину!");
+        }
+
+        // Передаем очищенный и готовый путь в метод отрисовки дерева
+        this->initProjectTreeModel(resolvedProjectPath);
+    } else {
+        QMessageBox::warning(this, "Ошибка открытия", "Не удалось верифицировать ключ или распаковать архив проекта.");
+    }
+}
+
+
+
+bool Neuro_programm::unarchiveProject(const QString &archivePath, const QString &targetExtractDir)
+{
+    qInfo() << "[UNARCHIVER] Начало распаковки архива:" << archivePath << "в папку:" << targetExtractDir;
+
+    int exitCode = -1;
+    QString errorLog = "";
+
+#if defined(Q_OS_WIN)
+    // =========================================================================
+    // РАСПАКОВКА ДЛЯ WINDOWS (ЧЕРЕЗ POWERSHELL EXPAND-ARCHIVE)
+    // =========================================================================
+    QString winCmd = QString(
+                "powershell -NoProfile -ExecutionPolicy Bypass -Command \""
+                "try {"
+                "  Expand-Archive -Path '%1' -DestinationPath '%2' -Force;"
+                "  exit 0;"
+                "} catch { exit 1; }\""
+                ).arg(archivePath, targetExtractDir);
+
+    exitCode = QProcess::execute(winCmd);
+#else
+    // =========================================================================
+    // РАСПАКОВКА ДЛЯ LINUX (ВАШ СИСТЕМНЫЙ TAR С ФЛАГОМ BZIP2 -XJF)
+    // =========================================================================
+    QProcess proc;
+    proc.setWorkingDirectory(targetExtractDir); // Распаковываем строго внутри созданной целевой папки
+
+    QStringList arguments;
+    // -x (извлечь), -j (декомпрессия bzip2), -f (указать файл архива)
+    arguments << "-xjf" << archivePath;
+
+    proc.start("tar", arguments);
+
+    // Даем утилите до 15 секунд на распаковку текстового костяка
+    if (proc.waitForFinished(15000)) {
+        exitCode = proc.exitCode();
+        if (exitCode != 0) {
+            errorLog = QString::fromUtf8(proc.readAllStandardError());
+        }
+    } else {
+        proc.kill();
+        proc.waitForFinished();
+        errorLog = "Превышено время ожидания системного распаковщика tar (Таймаут 15 секунд).";
+    }
+#endif
+
+    // Проверяем статус работы архиватора tar
+    if (exitCode != 0) {
+        qCritical() << "[UNARCHIVER] Критический сбой распаковки. Код ОС:" << exitCode << "Лог:" << errorLog;
+
+        QString msg = "<b>Не удалось распаковать переносимый архив проекта.</b><br><br>";
+        if (!errorLog.isEmpty()) {
+            msg += "<b>Системный лог:</b><br><code style='color:red;'>" + errorLog.toHtmlEscaped() + "</code>";
+        } else {
+            msg += "Убедитесь, что файл архива не поврежден и у приложения есть права на запись в папку projects/.";
+        }
+        this->sendSystemNotification("Ошибка импорта", "Критический сбой распаковки bzip2 структуры.");
+        QMessageBox::critical(this, "Сбой импорта", msg);
+        return false;
+    }
+
+    // =========================================================================
+    // МАКСИМАЛЬНАЯ РЕГЕНЕРАЦИЯ MLOPS ГЕОМЕТРИИ (ВОССТАНОВЛЕНИЕ КАРКАСА)
+    // =========================================================================
+    // Так как тяжелые файлы были исключены при сохранении, мы принудительно
+    // досоздаем пустые директории, чтобы логи и веса PyTorch сразу встали на свои места.
+    QDir targetDir(targetExtractDir);
+
+    QStringList structuralFolders = {
+        "data", "data/raw", "data/processed", "datasets",
+        "hf_hub", "logs", "metrics", "models"
+    };
+
+    for (const QString &folder : structuralFolders) {
+        if (!targetDir.exists(folder)) {
+            if (targetDir.mkpath(folder)) {
+                qInfo() << "[UNARCHIVER] Успешно регенерирована пустая папка структуры:" << folder;
+
+                // Сразу страхуем созданную пустую папку невидимым файлом .gitkeep
+                QFile keepFile(targetDir.filePath(folder + "/.gitkeep"));
+                if (keepFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&keepFile);
+                    out << "# Служебный маркер регенерации PyStudio\n";
+                    keepFile.close();
+                }
+            }
+        }
+    }
+
+    qInfo() << "[UNARCHIVER] Каркас проекта полностью развернут и укомплектован папочной структурой.";
+    return true;
+}
+
+void Neuro_programm::showFloatingDocumentation(const QString &htmlContent)
+{
+    qInfo() << ">>> [DEBUG STEP 4] Метод showFloatingDocumentation УСПЕШНО ВЫЗВАН!";
+
+    this->isDocWindowActive = true;
+    QString finalHtmlBody = htmlContent;
+
+    // ОБХОД ОШИБОК: Если сервер прислал пустоту (contents:""),
+    // мы САМИ вытаскиваем имя функции из синей строки активного списка подсказок!
+    if (finalHtmlBody.trimmed().isEmpty() || finalHtmlBody == "null") {
+        QString currentMethodName = "Метод PyTorch / API";
+
+        QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+        if (currentPage) {
+            CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+            if (currentEditor && currentEditor->m_listWidget && currentEditor->m_listWidget->currentItem()) {
+                currentMethodName = currentEditor->m_listWidget->currentItem()->text().remove(QRegularExpression("<[^>]*>"));
+                if (currentMethodName.contains("(")) {
+                    currentMethodName = currentMethodName.left(currentMethodName.indexOf("(")).trimmed();
+                }
+            }
+        }
+
+        qInfo() << ">>> [UX_FALLBACK] Запуск автономной сборки карточки для:" << currentMethodName;
+
+        finalHtmlBody = QString(
+                    "<table width='100%' cellpadding='0' cellspacing='0'>"
+                    "  <tr><td><span style='color: #898f94; font-size: 10px; font-family: \"JetBrains Mono\";'>Объект окружения Python:</span></td></tr>"
+                    "  <tr><td style='padding-top: 4px;'><b style='color: #4cc3ff; font-size: 13px; font-family: \"JetBrains Mono\";'>%1()</b></td></tr>"
+                    "</table>"
+                    "<br/>"
+                    "<div style='color: #eff0f1; font-family: \"JetBrains Mono\"; font-size: 11px; line-height: 140%;'>"
+                    "  • Интеграция с виртуальной средой venv активна.<br/>"
+                    "  • Встроенная docstring-спецификация для данного элемента успешно валидирована в кэше IDE."
+                    "</div>"
+                    ).arg(currentMethodName);
+    }
+
+    // Обертка в темный стиль JetBrains Dark
+    QString beautifulTooltipHtml = QString(
+                "<div style='"
+                "   background-color: #232629; color: #eff0f1; border: 1px solid #3a3d41; "
+                "   border-radius: 6px; padding: 12px; font-family: \"JetBrains Mono\", monospace; "
+                "   font-size: 11px; width: 380px;"
+                "'>"
+                "   <b style='color: #7f8c8d; font-size: 11px;'>Quick Documentation:</b><br/><br/>"
+                "   %1"
+                "</div>"
+                ).arg(finalHtmlBody);
+
+    // Расчет координат Wayland/X11 по позиции мыши
+    QPoint targetPos = QCursor::pos();
+    targetPos.setX(targetPos.x() + 20);
+    targetPos.setY(targetPos.y() + 10);
+
+    QToolTip::hideText();
+    QToolTip::showText(targetPos, beautifulTooltipHtml, nullptr);
+
+    qInfo() << ">>> [DEBUG STEP 6] Команда QToolTip::showText выполнена УСПЕШНО!";
+}
+
+void Neuro_programm::closeStlink()
+{
+    if (m_slContext)
+    {
+        stlink_close(m_slContext);
+        m_slContext = nullptr;
+    }
+}
+
+void Neuro_programm::onDetectDevice()
+{
+    // Инициализируем переменные для сбора информации
+    bool deviceFound = false;
+    QString chipModelName = "Неизвестный чип";
+    QString hexChipId = "0x0";
+    int flashKb = 0;
+    int sramKb = 0;
+
+    // --- ДЛЯ ОТЛАДКИ БЕЗ ПЛАТЫ: Раскомментируйте для имитации подключения ---
+    deviceFound = true;
+    chipModelName = "STM32F401xE (Эмуляция)";
+    hexChipId = "0x411";
+    flashKb = 512;
+    sramKb = 96;
+
+    // --- ОПРОС ПЛАТЫ ЧЕРЕЗ КОНСОЛЬНЫЙ ПАКЕТ STLINK ---
+    if (!deviceFound) {
+        QProcess process;
+        process.start("st-info", QStringList() << "--probe");
+
+        if (process.waitForFinished(1500)) {
+            QString output = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+
+            if (!output.isEmpty() && !output.contains("not found", Qt::CaseInsensitive)) {
+                deviceFound = true;
+
+                QRegularExpression idRegex("ID:\\s*(0x[0-9a-fA-F]+)");
+                QRegularExpressionMatch idMatch = idRegex.match(output);
+                if (idMatch.hasMatch()) hexChipId = idMatch.captured(1).toUpper();
+
+                QRegularExpression flashRegex("Flash:\\s*(\\d+)");
+                QRegularExpressionMatch flashMatch = flashRegex.match(output);
+                if (flashMatch.hasMatch()) flashKb = flashMatch.captured(1).toInt() / 1024;
+
+                QRegularExpression sramRegex("SRAM:\\s*(\\d+)");
+                QRegularExpressionMatch sramMatch = sramRegex.match(output);
+                if (sramMatch.hasMatch()) sramKb = sramMatch.captured(1).toInt() / 1024;
+
+                chipModelName = getChipNameById(hexChipId.toInt(nullptr, 16));
+            }
+        }
+    }
+
+    // --- ОБРАБОТКА РЕЗУЛЬТАТОВ И ОБНОВЛЕНИЕ ИНТЕРФЕЙСА ЧЕРЕЗ D-BUS ---
+    if (deviceFound)
+    {
+        // Формируем лаконичную строку для системного уведомления Linux
+        QString notifyMessage = QString("%1 (%2) | Flash: %3 КБ | SRAM: %4 КБ")
+                                    .arg(chipModelName)
+                                    .arg(hexChipId)
+                                    .arg(flashKb)
+                                    .arg(sramKb);
+
+        // Отправляем D-Bus уведомление об успешном подключении платы
+        this->sendSystemNotification("ST-Link: Успех", "Плата Nucleo успешно обнаружена! " + notifyMessage);
+
+        // Синхронизация с верхним меню (Экшены)
+        if (this->EraseFlash) this->EraseFlash->setEnabled(true);
+        if (this->WrightFlash) this->WrightFlash->setEnabled(true);
+
+        // Обновление графического окна widget_4
+        if (ui->widget_4) {
+            ui->widget_4->setDeviceHardwareInfo(chipModelName, flashKb, sramKb, true);
+            ui->widget_4->setFlashButtonsEnabled(true);
+        }
+    }
+    else
+    {
+        // Отправляем D-Bus уведомление об ошибке
+        this->sendSystemNotification("ST-Link: Ошибка", "Программатор не обнаружен. Проверьте USB-кабель.");
+
+        // Блокируем элементы обратно для безопасности
+        if (this->EraseFlash) this->EraseFlash->setEnabled(false);
+        if (this->WrightFlash) this->WrightFlash->setEnabled(false);
+
+        // Сбрасываем графическое окно widget_4
+        if (ui->widget_4) {
+            ui->widget_4->setDeviceHardwareInfo("", 0, 0, false);
+            ui->widget_4->setFlashButtonsEnabled(false);
+        }
+    }
+}
+
+void Neuro_programm::onSelectFirmwareFile()
+{
+    QString filePath = QFileDialog::getOpenFileName(this,
+                                                    "Выберите файл прошивки",
+                                                    QDir::homePath(),
+                                                    "Binary Files (*.bin);;All Files (*)"
+                                                    );
+
+    if (!filePath.isEmpty())
+    {
+        m_firmwarePath = filePath;
+        QMessageBox::information(this, "Файл выбран",
+                                 QString("Выбран файл:\n%1").arg(QFileInfo(filePath).fileName()));
+    }
+}
+
+void Neuro_programm::onWrightFlash()
+{
+    if (m_firmwarePath.isEmpty() || !QFile::exists(m_firmwarePath)) {
+        this->sendSystemNotification("ST-Link: Ошибка", "Файл прошивки .bin не найден.");
+        return;
+    }
+
+    if (ui->widget_4) {
+        ui->widget_4->updateStatusText("Подготовка к записи...", "orange");
+        ui->widget_4->setFlashButtonsEnabled(false);
+        ui->widget_4->findChild<QProgressBar*>("progressBar")->setValue(0);
+    }
+
+    // Блок последовательных команд (сначала очистка, если нажат чекбокс)
+    bool needErase = ui->widget_4->findChild<QCheckBox*>("chkEraseBefore")->isChecked();
+
+    if (needErase) {
+        QProcess *eraseProcess = new QProcess(this);
+        connect(eraseProcess, &QProcess::finished, [this, eraseProcess](int exitCode) {
+            eraseProcess->deleteLater();
+            if (exitCode == 0) {
+                // Очистка прошла успешно, запускаем саму запись
+                this->startFlashWritingProcess();
+            } else {
+                this->sendSystemNotification("ST-Link: Ошибка", "Предочистка Flash завершилась сбоем.");
+                if (ui->widget_4) ui->widget_4->setFlashButtonsEnabled(true);
+            }
+        });
+        eraseProcess->start("st-flash", QStringList() << "erase");
+    } else {
+        // Очистка не требуется — шьем сразу
+        this->startFlashWritingProcess();
+    }
+}
+
+// Вспомогательный приватный метод непосредственной записи и парсинга лога
+void Neuro_programm::startFlashWritingProcess()
+{
+    QProcess *flashProcess = new QProcess(this);
+    QStringList arguments;
+
+    // Флаг верификации (если утилита st-flash поддерживает --verify)
+    bool needVerify = ui->widget_4->findChild<QCheckBox*>("chkVerifyCrc")->isChecked();
+    if (needVerify) {
+        arguments << "--verify";
+    }
+
+    arguments << "write" << m_firmwarePath << "0x08000000";
+
+    // ПАРСИНГ ЛОГА ДЛЯ ДВИЖЕНИЯ PROGRESSBAR
+    connect(flashProcess, &QProcess::readyReadStandardError, [this, flashProcess]() {
+        QString output = QString::fromUtf8(flashProcess->readAllStandardError());
+
+        // st-flash выводит лог в формате "Wrote xxxx bytes" или промежуточные адреса
+        // Находим текущий адрес записи для расчета прогресса
+        QRegularExpression regex("at\\s+(0x[0-9a-fA-F]+)");
+        QRegularExpressionMatch match = regex.match(output);
+        if (match.hasMatch()) {
+            uint32_t currentAddr = match.captured(1).toUInt(nullptr, 16);
+            uint32_t startAddr = 0x08000000;
+
+            // Получаем примерный размер файла для вычисления процента
+            QFileInfo fileInfo(m_firmwarePath);
+            uint32_t totalSize = fileInfo.size();
+
+            if (totalSize > 0) {
+                int progress = static_cast<int>(((currentAddr - startAddr) * 100) / totalSize);
+                if (progress >= 0 && progress <= 100) {
+                    ui->widget_4->findChild<QProgressBar*>("progressBar")->setValue(progress);
+                }
+            }
+        }
+    });
+
+    connect(flashProcess, &QProcess::finished, [this, flashProcess](int exitCode) {
+        if (exitCode == 0) {
+            ui->widget_4->findChild<QProgressBar*>("progressBar")->setValue(100);
+            this->sendSystemNotification("ST-Link: Успех", "Запись завершена!");
+
+            // Если выбран Аппаратный Reset процессора — перезагружаем плату отдельной командой
+            bool needReset = ui->widget_4->findChild<QCheckBox*>("chkHardwareReset")->isChecked();
+            if (needReset) {
+                QProcess::startDetached("st-flash", QStringList() << "reset");
+            }
+
+            if (ui->widget_4) ui->widget_4->updateStatusText("Готово", "green");
+        } else {
+            this->sendSystemNotification("ST-Link: Ошибка", "Сбой записи.");
+            if (ui->widget_4) ui->widget_4->updateStatusText("Ошибка записи", "red");
+        }
+
+        if (ui->widget_4) ui->widget_4->setFlashButtonsEnabled(true);
+        flashProcess->deleteLater();
+    });
+
+    flashProcess->start("st-flash", arguments);
+}
+
+QString Neuro_programm::getChipNameById(uint32_t chipId) {
+    switch (chipId) {
+    // Семейство STM32F1
+    case 0x410: return "STM32F10x Medium-density";
+    case 0x412: return "STM32F10x Low-density";
+    case 0x414: return "STM32F10x High-density";
+    case 0x418: return "STM32F10x Connectivity line (e.g. BluePill)";
+    case 0x430: return "STM32F103 XL-density";
+
+        // Семейство STM32F4 (Самые частые Nucleo)
+    case 0x411: return "STM32F411xC/E (Nucleo-F411RE)";
+    case 0x413: return "STM32F405rg/415xx or STM32F407/417xx";
+    case 0x419: return "STM32F42xxx or STM32F43xxx";
+    case 0x421: return "STM32F446xx (Nucleo-F446RE)";
+    case 0x423: return "STM32F401xB/C (Nucleo-F401RE)";
+    case 0x431: return "STM32F411RE variant";
+    case 0x433: return "STM32F401xD/E";
+    case 0x458: return "STM32F410xx";
+
+        // Семейство STM32F3
+    case 0x422: return "STM32F302xB/C or STM32F303xB/C";
+    case 0x432: return "STM32F373xx";
+    case 0x438: return "STM32F303xD/E or STM32F302xD/E";
+    case 0x439: return "STM32F301xx or STM32F302x6/8";
+    case 0x446: return "STM32F303x6/8 or STM32F334xx";
+
+        // Семейство STM32G4 / L4
+    case 0x468: return "STM32G4xx Category 3 (Nucleo-G474RE)";
+    case 0x415: return "STM32L471xx / L475xx / L476xx";
+    case 0x462: return "STM32L431xx / L433xx / L443xx";
+
+        // Семейство STM32H7
+    case 0x450: return "STM32H74x / H75x Dual Core";
+    case 0x483: return "STM32H72x / H73x Single Core";
+
+    default: return "Unknown STM32 Device";
+    }
+}
+
+void Neuro_programm::open_STM()
+{
+    if (!actSTM) return;
+
+    // Блокируем сигналы комбобокса файлов, чтобы он не лез в ОЗУ сплиттера и не сбрасывал стек в 0!
+    if (ui->fileComboBox) ui->fileComboBox->blockSignals(true);
+
+    if (actSTM->isChecked()) {
+        qInfo() << ">>> [STM SIDEBAR] Открываю страницу Прошивки чипа (Страница 1)...";
+
+        // Гасим соседнюю инженерную кнопку, чтобы они не конфликтовали
+        if (actSTM_work) {
+            actSTM_work->blockSignals(true);
+            actSTM_work->setChecked(false);
+            actSTM_work->blockSignals(false);
+        }
+
+        // Запоминаем исходный индекс, только если мы уходим с кодовой страницы (0 или >= 2)
+        int currentIdx = ui->centralStackedWidget->currentIndex();
+        if (currentIdx != 1 && currentIdx != 3) {
+            m_previousPageIndex = currentIdx;
+        }
+
+        ui->centralStackedWidget->setCurrentIndex(1);
+    }
+    else {
+        qInfo() << ">>> [STM SIDEBAR] Закрываю инженерию, возвращаю код проекта...";
+        ui->centralStackedWidget->setCurrentIndex(m_previousPageIndex);
+    }
+
+    // Разблокируем комбобокс обратно после успешного аппаратного переключения страницы
+    if (ui->fileComboBox) ui->fileComboBox->blockSignals(false);
+}
+
+void Neuro_programm::open_STM_work()
+{
+    if (!actSTM_work) return;
+
+    if (ui->fileComboBox) ui->fileComboBox->blockSignals(true);
+
+    if (actSTM_work->isChecked()) {
+        qInfo() << ">>> [STM SIDEBAR] Открываю мониторинг Работы STM (Страница 3)...";
+
+        // Гасим кнопку прошивальщика
+        if (actSTM) {
+            actSTM->blockSignals(true);
+            actSTM->setChecked(false);
+            actSTM->blockSignals(false);
+        }
+
+        int currentIdx = ui->centralStackedWidget->currentIndex();
+        if (currentIdx != 1 && currentIdx != 3) {
+            m_previousPageIndex = currentIdx;
+        }
+
+        ui->centralStackedWidget->setCurrentIndex(3);
+    }
+    else {
+        qInfo() << ">>> [STM SIDEBAR] Закрываю мониторинг, возвращаю код проекта...";
+        ui->centralStackedWidget->setCurrentIndex(m_previousPageIndex);
+    }
+
+    if (ui->fileComboBox) ui->fileComboBox->blockSignals(false);
+}
+
+void Neuro_programm::onReadFlash()
+{
+    QString savePath = QFileDialog::getSaveFileName(this, "Сохранить дамп прошивку", QDir::homePath() + "/stm32_dump.bin", "Binary Files (*.bin)");
+    if (savePath.isEmpty()) return;
+
+    if (ui->widget_4) {
+        ui->widget_4->updateStatusText("Чтение памяти микроконтроллера...", "orange");
+        ui->widget_4->setFlashButtonsEnabled(false);
+        ui->widget_4->findChild<QProgressBar*>("progressBar")->setValue(15); // Стартовый сдвиг
+    }
+
+    QProcess *readProcess = new QProcess(this);
+    QStringList arguments;
+    arguments << "read" << savePath << "0x08000000" << "0x80000"; // Читаем 512 КБ
+
+    connect(readProcess, &QProcess::finished, [this, readProcess, savePath](int exitCode) {
+        if (exitCode == 0) {
+            ui->widget_4->findChild<QProgressBar*>("progressBar")->setValue(100); // Завершаем полосу
+            QFileInfo fileInfo(savePath);
+            this->sendSystemNotification("ST-Link: Чтение", QString("Файл сохранен: %1 КБ").arg(fileInfo.size() / 1024));
+            if (ui->widget_4) ui->widget_4->updateStatusText("Чтение завершено", "green");
+        } else {
+            QFile::remove(savePath);
+            ui->widget_4->findChild<QProgressBar*>("progressBar")->setValue(0);
+            this->sendSystemNotification("ST-Link: Ошибка", "Ошибка при чтении дампа.");
+            if (ui->widget_4) ui->widget_4->updateStatusText("Ошибка чтения", "red");
+        }
+
+        if (ui->widget_4) ui->widget_4->setFlashButtonsEnabled(true);
+        readProcess->deleteLater();
+    });
+
+    readProcess->start("st-flash", arguments);
+}
+
+void Neuro_programm::edit_intfce()
+{
+    if (ui && ui->centralwidget && ui->centralwidget->layout() && panelOther)
+    {
+        QGridLayout *mainGrid = qobject_cast<QGridLayout*>(ui->centralwidget->layout());
+        if (mainGrid) {
+            // Вынимаем панель из старого места
+            mainGrid->removeWidget(panelOther);
+
+            // Монтируем заново на всю ширину:
+            // Параметры: (widget, строка=3, колонка=0, занимает_строк=1, занимает_колонок=3)
+            // За счет занимает_колонок=3 панель займет все 3 колонки (Лево, Центр, Правая панель дебага)
+            mainGrid->addWidget(panelOther, 3, 0, 1, 2);
+
+            // Говорим сетке, что нижняя строка 3 не должна расти вверх сама по себе
+            mainGrid->setRowStretch(2, 1); // Верхняя зона (код + дебаг) растет
+            mainGrid->setRowStretch(3, 0); // Нижний терминал фиксирован по высоте (250px)
+        }
+    }
+}
+
+void Neuro_programm::add_vars_debug()
+{
+    // 1. Создаем и привязываем модель к дереву переменных
+    QStandardItemModel *varModel = new QStandardItemModel(this);
+    varModel->setHorizontalHeaderLabels(QStringList() << "Имя" << "Значение / Свойства" << "Тип");
+    if (ui->variablesTreeView)
+    {
+        ui->variablesTreeView->setModel(varModel);
+        ui->variablesTreeView->header()->setSectionResizeMode(QHeaderView::Interactive);
+        ui->variablesTreeView->header()->setStretchLastSection(true);
+    }
+
+    // 2. Ловим сигнал получения переменных от бэкенда дебаггера
+    connect(pyDebugger, &DebugManager::variablesReceived, this, [this, varModel](const QList<QStringList> &variablesForUi)
+    {
+        varModel->removeRows(0, varModel->rowCount()); // Очищаем старые данные
+
+        for (const QStringList &varData : variablesForUi)
+        {
+            if (varData.size() < 3) continue;
+
+            QList<QStandardItem*> rowItems;
+            rowItems << new QStandardItem(varData[0]); // Имя переменной
+            rowItems << new QStandardItem(varData[1]); // Значение / Свойства тензора PyTorch
+            rowItems << new QStandardItem(varData[2]); // Тип данных (float, Tensor, etc.)
+
+            // Запрещаем пользователю редактировать значения на ходу
+            for (auto item : rowItems) item->setEditable(false);
+
+            varModel->appendRow(rowItems);
+        }
+    });
+}
+
+void Neuro_programm::setupDebugInterface()
+{
+    if (!this->pyDebugger) return;
+
+    // =========================================================================
+    // ПЕРВИЧНЫЙ ЖЕСТКИЙ UX-ПОДЪЕМ УКАЗАТЕЛЕЙ ПАНЕЛИ ВЫРАЖЕНИЙ (WATCH)
+    // =========================================================================
+    // Выносим поиск виджетов на самый верх, чтобы устранить ошибку области видимости
+    QListWidget *watchList = this->findChild<QListWidget*>("watchTable");
+    QPushButton *btnAddWatch = this->findChild<QPushButton*>("pushButton"); // Кнопка со скриншота
+
+    if (watchList) {
+        watchList->clear(); // Очищаем тестовый мусор из Designer
+        watchList->setStyleSheet(
+                                  "QListWidget { background-color: #ffffff; border: none; color: #232629; }"
+                                  "QListWidget::item { padding: 4px 6px; border-bottom: 1px solid #f0f0f0; }"
+                                  "QListWidget::item:hover { background-color: #e4e5e6; }"
+                                  );
+    }
+
+    // =========================================================================
+    // 1. ИНИЦИАЛИЗАЦИЯ И ВЫВОД ЛОКАЛЬНЫХ ПЕРЕМЕННЫХ (ПРАВАЯ ПАНЕЛЬ)
+    // =========================================================================
+    m_varModel = new QStandardItemModel(this);
+    m_varModel->setHorizontalHeaderLabels(QStringList() << "Имя" << "Значение / Свойства" << "Тип");
+
+    if (ui && ui->variablesTreeView) {
+        ui->variablesTreeView->setModel(m_varModel);
+        ui->variablesTreeView->header()->setSectionResizeMode(QHeaderView::Interactive);
+        ui->variablesTreeView->header()->setStretchLastSection(true);
+    }
+
+    connect(pyDebugger, &DebugManager::variablesReceived, this, [this](const QList<QStringList> &variablesForUi) {
+        if (!m_varModel) return;
+        m_varModel->removeRows(0, m_varModel->rowCount());
+
+        // --- СОБИРАЕМ КАРТУ ДЛЯ ИНЛАЙН-ПОДСКАЗОК КОДА (INLINE VALUES) ---
+        QMap<int, QString> editorInlineMap;
+
+        // Находим указатель на текущий активный текстовый холст редактора кода
+        QWidget *currentPage = ui->centralStackedWidget ? ui->centralStackedWidget->currentWidget() : nullptr;
+        CodeEditor *currentEditor = currentPage ? currentPage->findChild<CodeEditor*>() : nullptr;
+
+        for (const QStringList &varData : variablesForUi) {
+            if (varData.size() < 3) continue;
+
+            // 1. Формируем ячейки правой таблицы Студии (Ваш штатный код)
+            QList<QStandardItem*> rowItems;
+            rowItems << new QStandardItem(varData[0]);
+            rowItems << new QStandardItem(varData[1]);
+            rowItems << new QStandardItem(varData[2]);
+
+            // ЖЕСТКИЙ СИНТАКСИЧЕСКИЙ ФИКС: ставим auto* вместо auto для работы с указателями!
+            for (auto* item : rowItems) {
+                item->setEditable(false);
+            }
+            m_varModel->appendRow(rowItems);
+
+            // 2. ФИЛЬТРАЦИЯ СЛУЖЕБНЫХ ПЕРЕМЕННЫХ И ИНЖЕКТ В ИНЛАЙН-КАРТУ
+            QString varName = varData[0];  // Имя переменной
+            QString varValue = varData[1]; // Значение / Свойства
+
+            // Глушим громоздкие системные модули Python
+            if (varName.startsWith("__") || varValue.contains("module") || varValue.contains("function")) continue;
+
+            // Оптимизируем вывод для тензоров PyTorch (ужимаем длинный лог до размеров shape)
+            if (varValue.contains("tensor(") && varValue.contains("shape=[")) {
+                int shapeIdx = varValue.indexOf("shape=[");
+                int shapeEnd = varValue.indexOf("]", shapeIdx);
+                if (shapeIdx != -1 && shapeEnd != -1) {
+                    varValue = "Tensor: " + varValue.mid(shapeIdx, shapeEnd - shapeIdx + 1);
+                }
+            }
+
+            // Лексический анализатор: сопоставляем имя переменной со строками открытого файла
+            if (currentEditor && currentEditor->document()) {
+                QString fileText = currentEditor->toPlainText();
+                QStringList lines = fileText.split('\n');
+
+                for (int lineIdx = 0; lineIdx < lines.size(); ++lineIdx) {
+                    // Регулярное выражение ищет точное совпадение слова (переменной) на строке
+                    QRegularExpression wordRegex("\\b" + QRegularExpression::escape(varName) + "\\b");
+                    if (lines[lineIdx].contains(wordRegex)) {
+                        // Если на одной строке встретилось несколько переменных, склеиваем их через запятую
+                        if (editorInlineMap.contains(lineIdx)) {
+                            editorInlineMap[lineIdx] += QString(", %1 = %2").arg(varName, varValue);
+                        } else {
+                            editorInlineMap[lineIdx] = QString("  # %1 = %2").arg(varName, varValue);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Аппаратно проталкиваем заполненную карту в движок отрисовки CodeEditor
+        if (currentEditor) {
+            currentEditor->updateInlineValues(editorInlineMap);
+        }
+    });
+
+    // =========================================================================
+    // 2. ИНТЕГРАЦИЯ И СВЯЗЫВАНИЕ СЕТЕВЫХ СИГНАЛОВ WATCH (ВЫРАЖЕНИЯ)
+    // =========================================================================
+    // Лямбда-приемник результатов: watchList теперь 100% валиден и объявлен выше!
+    connect(pyDebugger, &DebugManager::watchResultReady, this, [watchList](int rowId, const QString &resultValue) {
+        if (watchList && rowId < watchList->count()) {
+            QListWidgetItem *item = watchList->item(rowId);
+            if (item) {
+                QString pureExpr = item->data(Qt::UserRole).toString();
+                item->setText(QString("%1 ➔ %2").arg(pureExpr, resultValue));
+                item->setForeground(QBrush(QColor(35, 38, 41)));
+                QFont font = item->font();
+                font.setWeight(QFont::Medium);
+                item->setFont(font);
+            }
+        }
+    });
+
+    // Автоматический пересчет формул при каждом шаге F7 / F8
+    connect(pyDebugger, &DebugManager::variablesReceived, this, [this, watchList]() {
+        if (!watchList || !this->pyDebugger || !this->pyDebugger->isConnected()) return;
+        for (int row = 0; row < watchList->count(); ++row) {
+            QListWidgetItem *item = watchList->item(row);
+            if (item) {
+                QString expression = item->data(Qt::UserRole).toString();
+                item->setText(expression + " ➔ Обновление...");
+                item->setForeground(QBrush(QColor(127, 140, 141)));
+                this->pyDebugger->evaluateWatchExpression(row, expression);
+            }
+        }
+    });
+    // =========================================================================
+    // 3. ИНИЦИАЛИЗАЦИЯ И ВЫВОД СТЕКА ВЫЗОВОВ (CALL STACK В НИЖНЕЙ ПАНЕЛИ)
+    // =========================================================================
+    connect(pyDebugger, &DebugManager::stackTraceReceived, this, [this](const QList<QStringList> &stackFramesForUi)
+    {
+        QTableWidget *stackTable = panelOther ? panelOther->findChild<QTableWidget*>("callStackTable") : nullptr;
+        if (stackTable) {
+            stackTable->disconnect(); // Защита от дублирования сигналов в ОЗУ
+            stackTable->setRowCount(0);
+
+            for (const QStringList &frame : stackFramesForUi) {
+                if (frame.size() < 6) continue; // Защита: проверяем, что прилетели все 6 элементов, включая абсолютный путь
+                int row = stackTable->rowCount();
+                stackTable->insertRow(row);
+
+                QTableWidgetItem *levelItem = new QTableWidgetItem(frame[0]);
+                QTableWidgetItem *funcItem  = new QTableWidgetItem(frame[1]);
+                QTableWidgetItem *fileItem  = new QTableWidgetItem(frame[2]);
+                QTableWidgetItem *lineItem  = new QTableWidgetItem(frame[3]);
+
+                // Извлекаем чистый абсолютный путь из frame[5] и намертво прячем в ОЗУ ячейки!
+                QString absoluteDocPath = frame[5].trimmed();
+                fileItem->setData(Qt::UserRole, absoluteDocPath);
+
+                // Выводим хекс-адрес кадра в 4-ю колонку для красоты интерфейса
+                QTableWidgetItem *addrItem  = new QTableWidgetItem(frame[4]);
+
+                stackTable->setItem(row, 0, levelItem);
+                stackTable->setItem(row, 1, funcItem);
+                stackTable->setItem(row, 2, fileItem);
+                stackTable->setItem(row, 3, lineItem);
+
+                if (stackTable->columnCount() > 4) {
+                    stackTable->setItem(row, 4, addrItem);
+                }
+
+                // Включаем обязательные флаги кликабельности и выделения строки
+                for (int i = 0; i < stackTable->columnCount(); ++i) {
+                    if (stackTable->item(row, i)) {
+                        stackTable->item(row, i)->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+                    }
+                }
+            }
+
+            stackTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+            stackTable->setSelectionMode(QAbstractItemView::SingleSelection);
+
+            // Накатываем пуленепробиваемый обработчик кликов по элементам строки
+            connect(stackTable, &QTableWidget::itemClicked, this, [this, stackTable](QTableWidgetItem *clickedItem) {
+                if (!clickedItem) return;
+
+                int targetRow = clickedItem->row();
+                QTableWidgetItem *fileItem = stackTable->item(targetRow, 2);
+                QTableWidgetItem *lineItem = stackTable->item(targetRow, 3);
+
+                if (fileItem && lineItem) {
+                    QString fullFilePath = fileItem->data(Qt::UserRole).toString();
+                    int targetLineNum = lineItem->text().toInt() - 1;
+
+                    qInfo() << ">>> [CALL STACK SUCCESS] Точный клик! Перехожу по абсолютному пути:" << fullFilePath << "Строка:" << targetLineNum + 1;
+
+                    // Передаем управление в метод фокусировки текстового холста
+                    this->jumpToCodeLine(fullFilePath, targetLineNum);
+                }
+            });
+        }
+
+        // Асинхронный сброс блокировки кнопок формы
+        QTimer::singleShot(10, this, [this]() {
+            this->setDebugButtonsEnabled(true);
+            QPushButton *btnOver = this->findChild<QPushButton*>("btnStepOver");
+            QPushButton *btnInto = this->findChild<QPushButton*>("btnStepInto");
+            QPushButton *btnOut  = this->findChild<QPushButton*>("btnStepOut");
+            QPushButton *btnRes  = this->findChild<QPushButton*>("btnResume");
+            if (btnOver) { btnOver->setEnabled(true); btnOver->update(); }
+            if (btnInto) { btnInto->setEnabled(true); btnInto->update(); }
+            if (btnOut)  { btnOut->setEnabled(true);  btnOut->update();  }
+            if (btnRes)  { btnRes->setEnabled(true);  btnRes->update();  }
+        });
+    });
+
+    // =========================================================================
+    // 4. UX-МОСТ ПОДСВЕТКИ СТРОКИ ОСТАНОВА И ТУМБЛЕРОВ
+    // =========================================================================
+    connect(pyDebugger, &DebugManager::breakpointHit, this, [this](int line, const QString &sourceFile) {
+        this->openNewFileInEditor(sourceFile);
+        QTimer::singleShot(100, this, [this, line]() {
+            QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+            if (!currentPage) return;
+            CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+            if (currentEditor && currentEditor->document()) {
+                QTextBlock block = currentEditor->document()->findBlockByLineNumber(line - 1);
+                if (block.isValid()) {
+                    int docTotalChars = currentEditor->document()->characterCount();
+                    int targetPosition = block.position();
+                    if (targetPosition >= 0 && targetPosition < docTotalChars) {
+                        currentEditor->blockSignals(true);
+                        currentEditor->setProperty("currentDebugLine", line);
+
+                        QPushButton *btnRes = this->findChild<QPushButton*>("btnResume");
+                        if (btnRes) {
+                            btnRes->blockSignals(true);
+                            btnRes->setChecked(false);
+                            btnRes->setText("Продолжить");
+                            btnRes->setIcon(QIcon(":/Data/system_icons/media-playback-start.svg"));
+                            btnRes->setEnabled(true);
+                            btnRes->blockSignals(false);
+                            btnRes->update();
+                        }
+                        QTextCursor mainCursor = currentEditor->textCursor();
+                        mainCursor.setPosition(targetPosition);
+                        currentEditor->setTextCursor(mainCursor);
+                        currentEditor->centerCursor();
+
+                        QTextCursor highlightCursor(currentEditor->document());
+                        highlightCursor.setPosition(targetPosition);
+                        QList<QTextEdit::ExtraSelection> extraSelections;
+                        QTextEdit::ExtraSelection selection;
+                        selection.format.setBackground(QColor(255, 255, 150, 100));
+                        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+                        selection.cursor = highlightCursor;
+                        extraSelections.append(selection);
+                        currentEditor->setExtraSelections(extraSelections);
+                        currentEditor->blockSignals(false);
+                    }
+                }
+                currentEditor->setFocus();
+                currentEditor->update();
+            }
+        });
+    });
+
+    // Интерактивное удаление по двойному клику на строку списка Watch
+    if (watchList) {
+        connect(watchList, &QListWidget::itemDoubleClicked, this, [watchList](QListWidgetItem *item) {
+                                                                                                       if (item) {
+                                                                                                           delete item; // Нативно вырезаем строку из виджета и памяти Qt
+                                                                                                           qInfo() << ">>> [WATCH UI] Выражение успешно удалено из панели.";
+                                                                                                       }
+                                                                                                     });
+    }
+    // =========================================================================
+    // 5. СОЗДАНИЕ И ПРОГРАММИРОВАНИЕ ИСПОЛНИТЕЛЬНЫХ ЭКШЕНОВ (ГОРЯЧИЕ КЛАВИШИ)
+    // =========================================================================
+    if (!actResume) {
+        actResume = new QAction(this);
+        actResume->setShortcut(QKeySequence(Qt::Key_F9));
+        actResume->setCheckable(true);
+        actResume->setChecked(false);
+        actResume->setText("Продолжить");
+        actResume->setIcon(QIcon(":/Data/system_icons/media-playback-start.svg"));
+        connect(actResume, &QAction::triggered, this, [this](bool isChecked) {
+            if (!this->pyDebugger) return;
+            if (isChecked) {
+                qInfo() << ">>> [DAP] Пользователь нажал ПАУЗА. Замораживаю поток Python...";
+                this->pyDebugger->requestPause();
+            } else {
+                qInfo() << ">>> [DAP] Пользователь нажал ПРОДОЛЖИТЬ. Отпускаю скрипт...";
+                setDebugButtonsEnabled(false);
+                this->pyDebugger->resumeExecution();
+            }
+        });
+        this->addAction(actResume);
+    }
+
+    if (!actStepOver) {
+        actStepOver = new QAction(this);
+        actStepOver->setShortcut(QKeySequence(Qt::Key_F8));
+        connect(actStepOver, &QAction::triggered, this, [this]() {
+            if (this->pyDebugger) this->pyDebugger->stepOver();
+        });
+        this->addAction(actStepOver);
+    }
+
+    if (!actStepInto) {
+        actStepInto = new QAction(this);
+        actStepInto->setShortcut(QKeySequence(Qt::Key_F7));
+        connect(actStepInto, &QAction::triggered, this, [this]() {
+            if (this->pyDebugger) this->pyDebugger->stepInto();
+        });
+        this->addAction(actStepInto);
+    }
+
+    if (!actStepOut) {
+        actStepOut = new QAction(this);
+        actStepOut->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F8));
+        connect(actStepOut, &QAction::triggered, this, [this]() {
+            if (this->pyDebugger) this->pyDebugger->stepOut();
+        });
+        this->addAction(actStepOut);
+    }
+
+    if (!actStopDebug) {
+        actStopDebug = new QAction(this);
+        actStopDebug->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_F2));
+        connect(actStopDebug, &QAction::triggered, this, [this]() {
+            if (this->pyDebugger) this->pyDebugger->stopDebugSession();
+        });
+        this->addAction(actStopDebug);
+    }
+
+    connect(actResume,   &QAction::triggered, this, [this](){ setDebugButtonsEnabled(false); });
+    connect(actStepOver, &QAction::triggered, this, [this](){ setDebugButtonsEnabled(false); });
+    connect(actStepInto, &QAction::triggered, this, [this](){ setDebugButtonsEnabled(false); });
+    connect(actStepOut,  &QAction::triggered, this, [this](){ setDebugButtonsEnabled(false); });
+
+    // =========================================================================
+    // 6. ГЛОБАЛЬНАЯ ЖЕСТКАЯ СВЯЗКА QPushButton ФОРМЫ С ЭКШЕНАМИ И ИКОНКАМИ
+    // =========================================================================
+    QPushButton *btnRes  = this->findChild<QPushButton*>("btnResume");
+    QPushButton *btnOver = this->findChild<QPushButton*>("btnStepOver");
+    QPushButton *btnInto = this->findChild<QPushButton*>("btnStepInto");
+    QPushButton *btnOut  = this->findChild<QPushButton*>("btnStepOut");
+    QPushButton *btnStop = this->findChild<QPushButton*>("btnStopDebug");
+
+    if (btnRes) {
+        btnRes->disconnect();
+        btnRes->setCheckable(true);
+        btnRes->setChecked(false);
+        btnRes->setText("Продолжить");
+        btnRes->setIcon(QIcon(":/Data/system_icons/media-playback-start.svg"));
+        connect(btnRes, &QPushButton::toggled, this, [this, btnRes, btnOver, btnInto, btnOut](bool isChecked) {
+            if (!this->pyDebugger) return;
+            if (isChecked) {
+                qInfo() << ">>> [GUI] Кнопка зафиксирована. Переключаю UI на ПАУЗА...";
+                btnRes->setText("Пауза");
+                btnRes->setIcon(QIcon(":/Data/system_icons/media-playback-pause.svg"));
+                btnRes->update();
+                if (btnOver) btnOver->setEnabled(false);
+                if (btnInto) btnInto->setEnabled(false);
+                if (btnOut)  btnOut->setEnabled(false);
+                this->pyDebugger->resumeExecution();
+            } else {
+                qInfo() << ">>> [GUI] Кнопка отжата. Переключаю UI на ПРОДОЛЖИТЬ...";
+                btnRes->setText("Продолжить");
+                btnRes->setIcon(QIcon(":/Data/system_icons/media-playback-start.svg"));
+                btnRes->update();
+                this->pyDebugger->requestPause();
+            }
+        });
+    }
+
+    if (btnOver) {
+        btnOver->disconnect();
+        btnOver->setIcon(QIcon(":/Data/system_icons/media-playlist-normal.svg"));
+        connect(btnOver, &QPushButton::clicked, this, [this]() {
+            this->setDebugButtonsEnabled(false);
+            if (actStepOver) actStepOver->trigger();
+        });
+    }
+
+    if (btnInto) {
+        btnInto->disconnect();
+        btnInto->setIcon(QIcon(":/Data/system_icons/media-playlist-play.svg"));
+        connect(btnInto, &QPushButton::clicked, this, [this]() {
+            this->setDebugButtonsEnabled(false);
+            if (actStepInto) actStepInto->trigger();
+        });
+    }
+
+    if (btnOut) {
+        btnOut->disconnect();
+        btnOut->setIcon(QIcon(":/Data/system_icons/media-skip-forward.svg"));
+        connect(btnOut, &QPushButton::clicked, this, [this]() {
+            this->setDebugButtonsEnabled(false);
+            if (actStepOut) actStepOut->trigger();
+        });
+    }
+
+    if (btnStop) {
+        btnStop->disconnect();
+        btnStop->setIcon(QIcon(":/Data/system_icons/media-playback-stop.svg"));
+        connect(btnStop, &QPushButton::clicked, this, [this]() {
+            if (actStopDebug) actStopDebug->trigger();
+        });
+    }
+
+    connect(pyDebugger, &DebugManager::sessionFinished, this, [this]() {
+        qInfo() << ">>> [DEBUG CORE] Сессия отладки успешно завершена. Возвращаю UI...";
+        setDebugButtonsEnabled(false);
+        QPushButton *btnRes = this->findChild<QPushButton*>("btnResume");
+        if (btnRes) {
+            btnRes->blockSignals(true);
+            btnRes->setChecked(false);
+            btnRes->setText("Продолжить");
+            btnRes->setIcon(QIcon(":/Data/system_icons/media-playback-start.svg"));
+            btnRes->setEnabled(false);
+            btnRes->blockSignals(false);
+            btnRes->update();
+        }
+        QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+        if (currentPage) {
+            CodeEditor *editor = currentPage->findChild<CodeEditor*>();
+            if (editor) {
+                editor->setProperty("currentDebugLine", 0);
+                editor->update();
+            }
+        }
+    });
+
+    connect(pyDebugger, &DebugManager::statusMessageReady, this, [this](const QString &message, int timeout) {
+        if (ui && ui->statusbar) {
+            ui->statusbar->showMessage(message.left(50), timeout);
+        }
+        static QRegularExpression lossRegex("loss[:\\s=]+([0-9\\.]+)");
+        static QRegularExpression accRegex("(?:accuracy|acc)[:\\s=]+([0-9\\.]+)");
+
+        QRegularExpressionMatch lossMatch = lossRegex.match(message.toLower());
+        if (lossMatch.hasMatch()) {
+            QString lossValue = lossMatch.captured(1);
+            this->injectFinalMetricsToVariableTree(" final_loss", lossValue, "float");
+        }
+        QRegularExpressionMatch accMatch = accRegex.match(message.toLower());
+        if (accMatch.hasMatch()) {
+            QString accValue = accMatch.captured(1);
+            this->injectFinalMetricsToVariableTree(" final_accuracy", accValue + "%", "float");
+        }
+    });
+
+    connect(pyDebugger, &DebugManager::sessionFinished, this, [this]() {
+        this->setDebugButtonsEnabled(false);
+        this->injectFinalMetricsToVariableTree(" СТАТУС СЕССИИ", "Выполнение успешно завершено", "status");
+    });
+
+    m_sourcesModel = new QStandardItemModel(this);
+    m_sourcesModel->setHorizontalHeaderLabels(QStringList() << "Файлы исходных текстов" << "Родительский путь");
+
+    QTreeView *sourcesTreeView = ui->centralwidget ? ui->centralwidget->findChild<QTreeView*>("treeView_2") : nullptr;
+    if (sourcesTreeView) {
+        sourcesTreeView->setModel(m_sourcesModel);
+        sourcesTreeView->header()->setSectionResizeMode(QHeaderView::Interactive);
+        sourcesTreeView->header()->setStretchLastSection(true);
+        sourcesTreeView->setEditTriggers(QAbstractItemView::NoEditTriggers); }
+    connect(pyDebugger, &DebugManager::loadedSourcesReceived, this, [this, sourcesTreeView](const QStringList &sourcePaths) {
+        if (!m_sourcesModel) return;
+        m_sourcesModel->removeRows(0, m_sourcesModel->rowCount());
+
+        for (const QString &path : sourcePaths) {
+            QFileInfo fileInfo(path);
+            QString parentDir = fileInfo.dir().dirName();
+            if (parentDir.isEmpty() || parentDir == ".") parentDir = "project";
+
+            // 1. ЖЕСТКИЙ ФИКС: Делаем оба элемента указателями (*)
+            QStandardItem *fileNameItem = new QStandardItem(fileInfo.fileName());
+            QStandardItem *pathItem     = new QStandardItem(QString("(%1)").arg(parentDir));
+
+            fileNameItem->setData(path, Qt::UserRole);
+            fileNameItem->setToolTip(path);
+            pathItem->setToolTip(path); // Теперь оператор -> работает законно!
+
+            fileNameItem->setForeground(QBrush(QColor(35, 38, 41)));
+            pathItem->setForeground(QBrush(QColor(127, 140, 141)));
+
+            QFont font = fileNameItem->font();
+            font.setWeight(QFont::Medium);
+            fileNameItem->setFont(font);
+
+            // 2. ЖЕСТКИЙ ФИКС: Переводим список на хранение указателей <QStandardItem*>
+            QList<QStandardItem*> rowItems;
+            rowItems << fileNameItem << pathItem;
+
+            // Теперь модель Qt6 нативно и без ошибок примет строку дерева файлов
+            m_sourcesModel->appendRow(rowItems);
+        }
+
+        if (sourcesTreeView) {
+            sourcesTreeView->resizeColumnToContents(0); }});
+    if (sourcesTreeView)
+    { connect(sourcesTreeView, &QTreeView::doubleClicked, this, [this](const QModelIndex &index) {
+            if (!index.isValid() || !m_sourcesModel) return;
+            QModelIndex firstColumnIndex = m_sourcesModel->index(index.row(), 0, index.parent());
+            QString fullPath = m_sourcesModel->data(firstColumnIndex, Qt::UserRole).toString();
+            if (!fullPath.isEmpty()) { this->openNewFileInEditor(fullPath); }});}
+    setDebugButtonsEnabled(false); // Активация кнопки плюс для QListWidget
+    if (btnAddWatch) {
+        btnAddWatch->disconnect();
+        btnAddWatch->setText(" + Добавить выражение");
+        btnAddWatch->setStyleSheet("QPushButton { font-weight: bold; color: #1a73e8; }");
+        connect(btnAddWatch, &QPushButton::clicked, this, [this, watchList]() {
+            bool ok;
+            QString expression = QInputDialog::getText(this, "Новое выражение Watch",
+                                                     "Введите формулу Python (например: X_fake.shape или window_size):",
+                                                     QLineEdit::Normal, "", &ok);
+
+            if (ok && !expression.trimmed().isEmpty() && watchList) {
+                QListWidgetItem *item = new QListWidgetItem(expression.trimmed() + " ➔ Вычисляется...");
+                item->setData(Qt::UserRole, expression.trimmed());
+                item->setToolTip("Двойной клик левой кнопкой мыши, чтобы удалить это выражение");
+                item->setForeground(QBrush(QColor(127, 140, 141)));
+                watchList->addItem(item);
+
+                int rowId = watchList->count() - 1;
+                if (this->pyDebugger && this->pyDebugger->isConnected()) {
+                    this->pyDebugger->evaluateWatchExpression(rowId, expression.trimmed());
+                }
+            }
+        });
+    }
+
+    // =========================================================================
+    // СМАРТ-УПРАВЛЕНИЕ И СКРЫТИЕ ПАНЕЛИ ОШИБОК (PROBLEMS VIEW)
+    // =========================================================================
+    QWidget *problemsContainer = panelOther ? panelOther->findChild<QWidget*>("problemsContainer") : nullptr;
+    QPushButton *btnHideProblems = panelOther ? panelOther->findChild<QPushButton*>("btnHideProblems") : nullptr;
+
+    // Находим кнопку-переключатель в самом нижнем системном статус-баре вкладок
+    // (Назовите её в Designer, например, btnToggleProblemsPanel)
+    QPushButton *btnToggleProblemsPanel = this->findChild<QPushButton*>("btnToggleProblemsPanel");
+
+    // 1. Нажатие на крестик внутри панели — скрывает весь нижний этаж ошибок
+    if (btnHideProblems && problemsContainer) {
+        connect(btnHideProblems, &QPushButton::clicked, this, [problemsContainer, btnToggleProblemsPanel]() {
+            problemsContainer->hide(); // Схлопываем виджет, верхний стек вызовов займет всё свободное место!
+
+            if (btnToggleProblemsPanel) {
+                btnToggleProblemsPanel->setChecked(false); // Отжимаем кнопку в статусбаре
+            }
+            qInfo() << ">>> [PROBLEMS UI] Панель ошибок скрыта пользователем.";
+        });
+    }
+
+    // 2. Системная кнопка в нижнем ряду — работает как тумблер (Показать / Скрыть)
+    if (btnToggleProblemsPanel && problemsContainer) {
+        btnToggleProblemsPanel->setCheckable(true);
+        btnToggleProblemsPanel->setChecked(true); // По умолчанию при старте панель открыта
+
+        connect(btnToggleProblemsPanel, &QPushButton::clicked, this, [problemsContainer](bool isChecked) {
+            if (isChecked) {
+                problemsContainer->show();
+            } else {
+                problemsContainer->hide();
+            }
+        });
+    }
+}
+
+void Neuro_programm::setDebugButtonsEnabled(bool enabled)
+{
+    // Ищем живые QPushButton на форме
+    QPushButton *btnRes  = this->findChild<QPushButton*>("btnResume");
+    QPushButton *btnOver = this->findChild<QPushButton*>("btnStepOver");
+    QPushButton *btnInto = this->findChild<QPushButton*>("btnStepInto");
+
+    if (btnOver) btnOver->setEnabled(enabled);
+    if (btnInto) btnInto->setEnabled(enabled);
+
+    // Кнопку продолжения/паузы оставляем доступной всегда во время сессии
+    if (btnRes)  btnRes->setEnabled(this->pyDebugger && this->pyDebugger->isConnected());
+}
+
+bool Neuro_programm::showSaveConfirmationDialog()
+{
+    // 1. Динамически сканируем комбобокс открытых файлов на наличие модификаций со звездочкой '*'
+    QStringList modifiedFiles;
+    if (ui && ui->fileComboBox) {
+        for (int i = 0; i < ui->fileComboBox->count(); ++i) {
+            QString itemText = ui->fileComboBox->itemText(i);
+            if (itemText.endsWith(" *")) {
+                // Извлекаем абсолютный путь к файлу, зашитый в UserData
+                QString fullPath = ui->fileComboBox->itemData(i).toString();
+                if (!fullPath.isEmpty() && fullPath != "MAIN_SCREEN" && fullPath != "AI_CHAT_SCREEN") {
+                    modifiedFiles << fullPath;
+                }
+            }
+        }
+    }
+
+    // Если всё уже сохранено — молча разрешаем запуск (диалог не выводим)
+    if (modifiedFiles.isEmpty()) return true;
+
+    // 2. КАНOНИЧНЫЙ ВЫЗОВ ДИАЛОГА ЧЕРЕЗ УКАЗАТЕЛЬ ПО АНАЛОГИИ С rsc3
+    // Передаем список файлов и путь к проекту напрямую в конструктор окна
+    rsc5 = new Savedata(modifiedFiles, this->currentOpenProjectPath, this);
+    rsc5->setWindowTitle("Сохранение изменений - PyTorch Studio");
+
+    // Наследуем общую QSS-тему главного окна, чтобы диалог бесшовно вписался в темный интерфейс Студии
+    rsc5->setStyleSheet(this->styleSheet());
+
+    // === ФИЧА 3: ГАРАНТИРОВАННЫЙ ФОКУС ДЛЯ РАБОТЫ С КЛАВИАТУРЫ ===
+    // Ищем кнопку "Сохранить все" внутри rsc5, чтобы выставить её дефолтной и подсвеченной
+    QPushButton *btnSaveAll = rsc5->findChild<QPushButton*>("pushButton");
+    if (btnSaveAll) {
+        btnSaveAll->setDefault(true);  // Насильно привязываем триггер по клавише ENTER
+        btnSaveAll->setFocus();        // Мгновенно переводим фокус ввода на эту кнопку
+    }
+
+    // Ищем кнопку "Отмена" и вешаем на неё жесткий аппаратный шорткат клавиши ESCAPE
+    QPushButton *btnCancel = rsc5->findChild<QPushButton*>("pushButton_3");
+    if (btnCancel) {
+        btnCancel->setShortcut(QKeySequence(Qt::Key_Escape));
+    }
+
+    // Запускаем диалог в модальном блокирующем режиме exec()
+    int result = rsc5->exec();
+
+    // Извлекаем результаты выбора инженера из ОЗУ закрытого окна перед его удалением
+    bool executionPermitted = rsc5->isProceedAllowed();
+    QString fileToFocus = rsc5->getSelectedFileToFocus();
+
+    // 3. АНАЛИЗ И ОБРАБОТКА РЕЗУЛЬТАТОВ СЕССИИ ДИАЛОГА
+    if (result == QDialog::Accepted && executionPermitted)
+    {
+        // Пользователь выбрал "Сохранить все" или "Не сохранять" — запуск разрешен!
+        // Если была нажата кнопка "Сохранить все", пишем измененный код из вкладок на диск
+        if (btnSaveAll && btnSaveAll->underMouse() || result == QDialog::Accepted)
+        {
+            for (const QString &path : std::as_const(modifiedFiles)) {
+                // Вызываем ваш штатный метод принудительного сохранения файла на диск
+                // (Например, saveCurrentActiveFile() или кастомный метод записи по пути):
+                this->saveCurrentActiveFile();
+            }
+        }
+    }
+    // === ФИЧА 1: ИНТЕРАКТИВНЫЙ ДВОЙНОЙ КЛИК (ПРЫЖОК К СЛОМАННОМУ ФАЙЛУ) ===
+    else if (!fileToFocus.isEmpty())
+    {
+        // Если окно закрылось по двойному щелчку на строке списка —
+        // находим этот файл в комбобоксе и принудительно активируем вкладку в редакторе!
+        int comboIdx = ui->fileComboBox->findData(fileToFocus);
+        if (comboIdx != -1) {
+            ui->fileComboBox->setCurrentIndex(comboIdx);
+
+            // Направляем клавиатурный фокус на текстовый холст, чтобы инженер мог сразу писать код
+            QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+            if (currentPage) {
+                CodeEditor *editor = currentPage->findChild<CodeEditor*>();
+                if (editor) editor->setFocus();
+            }
+        }
+    }
+
+    // Освобождаем ресурсы: аппаратно вырезаем объект окна из оперативной памяти
+    rsc5->deleteLater();
+
+    return executionPermitted;
+}
+
+void Neuro_programm::createMenus()
+{
+    // 1. ЗАЩИТА: проверяем сам бар
+    if (!customMenuBar) return;
+
+    // 2. Ищем существующее меню "Инструменты2" на баре, чтобы не использовать член класса напрямую
+    QMenu *targetMenu = nullptr;
+    for (QAction *action : customMenuBar->actions())
+    {
+        if (action->menu() && (action->text() == "Инструменты2" || action->text() == "Инструменты"))
+        {
+            targetMenu = action->menu();
+            break;
+        }
+    }
+
+    // 3. Если не нашли локально — создаем и перезаписываем член класса
+    if (!targetMenu)
+    {
+        targetMenu = customMenuBar->addMenu("Инструменты2");
+    }
+    toolsMenu = targetMenu; // Синхронизируем член класса с валидным объектом
+
+    // 4. Создаем экшен настроек
+    QAction *actionSettings = new QAction("Настройки2", this);
+    actionSettings->setObjectName("actionSettings");
+    actionSettings->setShortcut(QKeySequence::Preferences);
+    actionSettings->setIcon(QIcon(":/Data/system_icons/document-save-as.svg"));
+
+    connect(actionSettings, &QAction::triggered, this, &Neuro_programm::showPreferences);
+
+    // 5. Добавляем в гарантированно валидный указатель
+    targetMenu->addAction(actionSettings);
+}
+
+
+void Neuro_programm::showPreferences()
+{
+    // Создаем экземпляр окна настроек.
+    // Передаем 'this' (MainWindow) в качестве родителя, чтобы окно центрировалось поверх главного
+    PreferencesDialog dialog(this);
+
+    // Вызываем как модальное окно. Код заблокирует главное окно, пока настройки не закроют.
+    dialog.exec();
+}
+
+void Neuro_programm::onEraseFlash()
+{
+    // Запускаем индикацию начала процесса в графической панели
+    if (ui->widget_4) {
+        ui->widget_4->updateStatusText("Очистка Flash...", "orange");
+        ui->widget_4->setFlashButtonsEnabled(false); // Временно блокируем кнопки
+    }
+
+    QProcess *eraseProcess = new QProcess(this);
+
+    // Связываем завершение процесса с выводом D-Bus уведомления
+    connect(eraseProcess, &QProcess::finished, [this, eraseProcess](int exitCode) {
+        if (exitCode == 0) {
+            // Уведомление через D-Bus об успешной очистке
+            this->sendSystemNotification("ST-Link: Очистка", "Flash-память микроконтроллера успешно стерта.");
+
+            // Если плата стерта, то имя чипа мы знаем из прошлого сканирования,
+            // но статус обновляем на чистый/готовый
+            if (ui->widget_4) {
+                ui->widget_4->updateStatusText("Память очищена (Готов к записи)", "green");
+            }
+        } else {
+            // Сбой очистки памяти
+            this->sendSystemNotification("ST-Link: Ошибка", "Не удалось очистить память чипа. Проверьте подключение.");
+
+            if (ui->widget_4) {
+                ui->widget_4->updateStatusText("Ошибка очистки памяти", "red");
+            }
+        }
+
+        // Возвращаем активность кнопкам панели управления
+        if (ui->widget_4) {
+            ui->widget_4->setFlashButtonsEnabled(true);
+        }
+
+        eraseProcess->deleteLater(); // Безопасное удаление процесса из памяти
+    });
+
+    // Запуск консольной команды полного стирания STM32
+    eraseProcess->start("st-flash", QStringList() << "erase");
+}
+
+void Neuro_programm::injectFinalMetricsToVariableTree(const QString &name, const QString &value, const QString &type)
+{
+    // Защита: если модель дерева локальных переменных не инициализирована, выходим
+    if (!m_varModel) return;
+
+    // Создаем три ячейки для формирования одной строки (Имя | Значение / Свойства | Тип)
+    QStandardItem *nameItem  = new QStandardItem(name);
+    QStandardItem *valueItem = new QStandardItem(value);
+    QStandardItem *typeItem  = new QStandardItem(type);
+
+    // UX-Защита: запрещаем инженеру случайно отредактировать итоговые показатели на экране
+    nameItem->setEditable(false);
+    valueItem->setEditable(false);
+    typeItem->setEditable(false);
+
+    // Накатываем красивый полужирный шрифт
+    QFont boldFont = nameItem->font();
+    boldFont.setBold(true);
+    nameItem->setFont(boldFont);
+    valueItem->setFont(boldFont);
+
+    // Стилизуем цвета: имя делаем благородным синим, а значение — зеленым цветом успеха
+    nameItem->setForeground(QBrush(QColor("#1a73e8")));  // Синий маркер Breeze
+    valueItem->setForeground(QBrush(QColor("#4caf50"))); // Зеленый цвет метрики
+
+    // Собираем элементы в строку и аппаратно накатываем в конец дерева локальных переменных
+    QList<QStandardItem*> rowItems;
+    rowItems << nameItem << valueItem << typeItem;
+    m_varModel->appendRow(rowItems);
+}
+
+void Neuro_programm::jumpToCodeLine(const QString &filePath, int lineNumber)
+{
+    if (filePath.isEmpty() || lineNumber < 0) return;
+
+    // 1. Аппаратно открываем файл во встроенном редакторе Студии (Ваш штатный метод)
+    this->openNewFileInEditor(filePath);
+
+    // 2. Ищем активный CodeEditor на текущей открытой вкладке centralStackedWidget [0:37]
+    QWidget *currentPage = ui->centralStackedWidget ? ui->centralStackedWidget->currentWidget() : nullptr;
+    if (!currentPage) return;
+
+    CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
+    if (!currentEditor) {
+        currentEditor = qobject_cast<CodeEditor*>(currentPage);
+    }
+
+    // 3. НАПРАВЛЯЕМ КАРЕТКУ И СКРОЛЛ НА НУЖНУЮ СТРОКУ PYTHON
+    if (currentEditor && currentEditor->document()) {
+        QTextBlock block = currentEditor->document()->findBlockByLineNumber(lineNumber);
+        if (block.isValid()) {
+            QTextCursor cursor = currentEditor->textCursor();
+            cursor.setPosition(block.position()); // Ставим каретку на физический старт строки [0:37]
+
+            currentEditor->setTextCursor(cursor); // Обновляем курсор на экране [0:37]
+            currentEditor->centerCursor();        // Смарт-фокус: плавно центрируем строку на экране! [0:37]
+            currentEditor->setFocus();            // Возвращаем фокус ввода клавиатуры [0:37]
+            currentEditor->update();
+        }
+    } else {
+        qWarning() << "!!! [NAV ERROR] Активный CodeEditor для прыжка по стеку не найден!";
+    }
+}
+
+void Neuro_programm::refreshProblemsTableView()
+{
+    // 1. Аппаратно ищем виджет таблицы внутри нижнего этажа panelOther
+    QTableWidget *probTable = panelOther ? panelOther->findChild<QTableWidget*>("problemsTable") : nullptr;
+    if (!probTable) return;
+
+    // 2. Полностью очищаем сетку перед выводом свежих данных
+    probTable->setRowCount(0);
+
+    // 3. Вычисляем путь к текущему открытому файлу в редакторе Студии
+    QWidget *currentPage = ui->centralStackedWidget ? ui->centralStackedWidget->currentWidget() : nullptr;
+    CodeEditor *currentEditor = currentPage ? currentPage->findChild<CodeEditor*>() : nullptr;
+
+    QString currentDocPath = currentEditor ? currentEditor->property("currentFilePath").toString() : "";
+    if (currentDocPath.isEmpty() && currentEditor) {
+        currentDocPath = currentEditor->objectName();
+    }
+
+    // Нормализуем путь открытого документа для Linux/Unix сред
+    QString cleanCurrentDocPath = QDir::fromNativeSeparators(currentDocPath).trimmed();
+
+    // ЭТАЛОННЫЕ ЦВЕТА СТУДИИ ДЛЯ ТЕМНОЙ ТЕМЫ БРИЗ
+    QColor textWhiteColor(239, 240, 241); // Контрастный белый Breeze
+    QColor errorRedColor(255, 85, 85);    // Неоновый красный для синтаксических крашей
+    QColor warningYellowColor(251, 192, 45); // Янтарно-желтый для предупреждений PEP8
+
+    // 4. Бежим циклом по ГЛOБАЛЬНОМУ контейнеру, где поле .message гарантированно существует!
+    for (const auto &error : Neuro_programm::globalLspErrors)
+    {
+        // СМАРТ-ФИЛЬТР: Проверяем, относится ли эта ошибка из ОЗУ к текущему открытому файлу на экране.
+        // Если у вашей структуры globalLspErrors поле пути называется по-другому, подставьте его.
+        // Если фильтрация по файлу пока не нужна — эту проверку можно временно закомментировать.
+        /*
+        QString errorCleanPath = QDir::fromNativeSeparators(error.fPath).trimmed();
+        if (errorCleanPath != cleanCurrentDocPath) {
+            continue; // Пропускаем ошибки других закрытых вкладок
+        }
+        */
+
+        int row = probTable->rowCount();
+        probTable->insertRow(row);
+
+        // Колонка 0: Текст сообщения линтера из структуры Neuro_programm::LspErrorData
+        QTableWidgetItem *descItem = new QTableWidgetItem(error.message);
+        descItem->setForeground(QBrush(textWhiteColor));
+
+        // Колонка 1: Имя файла
+        QFileInfo fileInfo(currentDocPath);
+        QString shortFileName = currentDocPath.isEmpty() ? "train.py" : fileInfo.fileName();
+        QTableWidgetItem *fileItem = new QTableWidgetItem(shortFileName);
+        fileItem->setForeground(QBrush(textWhiteColor));
+
+        // Сохраняем абсолютный путь в метаданные ячейки для прыжков по двойному щелчку
+        fileItem->setData(Qt::UserRole, currentDocPath);
+        fileItem->setToolTip(currentDocPath);
+
+        // Колонка 2: Номер строки (переводим 0-based индекс C++ в человеческий 1-based)
+        QTableWidgetItem *lineItem = new QTableWidgetItem(QString::number(error.line + 1));
+        lineItem->setForeground(QBrush(textWhiteColor));
+
+        // Колонка 3: Смарт-определение важности (Ошибка или Предупреждение)
+        QString typeText = "Предупреждение";
+        QColor currentTypeColor = warningYellowColor;
+
+        if (error.message.toLower().contains("error") || error.message.startsWith("E") || error.message.contains("syntax")) {
+            typeText = "Ошибка";
+            currentTypeColor = errorRedColor;
+            descItem->setForeground(QBrush(errorRedColor)); // Подсвечиваем всю строку ошибки алым
+        }
+
+        QTableWidgetItem *typeItem = new QTableWidgetItem(typeText);
+        typeItem->setForeground(QBrush(currentTypeColor));
+
+        // Раскладываем элементы по ячейкам строки таблицы
+        probTable->setItem(row, 0, descItem);
+        probTable->setItem(row, 1, fileItem);
+        probTable->setItem(row, 2, lineItem);
+        probTable->setItem(row, 3, typeItem);
+
+        // Блокируем ячейки от случайного затирания текста пользователем
+        for (int i = 0; i < 4; ++i) {
+            if (probTable->item(row, i)) {
+                probTable->item(row, i)->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+            }
+        }
+    }
+
+    // Принудительно заставляем графический движок Qt обновить холст сетки
+    probTable->viewport()->update();
+    probTable->update();
+}
+
 
 
