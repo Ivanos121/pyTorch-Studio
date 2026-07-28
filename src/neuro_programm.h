@@ -23,6 +23,8 @@
 #include "stacktablehandler.h"
 #include "variablestablehandler.h"
 #include "savedata.h"
+#include "localaimanager.h"
+#include "aipromptwidget.h"
 
 #include <QMainWindow>
 #include <QCompleter>
@@ -40,6 +42,9 @@
 #include <QPointer>
 #include <QTextBrowser>
 #include <QWebEngineView>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QElapsedTimer>
 
 class JupyterClient;
 class JupyterManager;
@@ -70,6 +75,7 @@ public:
     QString calculateFileMd5(const QString &filePath);
     void syncVenvToRequirements();
     void updateProjectsListFromSettings();
+    QElapsedTimer m_aiGenerationTimer;
     static Neuro_programm* self;
     QString getCurrentOpenFilePath() const;
     void showFloatingDocumentation(const QString &htmlContent);
@@ -77,6 +83,8 @@ public:
     QStringList temporaryOpenFilesBackup;
     QProcess* getLspProcess() const { return lspProcess; }
     int globalLspDocVersion = 1;
+    ElidedLabel *statusLogLabel = nullptr;
+    AiPromptWidget *m_activePromptWidget = nullptr;
     int lspRequestId = 0;
     void applyGlobalFonts();
     struct LspErrorData {
@@ -108,15 +116,16 @@ public:
     void onReadFlash();
     void startFlashWritingProcess();
 
-
 public slots:
     void updateJediStatusText(const QString &message, bool isError);
     void updateJediStatusTextFromLsp(int errorCount);
+    void refreshProblemsTableView();
 
 signals:
     void signalSendChunkToConsole(const QString &text);
     void completionDataReceived(const QStringList &completions);
     void firmwareFlashSuccess();
+    void aiCodeGenerationRequested(int cursorPosition, const QString &promptText, const QString &fullCodeContext);
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -182,7 +191,6 @@ private:
     bool showSaveConfirmationDialog();
     void injectFinalMetricsToVariableTree(const QString &name, const QString &value, const QString &type);
     void jumpToCodeLine(const QString &filePath, int lineNumber);
-    void refreshProblemsTableView();
 
 private slots:
     void onFileDoubleClicked(const QModelIndex &index);
@@ -215,17 +223,21 @@ private slots:
     void onReplaceCurrent();
     void onReplaceAndFindNext();
     void onReplaceAll();
-    void on_action_uninstall_package_triggered();
-    void on_action_upgrade_package_triggered();
-    void on_action_upgrade_all_packages_triggered();
-    void on_action_install_from_requirements_triggered();
-    void on_action_freeze_requirements_triggered();
+    void action_uninstall_package_triggered();
+    void action_upgrade_package_triggered();
+    void action_upgrade_all_packages_triggered();
+    void action_install_from_requirements_triggered();
+    void action_freeze_requirements_triggered();
     void saveCurrentProjectChanges();
     void saveProjectAsArchive();
     void open_STM();
     void open_STM_work();
+    void openAiPromptBox();
+    void onPromptSubmitted(const QString &promptText);
 
 private:
+    bool isAiProcessing = false;
+    LocalAiManager* m_aiManager;
     QMenu *toolsMenu;
     QMenuBar *customMenuBar;
     QAction *actResume = nullptr;
@@ -259,7 +271,6 @@ private:
     Savedata *rsc5;
     Search *search;
     QAction *actProject;
-    ElidedLabel *statusLogLabel;
     QFileSystemModel *projectModel = nullptr;
     ProjectRootProxyModel *projectProxyModel = nullptr;
     QSplitter   *mainVerticalSplitter;
@@ -297,7 +308,7 @@ private:
     QByteArray m_lspAccumulatedBuffer;
     QWidget *leftSideBarContainer = nullptr;
     QAction *actDebug;
-
+    CodeEditor *currentEditor;
     bool isDocWindowActive = false;
     bool m_dragging = false;
     bool m_isDragging = false;
@@ -330,7 +341,7 @@ private:
     void highlightCurrentMatch(QTextCursor symbolCursor);
     void updateFunctionNavigator(CodeEditor *editor);
     void on_btnSidebarTerminal_clicked();
-    void on_action_install_package_triggered();
+    void action_install_package_triggered();
     bool createServicesConfig(const QString &projectName, const QString &projectFolderPath);
     bool createDefaultTrainNotebook(const QString &projectFolderPath);
     void closeStlink();
@@ -341,5 +352,6 @@ private:
     QStandardItemModel *m_sourcesModel = nullptr;
     void createMenus();
     void showPreferences();
+    void insertGeneratedCodeIntoEditor(const QString &generatedCode);
 };
 #endif // NEURO_PROGRAMM_H

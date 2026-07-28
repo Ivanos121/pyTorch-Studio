@@ -19,39 +19,43 @@ JupyterManager::~JupyterManager()
     stopServer();
 }
 
-void JupyterManager::startServer() {
-    // 2. Извлекаем из pystudio.conf абсолютный путь к вашему внешнему venv Python
-    QString pythonInterpreter = ConfigManager::instance().getValue("Python/InterpreterPath", "/usr/bin/python3").toString();
+void JupyterManager::startServer(const QString &projectRootPath)
+{
+    if (m_process->state() == QProcess::Running) return;
 
-    // 3. Вычисляем путь к папке bin внутри venv
-    int lastSlash = pythonInterpreter.lastIndexOf('/');
-    QString venvBinDir = pythonInterpreter.left(lastSlash);
+    // 1. Формируем путь к бинарнику jupyter
+    QString jupyterBin = QDir::home().absoluteFilePath(QStringLiteral("venv/bin/jupyter"));
 
-    // 4. Формируем изолированное Linux-окружение для виртуальной среды venv
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-
-    // Внедряем venv/bin в начало системного PATH, чтобы Python видел локальные библиотеки
-    QString currentPath = env.value("PATH");
-    env.insert("PATH", venvBinDir + QDir::listSeparator() + currentPath);
-
-    // Передаем маркер VIRTUAL_ENV (это завершает корректную активацию venv для подпроцессов)
-    int binPos = venvBinDir.lastIndexOf("/bin");
-    if (binPos != -1) {
-        QString venvRootDir = venvBinDir.left(binPos);
-        env.insert("VIRTUAL_ENV", venvRootDir);
+    if (!QFile::exists(jupyterBin)) {
+        jupyterBin = projectRootPath + QStringLiteral("/venv/bin/jupyter");
     }
 
-    m_process->setProcessEnvironment(env);
+    if (!QFile::exists(jupyterBin)) {
+        jupyterBin = QStringLiteral("jupyter");
+    }
 
-    // 5. Запускаем jupyter как модуль Python через абсолютный путь
-    // Это на 100% страхует от системной ошибки "execve: Файл или каталог не существует"
+    // =========================================================================
+    // ОБЯЗАТЕЛЬНО СЮДА: Объявляем переменную arguments, которой не хватало!
+    // =========================================================================
     QStringList arguments;
-    arguments << "-m" << "notebook" << "--no-browser";
 
-    qDebug() << "[JUPYTER] Запуск сервера через:" << pythonInterpreter;
+    arguments << QStringLiteral("server") // Теперь смело используем современный server!
+              << QStringLiteral("--no-browser")
+              << QStringLiteral("--port=8888")
+              << QStringLiteral("--ip=127.0.0.1")
+              << QStringLiteral("--IdentityProvider.token=")
+              << QStringLiteral("--ServerApp.allow_origin=*")
+              << QStringLiteral("--ServerApp.disable_check_xsrf=True")
+              << (QStringLiteral("--ServerApp.root_dir=") + projectRootPath);
 
-    m_process->start(pythonInterpreter, arguments);
+    // Наполняем список аргументами запуска сервера
+    m_process->setWorkingDirectory(projectRootPath);
+
+    // 3. Запускаем процесс
+    m_process->start(jupyterBin, arguments);
 }
+
+
 
 void JupyterManager::stopServer()
 {

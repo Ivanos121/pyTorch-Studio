@@ -41,7 +41,7 @@
           <item row="3" column="0">
            <widget class="QLineEdit" name="lineEdit_2">
             <property name="enabled">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
@@ -67,7 +67,7 @@
           <item row="3" column="1">
            <widget class="QPushButton" name="btnReadFlash">
             <property name="enabled">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
             <property name="minimumSize">
              <size>
@@ -219,7 +219,7 @@
                 <string notr="true">border: none; font-family: 'Monospace'; font-size: 12px; font-weight: bold; color: #333333;</string>
                </property>
                <property name="text">
-                <string>ST-Link v2-1: Скан...</string>
+                <string>Версия ST-Link: Скан...</string>
                </property>
               </widget>
              </item>

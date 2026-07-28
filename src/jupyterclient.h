@@ -15,7 +15,7 @@ public:
     ~JupyterClient();
 
     // Шаг 1: Подключение к серверу и запрос создания сессии ядра
-    void connectToJupyter(const QString &host, int port);
+    void connectToJupyter(const QString &host, int port, const QString &notebookPath);
 
     // Шаг 2: Отправка Python-кода на выполнение в фоновое ядро
     void executePythonCode(const QString &code);
@@ -25,6 +25,7 @@ signals:
     void codeOutputReceived(const QString &text);
     // Сигнал об успешном окончании выполнения ячейки
     void executionFinished(bool success);
+    void jupyterClientReady();
 
 private slots:
     void onSessionCreated(QNetworkReply *reply);

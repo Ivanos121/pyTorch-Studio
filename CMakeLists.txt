@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Название вашего проекта и исполняемого файла
 project(pytorch-studio VERSION 0.2 LANGUAGES CXX)
 
 # Включаем автоматическую генерацию мета-объектов Qt (MOC, UIC, RCC)
@@ -11,70 +10,118 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Поиск необходимых модулей Qt (извлекаем модули на основе ваших инклудов)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Charts Network WebEngineWidgets Concurrent
-    WebChannel WebSockets UiTools SerialPort)
-
-set(KF6_VERSION "6.26.0" CACHE STRING "Force KF6 Version" FORCE)
-set(KF6Parts_VERSION "6.26.0" CACHE STRING "Force KF6 Parts Version" FORCE)
-
-find_package(KF6Parts REQUIRED)
-
-# Список всех исходных файлов (.cpp) вашего проекта
-set(PROJECT_SOURCES
-    src/about_program.cpp
-    src/advancedclosedialog.cpp
-    src/aiprojectmodel.cpp
-    src/breezeflatstyle.cpp
-    src/codeeditor.cpp
-    src/help_window.cpp
-    src/main.cpp
-    src/minimaparea.cpp
-    src/neuro_programm.cpp
-    src/panel_other.cpp
-    src/projectrootproxymodel.cpp
-    src/replwidget.cpp
-    src/search.cpp
-    src/settings.cpp
-    src/start_progect.cpp
-    src/statusbuttonstyle.cpp
-    src/terminalwidget.cpp
-    src/editorplaceholder.cpp
-    src/stickyscrollarea.cpp
-    src/qhtmldelegate.cpp
-    src/elidedlabel.cpp
-    src/projectmanager.cpp
-    src/configmanager.cpp
-    src/preferencesdialog.cpp
-
-    src/FolderBlockData.h
-    src/about_program.h
-    src/advancedclosedialog.h
-    src/aiprojectmodel.h
-    src/breezeflatstyle.h
-    src/codeeditor.h
-    src/help_window.h
-    src/minimaparea.h
-    src/neuro_programm.h
-    src/panel_other.h
-    src/projectrootproxymodel.h
-    src/replwidget.h
-    src/search.h
-    src/settings.h
-    src/start_progect.h
-    src/statusbuttonstyle.h
-    src/terminalwidget.h
-    src/editorplaceholder.h
-    src/stickyscrollarea.h
-    src/qhtmldelegate.h
-    src/elidedlabel.h
-    src/projectmanager.h
-    src/configmanager.h
-    src/preferencesdialog.h
+# Поиск необходимых модулей Qt6
+find_package(Qt6 REQUIRED COMPONENTS
+    Core Gui Widgets DBus Charts Network WebEngineWidgets
+    Concurrent WebChannel WebSockets UiTools SerialPort
 )
 
-# Список всех файлов интерфейса (.ui)
-set(PROJECT_FORMS
+# Поиск компонентов KDE (KF6)
+find_package(KF6Parts REQUIRED)
+
+# НАЙТИ LIBUSB (Обязательно для Linux)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
+
+# Единый список ВСЕХ исходных файлов (.cpp, .h, .ui, .qrc)
+set(PROJECT_SOURCES
+    # Главные файлы и базовые компоненты
+    src/main.cpp
+    src/codeeditor.cpp
+    src/codeeditor.h
+    src/neuro_programm.cpp
+    src/neuro_programm.h
+    src/about_program.cpp
+    src/about_program.h
+    src/help_window.cpp
+    src/help_window.h
+    src/settings.cpp
+    src/settings.h
+    src/search.cpp
+    src/search.h
+    src/start_progect.cpp
+    src/start_progect.h
+    src/documentmanager.cpp
+    src/documentmanager.h
+
+    # Стили и вспомогательные виджеты
+    src/breezeflatstyle.cpp
+    src/breezeflatstyle.h
+    src/statusbuttonstyle.cpp
+    src/statusbuttonstyle.h
+    src/minimaparea.cpp
+    src/minimaparea.h
+    src/editorplaceholder.cpp
+    src/editorplaceholder.h
+    src/stickyscrollarea.cpp
+    src/stickyscrollarea.h
+    src/qhtmldelegate.cpp
+    src/qhtmldelegate.h
+    src/elidedlabel.cpp
+    src/elidedlabel.h
+    src/replwidget.cpp
+    src/replwidget.h
+    src/terminalwidget.cpp
+    src/terminalwidget.h
+    src/advancedclosedialog.cpp
+    src/advancedclosedialog.h
+
+    # Менеджеры данных, процессов и ИИ
+    src/projectmanager.cpp
+    src/projectmanager.h
+    src/configmanager.cpp
+    src/configmanager.h
+    src/preferencesdialog.cpp
+    src/preferencesdialog.h
+    src/localaimanager.cpp
+    src/localaimanager.h
+    src/aiprojectmodel.cpp
+    src/aiprojectmodel.h
+    src/projectrootproxymodel.cpp
+    src/projectrootproxymodel.h
+    src/panel_other.cpp
+    src/panel_other.h
+    src/ai_panel.cpp
+    src/ai_panel.h
+    src/pythonenvmanager.cpp
+    src/pythonenvmanager.h
+    src/projectbuilderworker.cpp
+    src/projectbuilderworker.h
+    src/pipmanagerpage.cpp
+    src/pipmanagerpage.h
+    src/jupytermanager.cpp
+    src/jupytermanager.h
+    src/jupyterclient.cpp
+    src/jupyterclient.h
+    src/tensorboardmanager.cpp
+    src/tensorboardmanager.h
+    src/huggingfacemanager.cpp
+    src/huggingfacemanager.h
+
+    # Отладчик и прошивка (USB / STM)
+    src/debugmanager.cpp
+    src/debugmanager.h
+    src/debug_panel.cpp
+    src/debug_panel.h
+    src/prog_stm.cpp
+    src/prog_stm.h
+    src/stacktablehandler.cpp
+    src/stacktablehandler.h
+    src/variablestablehandler.cpp
+    src/variablestablehandler.h
+    src/savedata.cpp
+    src/savedata.h
+    src/usbreceiver.cpp
+    src/usbreceiver.h
+    src/prog_stm_work.cpp
+    src/prog_stm_work.h
+    src/aipromptwidget.cpp
+    src/aipromptwidget.h
+
+    # Чистые заголовочные файлы структур данных
+    src/FolderBlockData.h
+
+    # Файлы интерфейсов (.ui)
     src/about_program.ui
     src/help_window.ui
     src/neuro_programm.ui
@@ -82,93 +129,50 @@ set(PROJECT_FORMS
     src/search.ui
     src/settings.ui
     src/start_progect.ui
+    src/ai_panel.ui
+    src/debug_panel.ui
+    src/prog_stm.ui
+    src/savedata.ui
+    src/prog_stm_work.ui
+
+    # Файлы ресурсов (.qrc)
+    src/resources.qrc
 )
 
-# Список файлов ресурсов (.qrc), где лежат ваши иконки и картинки
-set(PROJECT_RESOURCES
-    src/resources.qrc # Замените на реальное имя вашего .qrc файла
-)
+# Создаем исполняемый файл проекта
+add_executable(pytorch-studio ${PROJECT_SOURCES})
 
-# Создаем исполняемый файл приложения Linux
-add_executable(pytorch-studio
-    ${PROJECT_SOURCES}
-    ${PROJECT_FORMS}
-    ${PROJECT_RESOURCES}
-    src/minimaparea.h src/minimaparea.cpp
-    src/editorplaceholder.h src/editorplaceholder.cpp
-    src/stickyscrollarea.h src/stickyscrollarea.cpp
-    src/qhtmldelegate.h src/qhtmldelegate.cpp
-    src/elidedlabel.h src/elidedlabel.cpp
-    src/ai_panel.h src/ai_panel.cpp src/ai_panel.ui
-    src/pythonenvmanager.h src/pythonenvmanager.cpp
-    src/projectbuilderworker.h src/projectbuilderworker.cpp
-    src/pipmanagerpage.h src/pipmanagerpage.cpp
-    src/jupytermanager.h src/jupytermanager.cpp
-    src/tensorboardmanager.h src/tensorboardmanager.cpp
-    src/jupyterclient.h src/jupyterclient.cpp
-    src/huggingfacemanager.h src/huggingfacemanager.cpp
-    src/debugmanager.h src/debugmanager.cpp
-    src/debug_panel.h src/debug_panel.cpp src/debug_panel.ui
-    src/projectmanager.h src/projectmanager.cpp
-    src/documentmanager.h src/documentmanager.cpp
-    src/prog_stm.h src/prog_stm.cpp src/prog_stm.ui
-    src/stacktablehandler.h src/stacktablehandler.cpp
-    src/variablestablehandler.h src/variablestablehandler.cpp
-    src/savedata.h src/savedata.cpp src/savedata.ui
-    src/configmanager.h src/configmanager.cpp
-    src/preferencesdialog.h src/preferencesdialog.cpp
-    src/configmanager.h src/configmanager.cpp
-    src/preferencesdialog.h src/preferencesdialog.cpp
-    src/usbreceiver.h src/usbreceiver.cpp
-    src/prog_stm_work.h src/prog_stm_work.cpp src/prog_stm_work.ui
-)
-
-# Указываем CMake искать заголовочные файлы в корне проекта
-# Это позволит компилятору находить <panel_other.h> и другие локальные файлы
+# Указываем пути поиска заголовочных файлов
 target_include_directories(pytorch-studio PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_include_directories(pytorch-studio PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${LIBUSB_INCLUDE_DIRS}
 )
 
-# 2. Подключаем саму собранную статическую библиотеку (файл libstlink.a)
+# Линковка статической библиотеки проекта, libusb и KF6
 target_link_libraries(pytorch-studio PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/libstlink.a
-)
-
-# 3. НАЙТИ И ПОДКЛЮЧИТЬ LIBUSB (Обязательно для Linux!)
-# Так как libstlink работает через USB, ей необходима системная библиотека libusb-1.0
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
-
-target_include_directories(pytorch-studio PRIVATE ${LIBUSB_INCLUDE_DIRS})
-target_link_libraries(pytorch-studio PRIVATE ${LIBUSB_LIBRARIES})
-
-# Линковка системных библиотек и модулей Qt к вашему приложению
-target_link_libraries(pytorch-studio PRIVATE
-    Qt${QT_VERSION_MAJOR}::Core
-    Qt${QT_VERSION_MAJOR}::Gui
-    Qt${QT_VERSION_MAJOR}::Widgets
-    Qt${QT_VERSION_MAJOR}::DBus
-    Qt${QT_VERSION_MAJOR}::Charts
-    Qt${QT_VERSION_MAJOR}::Network
-    Qt${QT_VERSION_MAJOR}::WebEngineWidgets
-    Qt${QT_VERSION_MAJOR}::Concurrent
-    Qt${QT_VERSION_MAJOR}::WebChannel
-    Qt${QT_VERSION_MAJOR}::WebSockets
-    Qt${QT_VERSION_MAJOR}::UiTools
-    Qt${QT_VERSION_MAJOR}::SerialPort
-
+    ${LIBUSB_LIBRARIES}
     KF6::Parts
 )
 
+# Линковка модулей Qt6
 target_link_libraries(pytorch-studio PRIVATE
-    KF6::Parts
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::DBus
+    Qt6::Charts
+    Qt6::Network
+    Qt6::WebEngineWidgets
+    Qt6::Concurrent
+    Qt6::WebChannel
+    Qt6::WebSockets
+    Qt6::UiTools
+    Qt6::SerialPort
 )
 
-# Установка имени WM_CLASS для Wayland (чтобы работала иконка приложения)
+# Настройки свойств исполняемого файла
 set_target_properties(pytorch-studio PROPERTIES
     OUTPUT_NAME "pytorch-studio"
 )
@@ -177,7 +181,7 @@ set_target_properties(pytorch-studio PROPERTIES
 string(TIMESTAMP CURRENT_DATE "%y%m%d")
 set(DYNAMIC_BUILD_NUMBER "1.0.${CURRENT_DATE}")
 
-# Передаем сгенерированное значение в компилятор
+# Передаем сгенерированное значение в компилятор C++
 target_compile_definitions(pytorch-studio PRIVATE
     APP_BUILD_NUMBER="${DYNAMIC_BUILD_NUMBER}"
     APP_VERSION_MAJOR=1

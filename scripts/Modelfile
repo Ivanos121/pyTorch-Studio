@@ -1,0 +1,6 @@
+# Указываем Ollama физический файл модели на диске
+FROM /home/elf/pyTorch-Studio/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf
+
+# Задаем базовые параметры контекста и температуры для кода
+PARAMETER num_ctx 4096
+PARAMETER temperature 0.2

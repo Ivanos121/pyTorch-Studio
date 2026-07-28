@@ -13,7 +13,7 @@ public:
     ~JupyterManager();
 
     // Запуск фонового Jupyter Notebook Server
-    void startServer();
+    void startServer(const QString &projectRootPath);
 
     // Мягкая остановка фонового сервера
     void stopServer();

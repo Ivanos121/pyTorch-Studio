@@ -69,8 +69,10 @@ void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &contex
         }
     }
     if (type == QtFatalMsg) {
-        QMutexLocker locker(&logMutex);
-        if (logFile.isOpen()) logFile.close();
+        if (logFile.isOpen()) {
+            logFile.flush(); // Просто сбрасываем буферы на диск
+            logFile.close();
+        }
         abort();
     }
 }
@@ -83,9 +85,6 @@ int main(int argc, char *argv[])
     qputenv("FONTCONFIG_FILE", "/etc/fonts/fonts.conf");
     qputenv("FONTCONFIG_PATH", "/etc/fonts");
 
-    // =========================================================================
-    // КРИТИЧЕСКИЙ ФИКС БЛОКИРОВКИ СТАРТА ТЕКСТА (ОБХОД CORS ДЛЯ FILE://)
-    // =========================================================================
     // Разрешаем Chromium загружать JS-модули xterm.js напрямую с жесткого диска
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-web-security --allow-file-access-from-files");
 
@@ -94,7 +93,25 @@ int main(int argc, char *argv[])
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::Round);
 #endif
 
+    QCoreApplication::setOrganizationName(QStringLiteral("elf"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("io.github.elf"));
+    QCoreApplication::setApplicationName(QStringLiteral("pytorch-studio"));
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("pytorch-studio"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("pytorch-studio"));
+
     QApplication a(argc, argv);
+
+    const QString systemIconPath = QDir::home().absoluteFilePath(QStringLiteral(".local/share/icons/hicolor/scalable/apps/pytorch-studio.svg"));
+    const QString fallbackResourcePath = QStringLiteral(":/Data/Icons/pytorch-studio.svg");
+
+    QIcon appIcon = QIcon::fromTheme(QStringLiteral("pytorch-studio"));
+
+    // Резервный вариант: если программа запущена в режиме разработки и ярлыки еще не установлены
+    if (appIcon.isNull()) {
+        appIcon = QIcon(QStringLiteral(":/Data/Icons/pytorch-studio.svg"));
+    }
+
+    a.setWindowIcon(appIcon);
 
     QFont globalFixedFont;
     globalFixedFont.setFamily("Liberation Mono"); // Ваш проверенный шрифт
@@ -111,12 +128,6 @@ int main(int argc, char *argv[])
     qDebug() << "Флаг моноширинности (Fixed Pitch):"
              << (appFontInfo.fixedPitch() ? " ДА, МОНОШИРИННЫЙ" : " НЕТ, ПРОПОРЦИОНАЛЬНЫЙ");
     qDebug() << "============================================================";
-
-    QCoreApplication::setApplicationName("pytorch-studio");
-    a.setDesktopFileName("pytorch-studio");
-
-    QIcon appIcon(":/Data/Icons/pytorch-studio.svg");
-    a.setWindowIcon(appIcon);
 
     // Формируем строковую версию из макросов сборщика: "2026.1-LTS"
     QString appVersion = QString("%1.%2-%3")

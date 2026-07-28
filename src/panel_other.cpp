@@ -1,5 +1,5 @@
 #include "panel_other.h"
-#include "replwidget.h"
+//#include "replwidget.h"
 #include "ui_panel_other.h"
 #include "neuro_programm.h"
 
@@ -10,7 +10,7 @@
 #include <QStyleFactory>
 #include <QScrollBar>
 #include <QTextCursor>
-#include <iostream>
+//#include <iostream>
 #include <QSettings>
 #include <QJsonParseError>
 #include <QJsonDocument>
@@ -156,56 +156,72 @@ panel_other::panel_other(QWidget *parent) :
     this->setStyleSheet("QWidget#MyCustomTerminalPanel { border: 1px solid #b0b0b0 !important; }");
 
     // =========================================================================
-    // 3. НАСТРОЙКА И СТИЛИЗАЦИЯ КОНСОЛИ ЛОГОВ И КНОПОК НАВИГАЦИИ
+    // 3. ИСПРАВЛЕННАЯ НАСТРОЙКА И СТИЛИЗАЦИЯ КОНСОЛИ ЛОГОВ И КНОПОК НАВИГАЦИИ
     // =========================================================================
-    QString logFontFamily = settings.value("Editor/FontFamily", "Liberation Mono").toString();
-    int logFontSize = settings.value("Editor/FontSize", 10).toInt();
+    QString logFontFamily = settings.value(QStringLiteral("Editor/FontFamily"), QStringLiteral("Liberation Mono")).toString();
+    int logFontSize = settings.value(QStringLiteral("Editor/FontSize"), 10).toInt();
     QFont logFont(logFontFamily, logFontSize);
     logFont.setFixedPitch(true);
 
-    ui->logEdit->setFont(logFont);
-    ui->logEdit->setReadOnly(true);
-    ui->logEdit->setUndoRedoEnabled(false);
-    ui->logEdit->setMaximumBlockCount(3000);
-    ui->logEdit->setStyleSheet(
-        "QPlainTextEdit { background-color: #232629; color: #eff0f1; border: none; padding: 10px; }"
-        );
+    if (ui->logEdit) {
+        ui->logEdit->setFont(logFont);
+        ui->logEdit->setReadOnly(true);
+        ui->logEdit->setUndoRedoEnabled(false);
+        ui->logEdit->setMaximumBlockCount(3000);
+        ui->logEdit->setStyleSheet(
+            QStringLiteral("QPlainTextEdit { background-color: #000000; color: #00FF00; font-family: 'Courier New', 'Consolas', monospace; font-size: 11pt; border: 1px solid #333333; padding: 10px; }")
+            );
+    }
 
+    // Кнопка ЛОГИ: Переключает строго на страницу с индексом 2
     if (ui->btnViewLog) {
         connect(ui->btnViewLog, &QPushButton::clicked, this, [this]() {
-            ui->stackedWidget->setCurrentIndex(1);
-            ui->stackedWidget->show();
+            if (ui->stackedWidget) {
+                ui->stackedWidget->setCurrentIndex(2);
+                ui->stackedWidget->show();
+            }
         });
     }
 
+    // Кнопка ТЕРМИНАЛ: Переключает строго на страницу с индексом 0 (Bash + REPL)
     if (ui->termView) {
         connect(ui->termView, &QPushButton::clicked, this, [this]() {
-            ui->stackedWidget->setCurrentIndex(0);
-            ui->stackedWidget->show();
+            if (ui->stackedWidget) {
+                ui->stackedWidget->setCurrentIndex(0);
+                ui->stackedWidget->show();
+            }
         });
     }
 
-    // if (actDebug) {
-    //     connect(ui->termView, &QPushButton::clicked, this, [this]() {
-    //         ui->stackedWidget->setCurrentIndex(2);
-    //         ui->stackedWidget->show();
-    //     });
-    // }
-
-    connect(ui->btnClose2, &QPushButton::clicked, this, &panel_other::close);
+    if (ui->btnClose2) {
+        connect(ui->btnClose2, &QPushButton::clicked, this, &panel_other::close);
+    }
 
     // =========================================================================
-    // 4. ЛОГИКА КНОПКИ-ЦИКЛЕРА РЕЖИМОВ СПЛИТТЕРА
+    // 4. ИСПРАВЛЕННАЯ ЛОГИКА КНОПКИ-ЦИКЛЕРА РЕЖИМОВ (btnCycleConsoles)
     // =========================================================================
     if (ui->btnCycleConsoles) {
-        ui->btnCycleConsoles->setText("Режим: Терминал + REPL");
+        ui->btnCycleConsoles->setText(QStringLiteral("Режим: Терминал + REPL"));
+        m_splitterMode = 0; // Изначальный режим
+
         connect(ui->btnCycleConsoles, &QPushButton::clicked, this, [this]() {
+            if (!ui->stackedWidget) return;
+
+            // ХАК-ФИКС: Если пользователь нажимает циклер, находясь на странице логов (индекс 2),
+            // мы ПРИНУДИТЕЛЬНО возвращаем его на страницу терминалов (индекс 0)
+            if (ui->stackedWidget->currentIndex() == 2) {
+                ui->stackedWidget->setCurrentIndex(0);
+                // При возврате не переключаем режим сплиттера сразу, даем пользователю увидеть текущее состояние
+                return;
+            }
+
+            // Стандартное циклическое переключение режимов внутри страницы 0
             m_splitterMode = (m_splitterMode + 1) % 3;
             switch (m_splitterMode) {
             case 0:
                 ui->myTerminalWidget->show();
                 ui->replContainer->show();
-                ui->btnCycleConsoles->setText("Режим: Терминал + REPL");
+                ui->btnCycleConsoles->setText(QStringLiteral("Режим: Терминал + REPL"));
                 if (ui->splitter) {
                     QList<int> sizes;
                     sizes << ui->splitter->width() / 2 << ui->splitter->width() / 2;
@@ -213,16 +229,18 @@ panel_other::panel_other(QWidget *parent) :
                 }
                 if (m_terminalPart1) m_terminalPart1->widget()->setFocus();
                 break;
+
             case 1:
                 ui->myTerminalWidget->show();
                 ui->replContainer->hide();
-                ui->btnCycleConsoles->setText("Режим: Только Терминал");
+                ui->btnCycleConsoles->setText(QStringLiteral("Режим: Только Терминал"));
                 if (m_terminalPart1) m_terminalPart1->widget()->setFocus();
                 break;
+
             case 2:
                 ui->myTerminalWidget->hide();
                 ui->replContainer->show();
-                ui->btnCycleConsoles->setText("Режим: Только REPL");
+                ui->btnCycleConsoles->setText(QStringLiteral("Режим: Только REPL"));
                 if (m_replEdit) m_replEdit->setFocus();
                 break;
             }
@@ -230,39 +248,43 @@ panel_other::panel_other(QWidget *parent) :
     }
 
     // =========================================================================
-    // 5. ОЧИСТКА АКТИВНОЙ КОНСОЛИ
+    // 5. ИСПРАВЛЕННАЯ ОЧИСТКА АКТИВНОЙ КОНСОЛИ (btnClearActive)
     // =========================================================================
     if (ui->btnClearActive) {
         connect(ui->btnClearActive, &QPushButton::clicked, this, [this]() {
+            if (!ui->stackedWidget) return;
+
             int currentIndex = ui->stackedWidget->currentIndex();
+
+            // Если мы на странице терминалов
             if (currentIndex == 0) {
+                // Если фокус в REPL или терминал скрыт — чистим REPL
                 if ((m_replEdit && m_replEdit->hasFocus()) || ui->myTerminalWidget->isHidden()) {
                     if (m_replEdit) m_replEdit->clear();
                 }
+                // Иначе шлем Ctrl+L в нативный KonsolePart
                 else if (m_terminalPart1 && m_terminalPart1->widget()) {
                     QWidget *targetWidget = m_terminalPart1->widget();
-                    QKeyEvent *pressEvent = new QKeyEvent(QEvent::KeyPress, Qt::Key_L, Qt::ControlModifier, "l");
-                    QKeyEvent *releaseEvent = new QKeyEvent(QEvent::KeyRelease, Qt::Key_L, Qt::ControlModifier, "l");
+                    QKeyEvent *pressEvent = new QKeyEvent(QEvent::KeyPress, Qt::Key_L, Qt::ControlModifier, QStringLiteral("l"));
+                    QKeyEvent *releaseEvent = new QKeyEvent(QEvent::KeyRelease, Qt::Key_L, Qt::ControlModifier, QStringLiteral("l"));
                     QApplication::postEvent(targetWidget, pressEvent);
                     QApplication::postEvent(targetWidget, releaseEvent);
                 }
             }
-            else if (currentIndex == 1) {
-                ui->logEdit->clear();
+            // ИСПРАВЛЕНО: Если мы на странице логов обучения (индекс СТРОГО 2)
+            else if (currentIndex == 2) {
+                if (ui->logEdit) ui->logEdit->clear();
             }
         });
     }
 
     // =========================================================================
-    // ЖЕСТКИЙ ФИКС: ДЕЛИМ НИЖНЮЮ ПАНЕЛЬ РОВНО ПОПОЛАМ (50/50) ПРИ СТАРТЕ
+    // ЖЕСТКИЙ ФИКС СПЛИТТЕРА ПРИ СТАРТЕ (50/50)
     // =========================================================================
     if (ui->splitter) {
-        // Задаем режим, чтобы при растяжении окна пропорции 50/50 сохранялись
         ui->splitter->setStretchFactor(0, 1);
         ui->splitter->setStretchFactor(1, 1);
 
-        // Посылаем одноразовый таймер, чтобы Qt успел рассчитать геометрию окна,
-        // после чего делим доступную ширину пополам
         QTimer::singleShot(100, this, [this]() {
             if (ui->splitter) {
                 int totalWidth = ui->splitter->width();
@@ -273,15 +295,6 @@ panel_other::panel_other(QWidget *parent) :
         });
     }
 
-    ui->logEdit->setStyleSheet(
-        "background-color: #000000; "
-        "color: #00FF00; "
-        "font-family: 'Courier New', 'Consolas', monospace; "
-        "font-size: 11pt; "
-        "border: 1px solid #333333;"
-        );
-
-    // Инициализируем обработчик прямо здесь, передавая ему вашу таблицу
     m_stackHandler = new StackTableHandler(ui->callStackListWidget, this);
 
     // Связываем сигнал двойного клика из обработчика с сигналом-ретранслятором панели

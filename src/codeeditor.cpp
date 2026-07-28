@@ -5,12 +5,12 @@
 #include "neuro_programm.h"
 #include "stickyscrollarea.h"
 #include "qhtmldelegate.h"
+#include "aipromptwidget.h"
 
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QTimer>
-#include <iostream>
 #include <QComboBox>
 #include <QStackedWidget>
 #include <QPainter>
@@ -22,7 +22,6 @@
 #include <QScrollBar>
 #include <QStatusBar>
 #include <QDateTime>
-#include <QtConcurrent>
 #include <QFuture>
 #include <QMenu>
 #include <QTextBlock>
@@ -34,6 +33,7 @@
 #include <QTextStream>
 #include <QSettings>
 #include <QStyleFactory>
+#include <qtconcurrentrun.h>
 
 QList<CodeEditor::LspErrorData> CodeEditor::currentLspErrors;
 
@@ -459,27 +459,43 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
             );
     }
 
-    // =========================================================================
-    // ЖЕЛЕЗНЫЙ ФИКС ДЛЯ ШОРТКАТА CTRL+Q НА УРОВНЕ ВСЕГО РЕДАКТОРА
-    // =========================================================================
-    // Создаем шорткат, который принудительно сработает, когда вы нажмете Ctrl+Q в коде!
-    // QShortcut *shortcutDoc = new QShortcut(QKeySequence("Ctrl+Q"), this);
-    // connect(shortcutDoc, &QShortcut::activated, this, [this]() {
-    //     if (m_popupWindow && m_popupWindow->isVisible() && m_listWidget) {
-    //         QListWidgetItem* currentItem = m_listWidget->currentItem();
-    //         if (currentItem) {
-    //             if (m_popupWindow) m_popupWindow->hide();
-    //             this->setFocus();
+    // === ИНТЕГРАЦИЯ AI COPILOT GENERATOR (ХОТКЕЙ CTRL + I) ===
+    QShortcut *shortcutAiGenerate = new QShortcut(QKeySequence("Ctrl+L"), this);
+    connect(shortcutAiGenerate, &QShortcut::activated, this, [this]() {
 
-    //             QString cleanMethodName = currentItem->text().remove(QRegularExpression("<[^>]*>"));
-    //             QTextCursor cursor = this->textCursor();
-    //             QString realActivePath = this->objectName().isEmpty() ? this->currentFilePath : this->objectName();
-    //             if (!realActivePath.isEmpty()) {
-    //                 emit documentationRequested(realActivePath, cursor.blockNumber(), cursor.columnNumber());
-    //             }
-    //         }
-    //     }
-    // });
+                // Вызываем наш вынесенный отдельный класс
+                AiPromptWidget *aiWidget = new AiPromptWidget(this);
+                aiWidget->setAttribute(Qt::WA_DeleteOnClose);
+
+                // Вычисляем точные экранные координаты каретки
+                QPoint cursorGlobalPos = this->mapToGlobal(this->cursorRect().bottomLeft());
+                aiWidget->move(cursorGlobalPos.x(), cursorGlobalPos.y() + 4);
+
+                // === НАЙДИТЕ ЭТОТ БЛОК И ЗАМЕНИТЕ ЕГО ПОЛНОСТЬЮ ===
+                connect(aiWidget, &AiPromptWidget::promptSubmitted, this, [this](const QString &prompt) {
+                    if (prompt.isEmpty()) return;
+
+                    if (Neuro_programm::self) {
+                        int insertPosition = this->textCursor().position();
+                        QString fullCode = this->toPlainText();
+
+                        qInfo() << ">>> [AI COPILOT] Вызываю генерацию через мета-систему invokeMethod...";
+
+                        // БРОНИРОВАННЫЙ ВЫЗОВ: Вызываем ИИ-метод по его строковому имени.
+                        // Это на 100% убирает ошибку компиляции "has no member named"!
+                        QMetaObject::invokeMethod(Neuro_programm::self, "aiCodeGenerationRequested",
+                                                  Qt::QueuedConnection,
+                                                  Q_ARG(int, insertPosition),
+                                                  Q_ARG(QString, prompt),
+                                                  Q_ARG(QString, fullCode)
+                                                  );
+                    }
+                });
+
+                aiWidget->show();
+                aiWidget->m_lineEdit->setFocus();
+            });
+
 }
 
 CodeEditor::~CodeEditor()
@@ -615,7 +631,7 @@ void CodeEditor::lineNumberAreaPaintEvent(QPaintEvent *event)
                     painter.setRenderHint(QPainter::Antialiasing, true);
 
                     // Выставляем яркий, глубокий синий цвет (акцент на текущую строку)
-                    painter.setPen(QPen(QColor("#0066cc"), 2));
+                    painter.setPen(QPen(QColor(0x0066cc), 2));
 
                     QFont arrowFont = painter.font();
                     arrowFont.setBold(true);
@@ -663,11 +679,11 @@ void CodeEditor::lineNumberAreaPaintEvent(QPaintEvent *event)
                     font.setWeight(QFont::Black);
                     font.setPixelSize(fontMetrics().height() - 1);
                     painter.setFont(font);
-                    painter.setPen(QColor("#000000"));
+                    painter.setPen(QColor(QRgb(0x000000)));
             } else if (isInSelectionRange) {
                     font.setBold(true);
                     painter.setFont(font);
-                    painter.setPen(QColor("#111111"));
+                    painter.setPen(QColor(0x111111));
             } else {
                     font.setBold(false);
                     painter.setFont(font);
@@ -690,10 +706,10 @@ void CodeEditor::lineNumberAreaPaintEvent(QPaintEvent *event)
                     painter.save();
                     if (foldData->changeState == FolderBlockData::Modified) {
                         painter.setPen(Qt::NoPen);
-                        painter.setBrush(QColor("#ff3333"));
+                        painter.setBrush(QColor(0xff3333));
                 } else if (foldData->changeState == FolderBlockData::Saved) {
                         painter.setPen(Qt::NoPen);
-                        painter.setBrush(QColor("#4cf54c"));
+                        painter.setBrush(QColor(0x4cf54c));
                 }
                 int markerWidth = 3;
                     int markerX = lineNumberArea->width() - markerWidth;
@@ -718,31 +734,34 @@ void CodeEditor::highlightCurrentLine()
     int docTotalChars = this->document() ? this->document()->characterCount() : 0;
     if (docTotalChars <= 0) return;
 
-    // 1. ПОДСВЕТКА ТЕКУЩЕЙ СТРОКИ КОДА [0:427]
+    // 1. ПОДСВЕТКА ТЕКУЩЕЙ СТРОКИ КОДА
     if (!isReadOnly()) {
         QTextEdit::ExtraSelection selection;
-        selection.format.setBackground(QColor(228, 242, 252)); // Breeze цвет [0:427]
-        selection.format.setProperty(QTextFormat::FullWidthSelection, true); // [0:427]
-        selection.cursor = textCursor(); // [0:427]
+        selection.format.setBackground(QColor(228, 242, 252));
+        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+        selection.cursor = textCursor();
 
         // Безопасный предохранитель для текущего системного курсора
-        if (selection.cursor.position() >= 0 && selection.cursor.position() < docTotalChars) {
-            selection.cursor.clearSelection(); // [0:427]
-            extraSelections.append(selection); // [0:427]
+        if (selection.cursor.position() >= 0 && selection.cursor.position() < docTotalChars)
+        {
+            selection.cursor.clearSelection();
+            extraSelections.append(selection);
         }
     }
 
     // 2. БЕЗОПАСНАЯ ИНТЕГРАЦИЯ ОШИБОК СЕРВЕРА (ФИКС OUT OF RANGE НА ПОЗИЦИЮ 4228)
-    for (const QTextEdit::ExtraSelection &lspSel : m_currentLspSelections) {
+    for (const QTextEdit::ExtraSelection &lspSel : std::as_const(m_currentLspSelections))
+    {
         // Здесь используется строго lspSel.cursor!
-        if (!lspSel.cursor.isNull() && lspSel.cursor.position() < docTotalChars) {
+        if (!lspSel.cursor.isNull() && lspSel.cursor.position() < docTotalChars)
+        {
             extraSelections.append(lspSel);
         }
     }
 
     // 3. ОТРИСОВКА ВИРТУАЛЬНЫХ КУРСОРОВ ДЛЯ МУЛЬТИКУРСОРНОСТИ [0:427]
     int mainCaretPos = textCursor().position();
-    for (const QTextCursor &vCursor : m_virtualCursors) {
+    for (const QTextCursor &vCursor : std::as_const(m_virtualCursors)) {
         if (vCursor.position() == mainCaretPos) continue;
 
         // Здесь используется строго vCursor!
@@ -847,11 +866,15 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
         QString leftOfCursor = lineText.left(cursor.columnNumber());
         int lastDotIndex = leftOfCursor.lastIndexOf('.');
 
-        if (lastDotIndex == -1 && e->key() == Qt::Key_Backspace &&
-            !leftOfCursor.contains(QRegularExpression("[a-zA-Z0-9_]"))) {
-            m_popupWindow->hide();
-            this->setFocus();
-            return;
+        if (lastDotIndex == -1 && e->key() == Qt::Key_Backspace)
+        {
+            static const QRegularExpression wordCharRegex("[a-zA-Z0-9_]");
+            if (!leftOfCursor.contains(wordCharRegex))
+            {
+                m_popupWindow->hide();
+                this->setFocus();
+                return;
+            }
         }
 
         QString currentPrefix = "";
@@ -881,7 +904,7 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
                 static const QRegularExpression htmlRegex("<[^>]*>");
                 itemText.remove(htmlRegex);
             }
-            bool matches = itemText.toLower().startsWith(currentPrefix);
+            bool matches = itemText.startsWith(currentPrefix, Qt::CaseInsensitive);
 
             if (matches && !currentPrefix.isEmpty()) {
                 QString typedPart = itemText.left(currentPrefix.length());
@@ -1061,7 +1084,8 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
             m_listWidget->setCurrentRow(nextRow);
             if (m_listWidget->item(nextRow)) {
                 m_listWidget->setCurrentItem(m_listWidget->item(nextRow));
-                QString cleanText = m_listWidget->item(nextRow)->text().remove(QRegularExpression("<[^>]*>"));
+                static const QRegularExpression htmlTagRegex("<[^>]*>");
+                QString cleanText = m_listWidget->item(nextRow)->text().remove(htmlTagRegex);
                 qDebug() << ">>> [STRELI LOG] Нажата стрелка ВНИЗ | Индекс:" << nextRow << "Фрейм:" << cleanText;
             }
             e->accept(); return;
@@ -1072,7 +1096,8 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
             m_listWidget->setCurrentRow(prevRow);
             if (m_listWidget->item(prevRow)) {
                 m_listWidget->setCurrentItem(m_listWidget->item(prevRow));
-                QString cleanText = m_listWidget->item(prevRow)->text().remove(QRegularExpression("<[^>]*>"));
+                static const QRegularExpression htmlTagRegex("<[^>]*>");
+                QString cleanText = m_listWidget->item(prevRow)->text().remove(htmlTagRegex);
                 qDebug() << ">>> [STRELI LOG] Нажата стрелка ВВЕРХ | Индекс:" << prevRow << "Фрейм:" << cleanText;
             }
             e->accept(); return;
@@ -1293,7 +1318,7 @@ void CodeEditor::paintEvent(QPaintEvent *e)
 
     // Настройка пера для Indent Guides
     QPen indentPen;
-    indentPen.setColor(QColor("#b0b4bc")); // Насыщенный серый цвет Breeze Light
+    indentPen.setColor(QColor(0xb0b4bc)); // Насыщенный серый цвет Breeze Light
     indentPen.setWidth(1); // Толщина строго в 1 пиксель
     indentPen.setStyle(Qt::SolidLine); // Сплошная линия
     // =========================================================================
@@ -1541,7 +1566,7 @@ void CodeEditor::paintEvent(QPaintEvent *e)
                     if (m_highlighter && b.layout())
                     {
                         QList<QTextLayout::FormatRange> blockFormats = b.layout()->formats();
-                        for (const auto &range : blockFormats)
+                        for (const auto &range : std::as_const(blockFormats))
                         {
                             if (range.start < 45)
                             {
@@ -1786,7 +1811,8 @@ void CodeEditor::onLspReadyRead()
                 // Собираем имя выбранного метода из активной ячейки списка
                 QString currentMethodName = "Метод PyTorch";
                 if (m_listWidget && m_listWidget->currentItem()) {
-                    currentMethodName = m_listWidget->currentItem()->text().remove(QRegularExpression("<[^>]*>"));
+                    static const QRegularExpression htmlTagRegex("<[^>]*>");
+                    currentMethodName = m_listWidget->currentItem()->text().remove(htmlTagRegex);
                     if (currentMethodName.contains("(")) {
                         currentMethodName = currentMethodName.left(currentMethodName.indexOf("(")).trimmed();
                     }
@@ -2049,7 +2075,7 @@ void CodeEditor::showQuickFixMenu(const QList<QuickFixAction>& fixes)
     QString detectedMessage = "";
 
     // 1. Сначала ищем текстовое описание ошибки в глобальном массиве (запасной вариант)
-    for (const auto& error : Neuro_programm::globalLspErrors) {
+    for (const auto& error : std::as_const(Neuro_programm::globalLspErrors)) {
         if (error.line == currentLine) {
             hasLineError = true;
             detectedMessage = error.message.toLower();
@@ -2059,7 +2085,7 @@ void CodeEditor::showQuickFixMenu(const QList<QuickFixAction>& fixes)
 
     // 2. ГРАФИЧЕСКАЯ ПРОВЕРКА: Проверяем, нарисован ли на текущей строке красный маркер ошибки
     if (!hasLineError) {
-        for (const auto& selection : m_currentLspSelections) {
+        for (const auto& selection : std::as_const(m_currentLspSelections)) {
             if (selection.cursor.blockNumber() == currentLine) {
                 hasLineError = true;
                 // Если текст ошибки не долетел, берем содержимое самой строки для контекста
@@ -2203,7 +2229,7 @@ bool CodeEditor::event(QEvent *event)
         // =========================================================================
         // ШАГ 1: ПРЯМОЙ ОФИЦИАЛЬНЫЙ ВЫВОД ОШИБОК ИЗ ГЛОБАЛЬНОГО МАССИВА СРЕДЫ
         // =========================================================================
-        for (const auto& error : Neuro_programm::globalLspErrors)
+        for (const auto& error : std::as_const(Neuro_programm::globalLspErrors))
         {
             // Проверяем, попала ли мышка на строку и символ, где Jedi зафиксировал ошибку
             if (error.line == mouseLine && mouseChar >= error.startChar && mouseChar <= error.endChar)
@@ -2323,7 +2349,7 @@ void CodeEditor::matchBrackets()
     // Важно: мы не должны затирать маркеры ошибок синтаксиса от Jedi!
     // Поэтому мы берем текущие выделения, отфильтровываем старые скобки и сохраняем ошибки.
     QList<QTextEdit::ExtraSelection> currentSelections = this->extraSelections();
-    for (const auto& selection : currentSelections) {
+    for (const auto& selection : std::as_const(currentSelections)) {
         // Ошибки синтаксиса у нас имеют WaveUnderline или фоновую заливку,
         // а у скобок формат будет строго точечный (Background/Outline).
         if (selection.format.underlineStyle() == QTextCharFormat::WaveUnderline ||
@@ -2829,7 +2855,7 @@ void CodeEditor::mousePressEvent(QMouseEvent *e)
 
             // ЗАЩИТА 2: Проверяем, нет ли уже виртуального курсора на этой позиции
             bool isDuplicate = false;
-            for (const QTextCursor &vCursor : m_virtualCursors) {
+            for (const QTextCursor &vCursor : std::as_const(m_virtualCursors)) {
                 if (vCursor.position() == clickedPos) {
                     isDuplicate = true;
                     break;
@@ -2930,14 +2956,15 @@ void CodeEditor::showLspCompletionsInGui(const QJsonArray &completionsArray)
 
         // Фильтруем подсказки по префиксу букв
         QString cleanCompareText = label;
-        cleanCompareText.remove(QRegularExpression("<[^>]*>"));
-        if (!currentPrefix.isEmpty() && !cleanCompareText.toLower().startsWith(currentPrefix)) {
+        static const QRegularExpression htmlTagRegex("<[^>]*>");
+        cleanCompareText.remove(htmlTagRegex);
+        if (!currentPrefix.isEmpty() && !cleanCompareText.startsWith(currentPrefix, Qt::CaseInsensitive)) {
             continue;
         }
 
         // Формируем красивый HTML для QHtmlDelegate
         QString finalHtml;
-        if (!currentPrefix.isEmpty() && cleanCompareText.toLower().startsWith(currentPrefix)) {
+        if (!currentPrefix.isEmpty() && cleanCompareText.startsWith(currentPrefix, Qt::CaseInsensitive)) {
             QString typedPart = cleanCompareText.left(currentPrefix.length());
             QString restPart = cleanCompareText.mid(currentPrefix.length());
             finalHtml = QString("<font color='#4cc3ff'><b>%1</b></font><font color='#eff0f1'>%2</font>")
@@ -2978,7 +3005,8 @@ void CodeEditor::showLspCompletionsInGui(const QJsonArray &completionsArray)
             if (item && !item->isHidden()) {
                 QString cleanText = item->text();
                 // Очищаем от HTML-тегов перед замером попиксельной длины
-                cleanText.remove(QRegularExpression("<[^>]*>"));
+                static const QRegularExpression htmlTagRegex("<[^>]*>");
+                cleanText.remove(htmlTagRegex);
 
                 // Добавляем запас под отступы ячейки (+45 пикселей)
                 int itemWidth = fm.horizontalAdvance(cleanText) + 45;
@@ -3111,7 +3139,7 @@ void CodeEditor::formatSelectedPythonCode()
     cursor.movePosition(QTextCursor::StartOfBlock);
     QString firstLine = cursor.block().text();
     int currentIndent = 0;
-    for (const QChar &ch : firstLine) {
+    for (const QChar &ch : std::as_const(firstLine)) {
         if (ch == ' ') currentIndent++;
         else if (ch == '\t') currentIndent += 4;
         else break;
@@ -3231,4 +3259,24 @@ void CodeEditor::clearInlineValues()
 {
     m_inlineValues.clear();
     this->viewport()->update();
+}
+
+void CodeEditor::processSubmittedPrompt(const QString &promptText)
+{
+    if (promptText.isEmpty()) return;
+
+    if (Neuro_programm::self) {
+        int insertPosition = this->textCursor().position();
+        QString fullCode = this->toPlainText();
+
+        qInfo() << ">>> [AI NETWORK]: Отправляю промпт чата в Ollama мост...";
+
+        // Асинхронно перенаправляем управление в главное окно Студии
+        QMetaObject::invokeMethod(Neuro_programm::self, "aiCodeGenerationRequested",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, insertPosition),
+                                  Q_ARG(QString, promptText),
+                                  Q_ARG(QString, fullCode)
+                                  );
+    }
 }

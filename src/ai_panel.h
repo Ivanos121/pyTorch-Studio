@@ -27,11 +27,11 @@ public:
     QComboBox *cosmboDevice_2=nullptr;
     QSpinBox *spinBoxEpochs=nullptr;
     QDoubleSpinBox *spinBoxLR = nullptr;
+    Ui::AI_panel *ui;
 
     //QPushButton *btnStartTraining = nullptr;
 
 private:
-    Ui::AI_panel *ui;
     Neuro_programm *m_mainIDE;
 };
 

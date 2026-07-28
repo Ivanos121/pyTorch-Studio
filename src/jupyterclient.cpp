@@ -26,25 +26,32 @@ JupyterClient::~JupyterClient()
     delete m_webSocket;
 }
 
-void JupyterClient::connectToJupyter(const QString &host, int port)
+void JupyterClient::connectToJupyter(const QString &host, int port, const QString &notebookPath)
 {
     m_host = host;
     m_port = port;
     m_isReady = false;
 
-    // Формируем HTTP POST запрос к REST API Jupyter для инициализации новой сессии
-    QUrl url(QString("http://%1:%2/api/sessions").arg(m_host).arg(m_port));
+    // Эндпоинт остается прежним
+    QUrl url(QStringLiteral("http://%1:%2/api/sessions").arg(m_host, QString::number(m_port)));
     QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
-    // Описываем параметры сессии. Ядро просим запустить дефолтное (python3)
+    // =========================================================================
+    // СОВРЕМЕННЫЙ ФИКС: Передаем заголовок Origin, без которого Jupyter Server 2.x вернет 403 Forbidden
+    // =========================================================================
+    QString originUrl = QStringLiteral("http://%1:%2").arg(m_host, QString::number(m_port));
+    request.setRawHeader("Origin", originUrl.toUtf8());
+    // =========================================================================
+
     QJsonObject json;
-    json["kernel"] = QJsonObject{{"name", "python3"}};
-    json["name"] = "pystudio_training_session";
-    json["type"] = "notebook";
+    json[QStringLiteral("kernel")] = QJsonObject{{QStringLiteral("name"), QStringLiteral("python3")}};
+    json[QStringLiteral("name")] = QStringLiteral("pystudio_training_session");
+    json[QStringLiteral("type")] = QStringLiteral("notebook");
+    json[QStringLiteral("path")] = notebookPath;
 
-    m_networkManager->post(request, QJsonDocument(json).toJson());
-    emit codeOutputReceived("🌐 [REST API] Отправлен запрос на инициализацию ядра Python...<br>");
+    m_networkManager->post(request, QJsonDocument(json).toJson(QJsonDocument::Compact));
+    emit codeOutputReceived(QStringLiteral(" [REST API] Отправлен запрос на инициализацию ядра Python...<br>"));
 }
 
 void JupyterClient::onSessionCreated(QNetworkReply *reply)
@@ -66,17 +73,29 @@ void JupyterClient::onSessionCreated(QNetworkReply *reply)
         return;
     }
 
-    emit codeOutputReceived(QString("🔗 [REST API] Вычислительное ядро создано. ID: %1<br>").arg(m_kernelId));
+    emit codeOutputReceived(QString(" [REST API] Вычислительное ядро создано. ID: %1<br>").arg(m_kernelId));
 
     // Шаг 2: Подключаем бинарный WebSocket-канал к каналам управления этого ядра
     QString wsUrl = QString("ws://%1:%2/api/kernels/%3/channels").arg(m_host).arg(m_port).arg(m_kernelId);
-    m_webSocket->open(QUrl(wsUrl));
+
+    // =========================================================================
+    // СОВРЕМЕННЫЙ ФИКС: Оформляем сокет-подключение как NetworkRequest с заголовком Origin
+    // =========================================================================
+    QNetworkRequest wsRequest((QUrl(wsUrl)));
+    QString originUrl = QStringLiteral("http://%1:%2").arg(m_host, QString::number(m_port));
+    wsRequest.setRawHeader("Origin", originUrl.toUtf8());
+
+    // Открываем WebSocket с передачей настроенного запроса безопасности
+    m_webSocket->open(wsRequest);
+    // =========================================================================
 }
 
 void JupyterClient::onWebSocketConnected()
 {
     m_isReady = true;
-    emit codeOutputReceived("🔌 <font color='#00FF00'><b>[WebSockets] Соединение с ядром успешно установлено. Поток управления активен!</b></font><br>");
+    emit codeOutputReceived(" <font color='#00FF00'><b>[WebSockets] Соединение с ядром успешно установлено. Поток активен!</b></font><br>");
+    //  НОВАЯ СТРОКА: Сообщаем главному окну, что сокет на 100% готов отправлять код!
+    emit jupyterClientReady();
 }
 
 void JupyterClient::executePythonCode(const QString &code)
@@ -117,35 +136,49 @@ void JupyterClient::executePythonCode(const QString &code)
 
 void JupyterClient::onWebSocketMessageReceived(const QString &message)
 {
-    // ПАРСИМ ПОТОК ОТВЕТОВ ОТ ЯДРА (IOPub channel)
+    // Парсим поток ответов от ядра (IOPub channel)
     QJsonObject msgObj = QJsonDocument::fromJson(message.toUtf8()).object();
-    QString msgType = msgObj["header"].toObject()["msg_type"].toString();
-    QJsonObject content = msgObj["content"].toObject();
+    QString msgType = msgObj[QStringLiteral("header")].toObject()[QStringLiteral("msg_type")].toString();
+    QJsonObject content = msgObj[QStringLiteral("content")].toObject();
+
+    // =========================================================================
+    // СИСТЕМНЫЙ РЕГУЛЯРНЫЙ ФИКС: Очищаем логи PyTorch от ANSI-мусора расцветки ([31m и т.д.)
+    // =========================================================================
+    static const QRegularExpression ansiRegex(QStringLiteral("\x1B\\[[0-9;]*[a-zA-Z]"));
 
     // Случай 1: Ядро выводит стандартный поток (print() или логи PyTorch)
-    if (msgType == "stream") {
-        QString text = content["text"].toString();
-        emit codeOutputReceived(text.toHtmlEscaped());
+    if (msgType == QStringLiteral("stream")) {
+        QString text = content[QStringLiteral("text")].toString();
+
+        // Накатываем очистку от ANSI-кодов, чтобы текст стал кристально чистым
+        text.remove(ansiRegex);
+
+        emit codeOutputReceived(text);
     }
     // Случай 2: Ядро вывело результат вычисления выражения
-    else if (msgType == "execute_result") {
-        QString res = content["data"].toObject()["text/plain"].toString();
-        emit codeOutputReceived("<font color='#00FF00'>" + res.toHtmlEscaped() + "</font>\n");
+    else if (msgType == QStringLiteral("execute_result")) {
+        QString res = content[QStringLiteral("data")].toObject()[QStringLiteral("text/plain")].toString();
+        res.remove(ansiRegex);
+
+        emit codeOutputReceived(QStringLiteral("<font color='#00FF00'>") + res.toHtmlEscaped() + QStringLiteral("</font>\n"));
     }
     // Случай 3: Критическая ошибка выполнения Python-кода (Трейсбэк ошибки обучения)
-    else if (msgType == "error") {
-        QJsonArray traceback = content["traceback"].toArray();
+    else if (msgType == QStringLiteral("error")) {
+        QJsonArray traceback = content[QStringLiteral("traceback")].toArray();
         QString errorStr;
         for (int i = 0; i < traceback.size(); ++i) {
-            errorStr += traceback[i].toString() + "\n";
+            QString line = traceback[i].toString();
+            line.remove(ansiRegex); // Очищаем каждую строчку Traceback от кракозябр
+            errorStr += line + QStringLiteral("\n");
         }
-        emit codeOutputReceived("<br><font color='#FF5350'><b>[PYTHON CRASH]:</b><br>" + errorStr.toHtmlEscaped() + "</font><br>");
+
+        emit codeOutputReceived(QStringLiteral("<br><font color='#FF5350'><b>[PYTHON CRASH]:</b><br>") + errorStr.toHtmlEscaped() + QStringLiteral("</font><br>"));
         emit executionFinished(false);
     }
     // Случай 4: Статус ответа на нашу команду execute_reply
-    else if (msgType == "execute_reply") {
-        QString status = content["status"].toString();
-        emit executionFinished(status == "ok");
+    else if (msgType == QStringLiteral("execute_reply")) {
+        QString status = content[QStringLiteral("status")].toString();
+        emit executionFinished(status == QStringLiteral("ok"));
     }
 }
 

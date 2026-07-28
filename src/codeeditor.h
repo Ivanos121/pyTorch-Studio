@@ -178,6 +178,7 @@ private slots:
     void showLspCompletionsInGui(const QJsonArray &completionsArray);
     void showLspCompletionsInGui(const QStringList &completions);
     void drawLspErrorsInGui(const QList<CodeEditor::LspErrorData> &errors);
+    void processSubmittedPrompt(const QString &promptText);
 
 private:
     QMap<int, QString> m_inlineValues;

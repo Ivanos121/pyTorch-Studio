@@ -11,3 +11,5 @@ build/
 Logs/
 .qtcreator/
 projects/
+models/
+libs/

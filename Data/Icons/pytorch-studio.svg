@@ -1,135 +1,57 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
-   width="256"
-   height="256"
-   viewBox="0 0 67.733332 67.733335"
-   version="1.1"
-   id="svg8"
-   inkscape:export-filename="../icons_IM/IM_48_blue.png"
-   inkscape:export-xdpi="13.5"
-   inkscape:export-ydpi="13.5"
-   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
-   sodipodi:docname="cerebro.svg"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg"
-   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-   xmlns:cc="http://creativecommons.org/ns#"
-   xmlns:dc="http://purl.org/dc/elements/1.1/">
-  <defs
-     id="defs2">
-    <linearGradient
-       id="linearGradient4706">
-      <stop
-         style="stop-color:#000000;stop-opacity:1;"
-         offset="0"
-         id="stop4704" />
+  width="256"
+  height="256"
+  viewBox="0 0 256 256"
+  shape-rendering="geometricPrecision"
+  text-rendering="geometricPrecision"
+  version="1.1"
+  id="svg8"
+  xmlns="http://w3.org"
+  xmlns:svg="http://w3.org">
+  <defs id="defs2">
+    <linearGradient id="linearGradient4706">
+      <stop style="stop-color:#000000;stop-opacity:1;" offset="0" id="stop4704" />
     </linearGradient>
   </defs>
-  <sodipodi:namedview
-     id="base"
-     pagecolor="#ffffff"
-     bordercolor="#666666"
-     borderopacity="1.0"
-     inkscape:pageopacity="0.0"
-     inkscape:pageshadow="2"
-     inkscape:zoom="1.7674379"
-     inkscape:cx="130.41477"
-     inkscape:cy="194.63202"
-     inkscape:document-units="mm"
-     inkscape:current-layer="g1"
-     showgrid="false"
-     units="px"
-     inkscape:window-width="2259"
-     inkscape:window-height="1215"
-     inkscape:window-x="0"
-     inkscape:window-y="0"
-     inkscape:window-maximized="1"
-     inkscape:document-rotation="0"
-     inkscape:showpageshadow="2"
-     inkscape:pagecheckerboard="0"
-     inkscape:deskcolor="#d1d1d1" />
-  <metadata
-     id="metadata5">
-    <rdf:RDF>
-      <cc:Work
-         rdf:about="">
-        <dc:format>image/svg+xml</dc:format>
-        <dc:type
-           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-      </cc:Work>
-    </rdf:RDF>
-  </metadata>
-  <g
-     inkscape:label="Layer 1"
-     inkscape:groupmode="layer"
-     id="layer1"
-     transform="translate(0,-229.26665)">
-    <g
-       id="g1">
-      <g
-         id="g2">
-        <g
-           id="g5960"
-           transform="matrix(1.4998068,0,0,1.4998068,-4.0461451,-123.84694)">
-          <ellipse
-             ry="21.542517"
-             rx="21.61434"
-             cy="257.50098"
-             cx="25.082443"
-             id="path4546-6"
-             style="fill:#01c1e0;fill-opacity:1;stroke:none;stroke-width:0.176853;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-             inkscape:export-filename="./IM_16x16.png"
-             inkscape:export-xdpi="6.5653801"
-             inkscape:export-ydpi="6.5653801" />
-          <path
-             id="path4546"
-             style="fill:#0ba1ba;fill-opacity:1;stroke:none;stroke-width:0.668421;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-             d="M 94.949219,71.380859 A 81.691994,81.420529 0 0 0 44.269531,88.945312 L 82.958984,233.33984 a 81.691994,81.420529 0 0 0 11.990235,0.88282 81.691994,81.420529 0 0 0 81.693361,-81.41993 81.691994,81.420529 0 0 0 -81.693361,-81.421871 z"
-             transform="matrix(0.26458333,0,0,0.26458333,0,217)" />
-        </g>
-        <ellipse
-           ry="27.196413"
-           rx="27.009918"
-           cy="262.73337"
-           cx="33.882847"
-           id="path4612"
-           style="fill:#187f8f;fill-opacity:1;stroke:none;stroke-width:0.237818;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-           inkscape:export-filename="./IM_16x16.png"
-           inkscape:export-xdpi="6.5653801"
-           inkscape:export-ydpi="6.5653801" />
-        <ellipse
-           ry="24.538122"
-           rx="24.333637"
-           cy="235.11072"
-           cx="121.55123"
-           id="path4616-3-8"
-           style="fill:#0ba1ba;fill-opacity:1;stroke:none;stroke-width:0.240424;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-           inkscape:export-filename="./IM_16x16.png"
-           inkscape:export-xdpi="6.5653801"
-           inkscape:export-ydpi="6.5653801"
-           transform="rotate(20)" />
-        <path
-           id="path4616-3"
-           style="fill:#01c1e0;fill-opacity:1;stroke:none;stroke-width:0.240424;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-           d="m 42.067957,239.41549 a 24.333633,24.538119 20 0 0 -13.552844,-0.80641 l 20.156834,43.22647 a 24.333633,24.538119 20 0 0 7.9795,-10.9992 24.333633,24.538119 20 0 0 -14.473576,-31.38086 24.333633,24.538119 20 0 0 -0.109913,-0.04 z" />
-        <text
-           xml:space="preserve"
-           style="font-style:normal;font-weight:normal;font-size:11.8076px;line-height:125%;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#ffd5d5;fill-opacity:1;stroke:none;stroke-width:0.295653;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-           x="14.048596"
-           y="272.88095"
-           id="text893"
-           transform="scale(1.0134222,0.98675556)"
-           inkscape:export-filename="./IM_16x16.png"
-           inkscape:export-xdpi="6.5653801"
-           inkscape:export-ydpi="6.5653801"><tspan
-             sodipodi:role="line"
-             id="tspan891"
-             x="14.048596"
-             y="272.88095"
-             style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:25.1894px;font-family:'Times New Roman';-inkscape-font-specification:'Times New Roman, Italic';fill:#ffd5d5;fill-opacity:1;stroke-width:0.295653;stroke-miterlimit:4;stroke-dasharray:none">pTS</tspan></text>
+  <g id="layer1" transform="translate(0,-229.26665)">
+    <g id="g1">
+      <!-- Фоновый бирюзовый круг (светлый слой) -->
+      <path
+        id="path4546-6"
+        style="fill:#01c1e0;stroke-width:1.0477;shape-rendering:geometricPrecision"
+        d="M 255.76395,357.48099 A 127.88197,127.78564 0 0 1 127.88197,485.26662 127.88197,127.78564 0 0 1 0,357.48099 127.88197,127.78564 0 0 1 127.88197,229.69535 127.88197,127.78564 0 0 1 255.76395,357.48099 Z" />
+
+      <!-- Темно-бирюзовый сегмент фона -->
+      <path
+        id="path4546"
+        style="fill:#0ba1ba;fill-opacity:1;stroke:none;stroke-width:1.04771"
+        d="M 128.1159,229.26662 A 127.88197,127.78563 0 0 0 48.781091,256.83319 L 109.34619,483.4535 A 127.88197,127.78563 0 0 0 128.1159,484.83904 127.88197,127.78563 0 0 0 256.00001,357.05435 127.88197,127.78563 0 0 0 128.1159,229.26662 Z" />
+
+      <!-- Внутренний темный контурный круг -->
+      <path
+        id="path4612"
+        style="fill:#187f8f;stroke-width:0.939368"
+        d="M 235.65601,358.97836 A 106.55045,107.56276 0 0 1 129.10556,466.54112 106.55045,107.56276 0 0 1 22.555107,358.97836 106.55045,107.56276 0 0 1 129.10556,251.4156 106.55045,107.56276 0 0 1 235.65601,358.97836 Z" />
+
+      <!-- Декоративные элементы градиентных масок -->
+      <path
+        id="path4616-3-8"
+        style="fill:#0ba1ba;stroke-width:0.949663;stroke:none"
+        transform="matrix(0.93940898,0.34279845,-0.34124314,0.93997506,0,0)"
+        d="m 339.29176,292.22235 a 96.021866,97.019966 0 0 1 -96.02186,97.01997 96.021866,97.019966 0 0 1 -96.02187,-97.01997 96.021866,97.019966 0 0 1 96.02187,-97.01997 96.021866,97.019966 0 0 1 96.02186,97.01997 z" />
+
+      <path
+        id="path4616-3"
+        style="fill:#01c1e0;fill-opacity:1;stroke:none;stroke-width:0.949662"
+        d="m 161.3947,266.75534 a 96.015467,97.02627 15.453099 0 0 -53.46412,-3.18938 l 79.51596,170.96219 a 96.015467,97.02627 15.453099 0 0 31.47804,-43.50222 96.015467,97.02627 15.453099 0 0 0 -57.09628,-124.11239 96.015467,97.02627 15.453099 0 0 0 -0.43359,-0.1582 z" />
+
+      <!-- Контуры букв pTS без искажающих матриц масштабирования -->
+      <path
+        id="text893"
+        aria-label="pTS"
+        style="font-style:italic;font-size:99.4968px;line-height:125%;font-family:'Times New Roman';fill:#ffffff;stroke:#ffffff;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;shape-rendering:geometricPrecision"
+        d="m 72.995947,345.51454 -3.352187,11.17395 q 5.295484,-6.21855 9.42499,-8.69625 4.178089,-2.4777 8.501924,-2.4777 4.323836,0 7.384529,3.44935 3.060693,3.40077 3.060693,8.89058 0,10.68813 -8.696254,21.76493 -8.696254,11.02821 -20.258871,11.02821 -2.429121,0 -4.323836,-0.53441 -1.846132,-0.53441 -4.178088,-1.89471 l -3.546517,12.53426 q -1.068813,3.69226 -1.068813,4.80966 0,1.06881 0.534406,1.79755 0.58299,0.77732 1.846133,1.16598 1.263143,0.43724 5.003989,0.43724 l -0.437242,1.79755 H 40.008482 l 0.485824,-1.79755 q 4.518166,-0.19433 6.121385,-1.55464 1.554638,-1.36031 3.303605,-7.53027 l 12.291353,-42.55821 q 1.117396,-4.03234 1.117396,-5.00399 0,-1.31172 -0.777319,-2.04046 -0.728736,-0.72873 -2.283374,-0.72873 -1.40889,0 -3.935176,0.34007 v -1.89471 z m -11.319704,38.86593 q 3.01211,3.5951 8.113264,3.5951 2.526286,0 5.149737,-1.40889 2.623451,-1.40889 5.101155,-4.17809 2.526286,-2.76919 4.518165,-6.36429 1.99188,-3.64368 3.546517,-8.55051 1.60322,-4.90682 1.60322,-9.71648 0,-3.8866 -1.79755,-5.92706 -1.748967,-2.08904 -4.129506,-2.08904 -5.246901,0 -10.396638,6.02422 -5.101155,6.02422 -7.481693,14.0889 z m 53.634997,-60.77661 h 50.03989 l -5.39264,17.48967 h -1.84614 q 0.92307,-3.83801 0.92307,-6.85012 0,-3.54651 -2.18621,-5.34406 -1.6518,-1.36031 -8.50192,-1.36031 h -5.19832 l -13.02009,45.37598 q -2.47771,8.55051 -2.47771,10.54239 0,1.84613 1.55464,3.06069 1.55464,1.16598 5.48982,1.16598 h 2.23479 l -0.58299,1.79755 H 107.6838 l 0.5344,-1.79755 h 1.26315 q 3.78943,0 5.82989,-1.21456 1.40889,-0.8259 2.52628,-2.96353 1.16598,-2.18621 3.20644,-9.18208 l 13.65167,-46.78487 h -3.93518 q -2.47771,0 -5.58698,1.45747 -3.10927,1.45747 -5.58698,4.22667 -2.47771,2.7692 -3.49793,7.87035 h -1.79755 z m 41.44081,67.38382 5.44123,-24.43696 h 1.6518 q -0.34007,3.54652 -0.34007,5.87848 0,6.65579 4.22667,10.83388 4.27525,4.17809 11.12537,4.17809 6.3643,0 9.6679,-3.8866 3.30361,-3.93517 3.30361,-9.03633 0,-3.3036 -1.50606,-6.02422 -2.28337,-4.03234 -12.19418,-14.18607 -4.80966,-4.85824 -6.16997,-7.23878 -2.23479,-3.93517 -2.23479,-8.25901 0,-6.8987 5.14973,-11.80553 5.14974,-4.90682 13.21442,-4.90682 2.72062,0 5.14974,0.5344 1.50605,0.2915 5.48981,1.9433 2.81778,1.1174 3.10928,1.21456 0.68015,0.14575 1.50605,0.14575 1.40889,0 2.42912,-0.72874 1.02024,-0.72873 2.38054,-3.10927 h 1.84614 l -5.05258,21.86209 h -1.6518 q 0.19433,-2.91495 0.19433,-4.7125 0,-5.87847 -3.88659,-9.61932 -3.8866,-3.74084 -10.25089,-3.74084 -5.05258,0 -8.21043,2.96352 -3.15786,2.96353 -3.15786,6.85013 0,3.40077 1.99188,6.51004 2.04046,3.06069 9.27924,10.05656 7.28736,6.94729 9.42499,10.88246 2.13763,3.8866 2.13763,8.3076 0,5.00399 -2.67204,9.71648 -2.62345,4.66392 -7.57885,7.23879 -4.95541,2.57486 -10.83388,2.57486 -2.91495,0 -5.44124,-0.5344 -2.52628,-0.53441 -8.06468,-2.62345 -1.89471,-0.72874 -3.15786,-0.72874 -2.86636,0 -4.46958,3.88659 z" />
       </g>
     </g>
-  </g>
-</svg>
+  </svg>
