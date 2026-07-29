@@ -20,13 +20,6 @@
 //#include "aiprojectmodel.h"
 extern "C" {
 #include "stlink.h"
-//#include "stlink_backend.h"
-
-// Ручное прототипирование функций прошивальщика для C++ компилятора
-// Это закроет ошибку "was not declared in this scope" раз и навсегда
-// int stlink_erase_flash_mass(stlink_t* sl);
-// int stlink_fwrite_flash(stlink_t *sl, const char* path, stm32_addr_t addr);
-// int stlink_read_all_flash(stlink_t *sl, const char *path);
 
 void stlink_read_mem32(stlink_t *sl, uint32_t addr, uint16_t len);
 int32_t stlink_reset(stlink_t *sl, enum reset_type type);
@@ -37,7 +30,7 @@ int stlink_fwrite_flash(stlink_t *sl, const char* path, stm32_addr_t addr);
 #include "preferencesdialog.h"
 #include "usbreceiver.h"
 #include "aipromptwidget.h"
-//#include "prog_stm_work.h"
+#include "advancedclosedialog.h"
 
 #include <QFileSystemModel>
 #include <QInputDialog>
@@ -62,8 +55,6 @@ int stlink_fwrite_flash(stlink_t *sl, const char* path, stm32_addr_t addr);
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QNetworkReply>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QJsonArray>
 #include <QVariant>
 #include <QTimer>
@@ -74,10 +65,6 @@ int stlink_fwrite_flash(stlink_t *sl, const char* path, stm32_addr_t addr);
 #include <QKeySequence>
 #include <cstdio>
 #include <iostream>
-#include <QProcess>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
 #include <QCompleter>
 #include <QStringListModel>
 #include <QThread>
@@ -93,31 +80,32 @@ int stlink_fwrite_flash(stlink_t *sl, const char* path, stm32_addr_t addr);
 #include <QStandardPaths>
 #include <QMessageBox>
 #include <QCloseEvent>
-#include <QRegularExpression>
 #include <QGraphicsDropShadowEffect>
-#include <QWindow>
 #include <QBitmap>
-#include <QPainter>
 #include <QMenu>
 #include <QPalette>
 #include <QColor>
 #include <QActionGroup>
-#include <QToolBar>
 #include <QToolButton>
 #include <QStackedWidget>
-#include <QThread>
-#include <QMessageBox>
 #include <QDateTime>
-#include <QPlainTextEdit>
-#include <QInputDialog>
 #include <QNetworkRequest>
 #include <QUrl>
-#include <QTextStream>
-#include <QProcess>
-#include <QSettings>
-#include <QMessageBox>
-#include <QThread>
-#include <QStackedWidget>
+#include <QFile>
+#include <QCryptographicHash>
+#include <QPushButton>
+#include <QFile>
+#include <csignal>
+
+#ifndef Q_OS_WIN
+#include <sys/types.h>
+#include <signal.h>
+#endif
+
+#ifndef Q_OS_WIN
+#include <unistd.h>
+#include <signal.h>
+#endif
 
 Neuro_programm* Neuro_programm::self = nullptr;
 QList<Neuro_programm::LspErrorData> Neuro_programm::globalLspErrors;
@@ -1428,12 +1416,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     btnAIChat = new QPushButton("💬 ИИ-Ассистент", this);
     btnStartDebug = new QPushButton("Запуск Debug", this);
 
-    // Настраиваем окно вывода чата
-    // ui->chatLogWidget->setReadOnly(true);
-    // ui->chatLogWidget->setOpenLinks(false); // Чтобы клики обрабатывались программно
-
     // // Привязываем кнопку отправки и клики по ссылкам-кнопкам
-    // connect(ui->chatLogWidget, &QTextBrowser::anchorClicked, this, &Neuro_programm::onChatAnchorClicked);
     QTextBrowser *safeChatLogPage24 = ui->centralwidget->findChild<QTextBrowser*>("chatLogWidget");
     if (safeChatLogPage24 != nullptr) {
         safeChatLogPage24->setReadOnly(true);
@@ -1813,9 +1796,6 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
             ui->centralStackedWidget->blockSignals(false);
         }
 
-        // =====================================================================
-        // ИСПРАВЛЕННЫЙ БЛОК УПРАВЛЕНИЯ СЕРВИСНЫМИ СТРАНИЦАМИ (ДОБАВЛЕНО ВЫДЕЛЕНИЕ)
-        // =====================================================================
         // =====================================================================
         // ИСПРАВЛЕННЫЙ БЛОК УПРАВЛЕНИЯ СЕРВИСНЫМИ СТРАНИЦАМИ (ФИКС НАЛОЖЕНИЯ ПАНЕЛЕЙ)
         // =====================================================================
@@ -2862,9 +2842,6 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     }
 
     // =========================================================================
-    // 8. В. УМНАЯ ЛОГИКА ДЛЯ КНОПКИ: ГРАФИКИ (actTensor) - БЕЗ ОШИБОК КОМПИЛЯЦИИ
-    // =========================================================================
-    // =========================================================================
     // УМНАЯ ЛОГИКА ДЛЯ КНОПКИ: ГРАФИКИ (actTensor) - ИНТЕГРАЦИЯ С WEBVIEW
     // =========================================================================
     if (leftSideBarContainer && ui->mainHorizontalSplitter && ui->widgetRightCharts)
@@ -3024,7 +3001,6 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     // ИНИЦИАЛИЗАЦИЯ НИЖНЕЙ ПАНЕЛИ ТЕРМИНАЛА (КОНЕЦ КОНСТРУКТОРА)
     // =========================================================================
     panelOther = new panel_other(this);
-    // mainVerticalSplitter->addWidget(panelOther);
 
     if (actDebug)
     {
@@ -3047,7 +3023,6 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     // Блокируем схлопывание кода в ноль, но разрешаем полностью прятать терминал
     mainVerticalSplitter->setCollapsible(0, false);
     mainVerticalSplitter->setCollapsible(1, true);
-
 
     // =========================================================================
     // БЕТОНИРОВАНИЕ ПАЛИТРЫ ТЕРМИНАЛА logEdit (УГОЛЬНО-ЧЕРНЫЙ + ЗЕЛЕНЫЙ НЕОН)
@@ -3082,14 +3057,11 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
         replWidget->setStyleSheet("border: none; font-family: 'Liberation Mono'; font-size: 11px;");
     }
 
-
     panelOther->setVisible(false); // Изначально скрыта
 
     // Привязываем фокус-политику к кнопкам и панелям, чтобы они НЕ перехватывали клавиатуру
     panelOther->setFocusPolicy(Qt::NoFocus);
 
-    //this->updateProjectsListFromSettings();
-    //this->envManager = new PythonEnvManager(this);
     // =========================================================================
     // ЖЕСТКИЙ ФИКС ЧИСТОГО СТАРТА: БЛОКИРУЕМ АВТОЗАГРУЗКУ ПРОЕКТА
     // =========================================================================
@@ -3280,150 +3252,9 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
         });
     });
 
-    // =========================================================================
-    // ЧАСТЬ 2: АВТОНОМНЫЙ ПРЯМОЙ КОННЕКТ ДЛЯ КНОПКИ ДЕБАГА НА БОКОВОЙ ПАНЕЛИ
-    // =========================================================================
-    // if (actDebug) {
-    //     actDebug->disconnect(); // Намертво вырезаем старые связи
-
-    //     // КРИТИЧЕСКИЙ ШАГ: Связываем экшен кнопки сайдбара СРАЗУ с новым слотом внутри panelOther!
-    //     if (panelOther) {
-    //         connect(actDebug, &QAction::triggered, panelOther, &panel_other::onDebugModeTriggered);
-    //     }
-
-    //     // Основной коннект для управления процессами и внешними сплиттерами главного окна
-    //     connect(actDebug, &QAction::triggered, this, [this](bool checked) {
-    //         QToolButton *sideDebugBtn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Дебаг") : nullptr;
-    //         QLabel *sideDebugLbl = sideDebugBtn ? sideDebugBtn->findChild<QLabel*>() : nullptr;
-
-    //         if (checked) {
-    //             // =============================================================
-    //             // СЦЕНАРИЙ А: ЗАПУСК СЕССИИ ОТЛАДКИ PyTorch
-    //             // =============================================================
-    //             if (this->currentOpenProjectPath.isEmpty()) {
-    //                 this->sendSystemNotification("Debug", "Ошибка: Нет открытого проекта!");
-    //                 actDebug->setChecked(false);
-    //                 return;
-    //             }
-
-    //             QWidget *currentPage = ui->centralStackedWidget->currentWidget();
-    //             if (!currentPage || currentPage->objectName().isEmpty() || currentPage->objectName() == "MAIN_SCREEN") {
-    //                 this->sendSystemNotification("Debug", "Выберите файл .py в редакторе для запуска отладки.");
-    //                 actDebug->setChecked(false);
-    //                 return;
-    //             }
-
-    //             QString activeScript = currentPage->objectName();
-    //             if (!activeScript.endsWith(".py", Qt::CaseInsensitive)) {
-    //                 this->sendSystemNotification("Debug", "Отладка поддерживается только для чистых файлов .py");
-    //                 actDebug->setChecked(false);
-    //                 return;
-    //             }
-
-    //             if (sideDebugLbl) sideDebugLbl->setText("Стоп дебаг");
-
-    //             if (ui->statusbar) {
-    //                 ui->statusbar->showMessage("🪲 Режим отладки активирован. Ожидание подключения к debugpy...", 5000);
-    //             }
-
-    //             // Нативно открываем нижний виджет и раздвигаем вертикальный сплиттер
-    //             if (panelOther) {
-    //                 panelOther->setVisible(true);
-    //                 panelOther->show();
-
-    //                 QStackedWidget *stacked = panelOther->findChild<QStackedWidget*>("stackedWidget");
-    //                 if (stacked) {
-    //                     stacked->setCurrentIndex(1);}
-
-    //                 if (mainVerticalSplitter) {
-    //                     int totalHeight = this->height() > 0 ? this->height() : 800;
-    //                     mainVerticalSplitter->setSizes(QList<int>({totalHeight - 250, 250}));
-    //                     mainVerticalSplitter->refresh();
-    //                 }
-    //             }
-
-    //             // Нативно открываем и раздвигаем правую вертикальную панель
-    //             if (ui->rightDebugPanel) {
-    //                 ui->rightDebugPanel->setVisible(true);
-    //                 ui->rightDebugPanel->show();
-
-    //                 QSplitter *codeSplitter = qobject_cast<QSplitter*>(ui->rightDebugPanel->parentWidget());
-    //                 if (codeSplitter) {
-    //                     int codeZoneWidth = codeSplitter->width() > 0 ? codeSplitter->width() : (this->width() - 68);
-    //                     int rightWidth = 350;
-    //                     int leftWidth = codeZoneWidth - rightWidth;
-
-    //                     if (leftWidth < 200) leftWidth = 200;
-
-    //                     codeSplitter->setCollapsible(0, false);
-    //                     codeSplitter->setCollapsible(1, false);
-    //                     codeSplitter->setSizes(QList<int>({leftWidth, rightWidth}));
-    //                     codeSplitter->refresh();
-    //                 }
-
-    //                 QToolButton *btnTensor = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Графики") : nullptr;
-    //                 if (btnTensor) btnTensor->setChecked(true);
-    //             }
-
-    //             // Запуск сессии дебаггера
-    //             QSettings ideConfig(QDir::homePath() + "/.config/PyTorchStudio/IDE.conf", QSettings::IniFormat);
-    //             QString activeVenv = ideConfig.value("python/global_venv_path").toString();
-    //             if (activeVenv.isEmpty()) {
-    //                 activeVenv = this->currentOpenProjectPath + "/venv";
-    //             }
-
-    //             if (this->pyDebugger) {
-    //                 this->pyDebugger->startDebugSession(this->currentOpenProjectPath, activeScript, activeVenv);
-    //             }
-
-    //         } else {
-    //             // =============================================================
-    //             // СЦЕНАРИЙ Б: ПРИНУДИТЕЛЬНЫЙ ОСТАНОВ ОТЛАДКИ ПОЛЬЗОВАТЕЛЕМ
-    //             // =============================================================
-    //             if (sideDebugLbl) sideDebugLbl->setText("Дебаг");
-    //             if (this->pyDebugger) {
-    //                 this->pyDebugger->stopDebugSession();
-    //             }
-
-    //             // Нативно прячем нижнюю панель логов через hide
-    //             if (panelOther) {
-    //                 panelOther->setVisible(false);
-    //                 panelOther->hide();
-    //             }
-
-    //             if (mainVerticalSplitter) {
-    //                 mainVerticalSplitter->setSizes(QList<int>({this->height(), 0}));
-    //                 mainVerticalSplitter->refresh();
-    //             }
-
-    //             // Нативно прячем правую дебаг-панель
-    //             if (ui->rightDebugPanel) {
-    //                 ui->rightDebugPanel->setVisible(false);
-    //                 ui->rightDebugPanel->hide();
-
-    //                 QSplitter *codeSplitter = qobject_cast<QSplitter*>(ui->rightDebugPanel->parentWidget());
-    //                 if (codeSplitter) {
-    //                     codeSplitter->setSizes(QList<int>({codeSplitter->width(), 0}));
-    //                     codeSplitter->refresh();
-    //                 }
-
-    //                 QToolButton *btnTensor = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>("Графики") : nullptr;
-    //                 if (btnTensor) btnTensor->setChecked(false);
-    //             }
-
-    //             if (ui->statusbar) {
-    //                 ui->statusbar->showMessage("Сессия отладки прервана.", 3000);
-    //             }
-    //             this->sendSystemNotification("Debug", "Сессия отладки прервана.");
-    //         }
-
-    //         if (this->layout()) this->layout()->activate();
-    //         this->update();
-    //     });
-    // }
-
-    if (actDebug) {
-        actDebug->disconnect(); // Намертво вырезаем старые связи
+    if (actDebug)
+    {
+        QObject::disconnect(actDebug, &QAction::triggered, nullptr, nullptr);
 
         if (panelOther) {
             connect(actDebug, &QAction::triggered, panelOther, &panel_other::onDebugModeTriggered);
@@ -3579,8 +3410,9 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     // =========================================================================
     // ЧАСТЬ 3: ЕДИНЫЙ АВТОНОМНЫЙ ОБРАБОТЧИК КНОПКИ "ОБУЧЕНИЕ"
     // =========================================================================
-    if (actStartTrain) {
-        actStartTrain->disconnect(SIGNAL(triggered(bool)));
+    if (actStartTrain)
+    {
+        QObject::disconnect(actStartTrain, &QAction::triggered, nullptr, nullptr);
         connect(actStartTrain, &QAction::triggered, this, [this](bool checked) {
             QToolButton *btn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>(QStringLiteral("Обучение")) : nullptr;
             QLabel *lbl = btn ? btn->findChild<QLabel*>() : nullptr;
@@ -3786,8 +3618,8 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
 
                 QProcess *serverProc = this->jupyterServer ? this->jupyterServer->findChild<QProcess*>() : nullptr;
                 if (serverProc) {
-                    serverProc->disconnect(SIGNAL(readyReadStandardOutput()));
-                    serverProc->disconnect(SIGNAL(readyReadStandardError()));
+                    QObject::disconnect(serverProc, &QProcess::readyReadStandardOutput, nullptr, nullptr);
+                    QObject::disconnect(serverProc, &QProcess::readyReadStandardError, nullptr, nullptr);
 
                     static bool isApiConnected = false;
                     isApiConnected = false;
@@ -3896,7 +3728,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     // =========================================================================
     QShortcut* chatShortcut = new QShortcut(QKeySequence("Ctrl+J"), this);
     chatShortcut->setContext(Qt::ApplicationShortcut);
-    chatShortcut->disconnect();
+    QObject::disconnect(chatShortcut, &QShortcut::activated, nullptr, nullptr);
 
     connect(chatShortcut, &QShortcut::activated, this, [this]() {
         // ЗАЩИТА ОТ КЛОНОВ: Проверяем сохраненный указатель класса или ищем на экране
@@ -8117,45 +7949,6 @@ bool Neuro_programm::archiveProject(const QString &sourceDir, const QString &out
     return true;
 }
 
-
-// bool Neuro_programm::unarchiveProject(const QString &saveFilePath, const QString &targetExtractDir)
-// {
-//     QDir dir(targetExtractDir);
-//     if (!dir.exists()) {
-//         dir.mkpath(targetExtractDir);
-//     }
-
-//     // !!! КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Создаем QProcess динамически в куче !!!
-//     // Передаем nullptr вместо this, чтобы полностью изолировать его от потока главного окна
-//     QProcess *tarProcess = new QProcess(nullptr);
-
-//     QStringList arguments;
-//     arguments << "-x" << "-j" << "-f" << saveFilePath << "-C" << targetExtractDir;
-
-//     tarProcess->start("tar", arguments);
-
-//     // Блокируем поток интерфейса на время распаковки, но БЕЗ обработки фоновых сигналов окон
-//     bool success = tarProcess->waitForFinished(10000);
-//     int exitCode = tarProcess->exitCode();
-//     QByteArray errorOutput = tarProcess->readAllStandardError();
-
-//     // !!! ВАЖНО: Даем процессу tar команду безопасно удалиться самостоятельно
-//     // строго на следующем витке цикла событий Qt, когда его QWeakPointer закроются
-//     tarProcess->deleteLater();
-
-//     if (!success) {
-//         qCritical() << "[CRITICAL IDE ERROR] Превышено время ожидания распаковки проекта";
-//         return false;
-//     }
-
-//     if (exitCode != 0) {
-//         qCritical() << "[CRITICAL IDE ERROR] Ошибка tar при распаковке:" << errorOutput;
-//         return false;
-//     }
-
-//     return true;
-// }
-
 void Neuro_programm::saveProjectParameters(const QString &tmpDir)
 {
     QJsonObject projectData;
@@ -8376,23 +8169,7 @@ QString Neuro_programm::getSafeSaveFolderPath()
     return savePath;
 }
 
-#include "advancedclosedialog.h" // ОБЯЗАТЕЛЬНО подключите этот заголовок в самом верху neuro_programm.cpp
-#include <QMessageBox>
-#include <QPushButton>
-#include <QCloseEvent>
-#include <QFile>
-#include <QProcess>
-#include <iostream>
 
-#ifndef Q_OS_WIN
-#include <sys/types.h>
-#include <signal.h>
-#endif
-
-#ifndef Q_OS_WIN
-#include <unistd.h>
-#include <signal.h>
-#endif
 
 void Neuro_programm::closeEvent(QCloseEvent *event)
 {
@@ -8400,7 +8177,7 @@ void Neuro_programm::closeEvent(QCloseEvent *event)
     std::cout.flush();
 
     if (m_aiManager) {
-        m_aiManager->disconnect();
+        QObject::disconnect(m_aiManager, &LocalAiManager::statusChanged, nullptr, nullptr);
     }
 
     // Сбор измененных файлов
@@ -9656,9 +9433,6 @@ void Neuro_programm::onExecuteScriptRequested(const QString &scriptPath)
     }
 
 }
-
-#include <QActionGroup>
-#include <QCryptographicHash>
 
 // Вспомогательная функция для расчета MD5-хэша (вставьте её перед методом)
 QString Neuro_programm::calculateFileMd5(const QString &filePath)
@@ -10949,14 +10723,6 @@ void Neuro_programm::setupInstallProcessConnections()
     });
 }
 
-#include <QInputDialog>
-#include <QMessageBox>
-#include <QDir>
-#include <QSettings>
-#include <QPlainTextEdit>
-#include <QStackedWidget>
-#include <QDebug>
-
 void Neuro_programm::action_uninstall_package_triggered()
 {
     // 1. Проверяем, не занят ли процесс pip другой фоновой операцией
@@ -11054,14 +10820,6 @@ void Neuro_programm::action_uninstall_package_triggered()
 
     m_installProcess->start(pythonExe, arguments);
 }
-
-#include <QInputDialog>
-#include <QMessageBox>
-#include <QDir>
-#include <QSettings>
-#include <QPlainTextEdit>
-#include <QStackedWidget>
-#include <QDebug>
 
 void Neuro_programm::action_upgrade_package_triggered()
 {
@@ -11523,12 +11281,6 @@ void Neuro_programm::runPipUninstallProcess(const QString &packageName)
     m_installProcess->start(pythonExe, arguments);
 }
 
-#include <QDir>
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QDebug>
-
 bool Neuro_programm::createServicesConfig(const QString &projectName, const QString &projectFolderPath)
 {
     QDir projectDir(projectFolderPath);
@@ -11584,13 +11336,6 @@ bool Neuro_programm::createServicesConfig(const QString &projectName, const QStr
     qInfo() << "[SERVICES_MGR] Технический файл настроек служб успешно создан:" << configFilePath;
     return true;
 }
-
-#include <QDir>
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
-#include <QDebug>
 
 bool Neuro_programm::createDefaultTrainNotebook(const QString &projectFolderPath)
 {
@@ -11695,15 +11440,6 @@ void Neuro_programm::saveCurrentProjectChanges() // Ваш слот для save_
 
     ui->statusbar->showMessage("Данные проекта успешно обновлены в passport.pystudio.json", 3000);
 }
-
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QProcess>
-#include <QDir>
-#include <QDateTime>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QTextStream>
 
 void Neuro_programm::saveProjectAsArchive()
 {
@@ -12629,7 +12365,8 @@ void Neuro_programm::setupDebugInterface()
     {
         QTableWidget *stackTable = panelOther ? panelOther->findChild<QTableWidget*>("callStackTable") : nullptr;
         if (stackTable) {
-            stackTable->disconnect(); // Защита от дублирования сигналов в ОЗУ
+            QObject::disconnect(stackTable, &QTableWidget::itemActivated, nullptr, nullptr);
+            QObject::disconnect(stackTable, &QTableWidget::itemClicked, nullptr, nullptr);
             stackTable->setRowCount(0);
 
             for (const QStringList &frame : stackFramesForUi) {
@@ -12840,7 +12577,8 @@ void Neuro_programm::setupDebugInterface()
     QPushButton *btnStop = this->findChild<QPushButton*>("btnStopDebug");
 
     if (btnRes) {
-        btnRes->disconnect();
+        //btnRes->disconnect();
+        disconnect(btnRes, &QPushButton::clicked, nullptr, nullptr);
         btnRes->setCheckable(true);
         btnRes->setChecked(false);
         btnRes->setText("Продолжить");
@@ -12867,7 +12605,7 @@ void Neuro_programm::setupDebugInterface()
     }
 
     if (btnOver) {
-        btnOver->disconnect();
+        disconnect(btnOver, &QPushButton::clicked, nullptr, nullptr);
         btnOver->setIcon(QIcon(":/Data/system_icons/media-playlist-normal.svg"));
         connect(btnOver, &QPushButton::clicked, this, [this]() {
             this->setDebugButtonsEnabled(false);
@@ -12876,7 +12614,7 @@ void Neuro_programm::setupDebugInterface()
     }
 
     if (btnInto) {
-        btnInto->disconnect();
+        disconnect(btnInto, &QPushButton::clicked, nullptr, nullptr);
         btnInto->setIcon(QIcon(":/Data/system_icons/media-playlist-play.svg"));
         connect(btnInto, &QPushButton::clicked, this, [this]() {
             this->setDebugButtonsEnabled(false);
@@ -12885,7 +12623,7 @@ void Neuro_programm::setupDebugInterface()
     }
 
     if (btnOut) {
-        btnOut->disconnect();
+        disconnect(btnOut, &QPushButton::clicked, nullptr, nullptr);
         btnOut->setIcon(QIcon(":/Data/system_icons/media-skip-forward.svg"));
         connect(btnOut, &QPushButton::clicked, this, [this]() {
             this->setDebugButtonsEnabled(false);
@@ -12894,7 +12632,7 @@ void Neuro_programm::setupDebugInterface()
     }
 
     if (btnStop) {
-        btnStop->disconnect();
+        disconnect(btnStop, &QPushButton::clicked, nullptr, nullptr);
         btnStop->setIcon(QIcon(":/Data/system_icons/media-playback-stop.svg"));
         connect(btnStop, &QPushButton::clicked, this, [this]() {
             if (actStopDebug) actStopDebug->trigger();
@@ -12999,7 +12737,7 @@ void Neuro_programm::setupDebugInterface()
             if (!fullPath.isEmpty()) { this->openNewFileInEditor(fullPath); }});}
     setDebugButtonsEnabled(false); // Активация кнопки плюс для QListWidget
     if (btnAddWatch) {
-        btnAddWatch->disconnect();
+        disconnect(btnAddWatch, &QPushButton::clicked, nullptr, nullptr);
         btnAddWatch->setText(" + Добавить выражение");
         btnAddWatch->setStyleSheet("QPushButton { font-weight: bold; color: #1a73e8; }");
         connect(btnAddWatch, &QPushButton::clicked, this, [this, watchList]() {
@@ -13343,16 +13081,6 @@ void Neuro_programm::refreshProblemsTableView()
     // 4. Бежим циклом по ГЛOБАЛЬНОМУ контейнеру, где поле .message гарантированно существует!
     for (const auto &error : std::as_const(Neuro_programm::globalLspErrors))
     {
-        // СМАРТ-ФИЛЬТР: Проверяем, относится ли эта ошибка из ОЗУ к текущему открытому файлу на экране.
-        // Если у вашей структуры globalLspErrors поле пути называется по-другому, подставьте его.
-        // Если фильтрация по файлу пока не нужна — эту проверку можно временно закомментировать.
-        /*
-        QString errorCleanPath = QDir::fromNativeSeparators(error.fPath).trimmed();
-        if (errorCleanPath != cleanCurrentDocPath) {
-            continue; // Пропускаем ошибки других закрытых вкладок
-        }
-        */
-
         int row = probTable->rowCount();
         probTable->insertRow(row);
 

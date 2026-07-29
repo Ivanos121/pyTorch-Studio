@@ -55,5 +55,8 @@
         <file>../Data/Icons/pytorch-studio.svg</file>
         <file>../Data/system_icons/text-x-python.svg</file>
         <file>../Config/settings_schema.json</file>
+        <file>../Data/system_icons/media-playlist-normal.svg</file>
+        <file>../Data/system_icons/media-playlist-play.svg</file>
+        <file>../Data/system_icons/media-skip-forward.svg</file>
     </qresource>
 </RCC>
