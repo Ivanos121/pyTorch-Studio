@@ -202,17 +202,17 @@ void LocalAiManager::requestChatGeneration(const QString &prompt, const QString 
     int batchSize = 32;
     bool lowRamMode = false;
 
-    if (Neuro_programm::self != nullptr && Neuro_programm::self->aiPanel != nullptr) {
-        if (Neuro_programm::self->aiPanel->comboBatchSize != nullptr) {
-            batchSize = Neuro_programm::self->aiPanel->comboBatchSize->currentText().toInt();
-        }
-        if (Neuro_programm::self->aiPanel->ui && Neuro_programm::self->aiPanel->ui->comboDevice_2) {
-            QString deviceText = Neuro_programm::self->aiPanel->ui->comboDevice_2->currentText().toLower();
-            if (deviceText.contains("cpu")) {
-                lowRamMode = true;
-            }
-        }
-    }
+    // if (Neuro_programm::self != nullptr && Neuro_programm::self->aiPanel != nullptr) {
+    //     if (Neuro_programm::self->aiPanel->comboBatchSize != nullptr) {
+    //         batchSize = Neuro_programm::self->aiPanel->comboBatchSize->currentText().toInt();
+    //     }
+    //     if (Neuro_programm::self->aiPanel->ui && Neuro_programm::self->aiPanel->ui->comboDevice_2) {
+    //         QString deviceText = Neuro_programm::self->aiPanel->ui->comboDevice_2->currentText().toLower();
+    //         if (deviceText.contains("cpu")) {
+    //             lowRamMode = true;
+    //         }
+    //     }
+    // }
 
     // Собираем расширенную Pydantic-структуру для FastAPI
     QJsonObject mainJson;

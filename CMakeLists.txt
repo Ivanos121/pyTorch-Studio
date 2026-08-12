@@ -139,19 +139,25 @@ set(PROJECT_SOURCES
     src/resources.qrc
 )
 
+# Передаем абсолютный путь к исходникам текущего компьютера в компилятор C++
+add_compile_definitions(PROJECT_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
 # Создаем исполняемый файл проекта
-add_executable(pytorch-studio ${PROJECT_SOURCES})
+add_executable(pytorch-studio ${PROJECT_SOURCES}
+    src/dynamicformbuilder.h src/dynamicformbuilder.cpp
+    src/sessiontablewidget.h src/sessiontablewidget.cpp
+    src/sessiondetailswidget.h src/sessiondetailswidget.cpp src/sessiondetailswidget.ui
+    src/trainconfigwizard.h src/trainconfigwizard.cpp
+)
 
 # Указываем пути поиска заголовочных файлов
 target_include_directories(pytorch-studio PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${LIBUSB_INCLUDE_DIRS}
 )
 
 # Линковка статической библиотеки проекта, libusb и KF6
 target_link_libraries(pytorch-studio PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/libstlink.a
     ${LIBUSB_LIBRARIES}
     KF6::Parts
 )

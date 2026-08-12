@@ -295,11 +295,65 @@ panel_other::panel_other(QWidget *parent) :
         });
     }
 
-    m_stackHandler = new StackTableHandler(ui->callStackListWidget, this);
+    // 🌟 ИСПРАВЛЕННЫЙ ВАРИАНТ: Привязываем обработчик к ВЕРХНЕЙ таблице дебага!
+    if (ui->callStackListWidget)
+    {
+        m_stackHandler = new StackTableHandler(ui->callStackListWidget, this);
+    }
 
-    // Связываем сигнал двойного клика из обработчика с сигналом-ретранслятором панели
-    connect(m_stackHandler, &StackTableHandler::frameSelected,
-            this, &panel_other::fileNavigationRequested);
+    // Ретранслируем сигнал двойного клика фрейма отладки напрямую в MainWindow
+    connect(m_stackHandler, &StackTableHandler::frameSelected, this, &panel_other::errorItemDoubleClicked);
+
+
+    // Настраиваем колонки problemsTable прямо внутри её родного класса
+    ui->problemsTable->setColumnCount(4);
+    ui->problemsTable->setHorizontalHeaderLabels(QStringList() << "Код" << "Строка" << "Описание ошибки" << "Файл");
+
+    // Жестко включаем сетку, чтобы строки не накладывались на заголовки
+    ui->problemsTable->setShowGrid(true);
+
+    // Включаем автоматическое растягивание колонок под текст в стиле PyCharm
+    if (ui->problemsTable->horizontalHeader())
+    {
+        ui->problemsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents); // "Код" ужимается под E501
+        ui->problemsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents); // "Строка" ужимается под 26
+        ui->problemsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);          // "Описание" занимает весь центр экрана
+        ui->problemsTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents); // "Файл" ужимается под train.py
+    }
+
+    ui->problemsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->problemsTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->problemsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    ui->problemsTable->verticalHeader()->setVisible(false);
+    ui->problemsTable->setAlternatingRowColors(true);
+    ui->problemsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+
+    // Связываем двойной клик по таблице с отправкой сигнала наружу в Neuro_programm
+    connect(ui->problemsTable, &QTableWidget::itemDoubleClicked, this, [this](QTableWidgetItem *item) {
+        if (!item) return;
+        int row = item->row();
+
+        QTableWidgetItem *rowItem = ui->problemsTable->item(row, 1);
+        QTableWidgetItem *fileItem = ui->problemsTable->item(row, 3);
+        if (!rowItem || !fileItem) return;
+
+        int lineNum = rowItem->text().toInt();
+        QString fullPath = fileItem->data(Qt::UserRole).toString();
+
+        emit errorItemDoubleClicked(fullPath, lineNum);
+    });
+
+    connect(ui->callStackListWidget, &QTableWidget::itemDoubleClicked, this, [this](QTableWidgetItem *item) {
+        if (!item) return;
+        int row = item->row();
+        QTableWidgetItem *rowItem = ui->callStackListWidget->item(row, 1); // Строка
+        QTableWidgetItem *fileItem = ui->callStackListWidget->item(row, 2); // Файл
+        if (rowItem && fileItem) {
+            // Пробрасываем сигнал навигации в главное окно
+            emit errorItemDoubleClicked(fileItem->text(), rowItem->text().toInt());
+        }
+    });
+
 }
 
 panel_other::~panel_other()
@@ -503,3 +557,185 @@ void panel_other::setDebugAction(QAction *action)
     // Связываем сигнал кнопки сайдбара напрямую со слотом внутри этого класса
     connect(action, &QAction::triggered, this, &panel_other::onDebugModeTriggered);
 }
+
+void panel_other::updateErrorTable(const QString &filePath, const QStringList &errorLines)
+{
+    QString fileName = QFileInfo(filePath).fileName();
+
+    // 1. Сначала удаляем из таблицы старые ошибки ТОЛЬКО этого файла
+    for (int i = ui->problemsTable->rowCount() - 1; i >= 0; --i) {
+        QTableWidgetItem *fileItem = ui->problemsTable->item(i, 3);
+        if (fileItem && fileItem->data(Qt::UserRole).toString() == filePath) {
+            ui->problemsTable->removeRow(i);
+        }
+    }
+
+    // 2. Заполняем таблицу новыми ошибками, если они есть
+    for (const QString &errorLine : errorLines) {
+        QStringList parts = errorLine.split('|');
+        if (parts.size() < 3) continue;
+
+        QString errorCode = parts[0].trimmed();
+        QString errorRow  = parts[1].trimmed();
+        QString errorText = parts[2].trimmed();
+
+        int currentRow = ui->problemsTable->rowCount();
+        ui->problemsTable->insertRow(currentRow);
+
+        QTableWidgetItem *codeItem = new QTableWidgetItem(errorCode);
+        QTableWidgetItem *rowItem  = new QTableWidgetItem(errorRow);
+        QTableWidgetItem *descItem = new QTableWidgetItem(errorText);
+        QTableWidgetItem *fileItem = new QTableWidgetItem(fileName);
+
+        // Прячем абсолютный путь для навигации
+        fileItem->setData(Qt::UserRole, filePath);
+
+        // Раскраска под стиль PEP8 (E501 и синтаксис)
+        if (errorCode.startsWith("E") || errorCode.startsWith("F")) {
+            codeItem->setForeground(QBrush(QColor(0xef5350)));
+        } else if (errorCode.startsWith("W")) {
+            codeItem->setForeground(QBrush(QColor(0xffa726)));
+        }
+
+        ui->problemsTable->setItem(currentRow, 0, codeItem);
+        ui->problemsTable->setItem(currentRow, 1, rowItem);
+        ui->problemsTable->setItem(currentRow, 2, descItem);
+        ui->problemsTable->setItem(currentRow, 3, fileItem);
+    }
+}
+
+void panel_other::clearErrorsForFile(const QString &filePath)
+{
+    // Очищаем все строки таблицы, чтобы убрать старые зависшие ячейки
+    ui->problemsTable->setRowCount(0);
+}
+
+void panel_other::addErrorRow(const QString &filePath, const QString &code, const QString &line, const QString &description)
+{
+    int currentRow = ui->problemsTable->rowCount();
+    ui->problemsTable->insertRow(currentRow);
+
+    // 1. Ищем главное окно, чтобы вытащить свойство папки проекта
+    // Идем вверх по иерархии родителей, пока не найдем объект главного окна
+    QWidget *mainWindowWidget = this->parentWidget();
+    while (mainWindowWidget && !mainWindowWidget->inherits("QMainWindow")) {
+        mainWindowWidget = mainWindowWidget->parentWidget();
+    }
+
+    QString projectRoot = mainWindowWidget ? mainWindowWidget->property("currentOpenProjectPath").toString() : "";
+    QString relativePathDisplay;
+
+    if (!projectRoot.isEmpty()) {
+        QDir rootDir(projectRoot);
+        // Вычисляем красивый относительный путь (например: scripts/train.py)
+        relativePathDisplay = rootDir.relativeFilePath(filePath);
+    }
+
+    // РЕЗЕРВНЫЙ СЦЕНАРИЙ (Если relativeFilePath вернул пустую строку или сломался)
+    if (relativePathDisplay.isEmpty() || relativePathDisplay.startsWith("..") || relativePathDisplay == filePath) {
+        QFileInfo fileInfo(filePath);
+        // Вручную собираем строку вида "scripts/train.py" на основе структуры папок
+        relativePathDisplay = fileInfo.dir().dirName() + "/" + fileInfo.fileName();
+    }
+
+    // 2. Создаем элементы ячеек
+    QTableWidgetItem *codeItem = new QTableWidgetItem(code);
+    QTableWidgetItem *rowItem  = new QTableWidgetItem(line);
+    QTableWidgetItem *descItem = new QTableWidgetItem(description);
+    QTableWidgetItem *fileItem = new QTableWidgetItem(relativePathDisplay);
+
+    // Надежно прячем полный путь к файлу в UserRole (необходимо для двойного клика курсором!)
+    fileItem->setData(Qt::UserRole, filePath);
+
+    // Стилизация кодов под PEP8
+    if (code.startsWith("E501")) {
+        codeItem->setForeground(QBrush(QColor(0xffa726)));
+    } else if (code.startsWith("E") || code.startsWith("F")) {
+        codeItem->setForeground(QBrush(QColor(0xef5350)));
+    }
+
+    // 3. Раскладываем элементы строго по колонкам новой строки
+    ui->problemsTable->setItem(currentRow, 0, codeItem); // Код (E501)
+    ui->problemsTable->setItem(currentRow, 1, rowItem);  // Строка (147)
+    ui->problemsTable->setItem(currentRow, 2, descItem); // Описание ошибки
+    ui->problemsTable->setItem(currentRow, 3, fileItem); // Относительный путь (scripts/train.py)
+
+    // Принудительно растягиваем колонку описания
+    if (ui->problemsTable->horizontalHeader()) {
+        ui->problemsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+        ui->problemsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+        ui->problemsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+        ui->problemsTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    }
+}
+
+void panel_other::activateMode(DisplayMode mode, QSplitter *mainVerticalSplitter)
+{
+    Q_UNUSED(mainVerticalSplitter);
+
+    // -------------------------------------------------------------------------
+    // 🔥 АБСОЛЮТНЫЙ ФИЛЬТР ЛОЖНЫХ ЗАПУСКОВ (Защита от фоновых сигналов)
+    // -------------------------------------------------------------------------
+    // Проверяем, нажата ли кнопка Терминала физически.
+    // Если метод вызван фоновым сигналом/таймером, а кнопка "отжата" — немедленно выходим!
+    if (this->parentWidget()) {
+        QPushButton *btnTerm = this->parentWidget()->findChild<QPushButton*>("btnTerminal");
+        if (btnTerm && !btnTerm->isChecked()) {
+            this->setVisible(false);
+            this->hide();
+            return; // ЖЕСТКИЙ СИЛОВОЙ ВОЗВРАТ — БЛОКИРУЕМ ОТКРЫТИЕ!
+        }
+    }
+
+    if (!ui) return;
+
+    // ШАГ 1: Показываем панель на экране (выполнится ТОЛЬКО если кнопка зажата)
+    this->show();
+    this->setVisible(true);
+
+    // Установка корректной высоты и компоновки (Ваш рабочий сеточный код)
+    int targetHeight = 390;
+    this->setMinimumHeight(targetHeight);
+    this->setFixedHeight(targetHeight);
+    this->setContentsMargins(10, 0, 10, 28); // Зазор над статусбаром
+
+    if (ui->splitter) {
+        ui->splitter->setContentsMargins(0, 0, 0, 0);
+        ui->splitter->refresh();
+    }
+
+    // ШАГ 2: Управление внутренним контентом в зависимости от нажатой кнопки
+    switch (mode) {
+    case TerminalMode:
+        if (ui->problemsContainer) ui->problemsContainer->hide();
+        if (ui->stackedWidget) ui->stackedWidget->setCurrentIndex(0);
+        break;
+    case DebugMode:
+        if (ui->problemsContainer) ui->problemsContainer->show();
+        if (ui->stackedWidget) ui->stackedWidget->setCurrentIndex(2);
+        break;
+    case TrainingMode:
+        if (ui->problemsContainer) ui->problemsContainer->hide();
+        if (ui->stackedWidget) ui->stackedWidget->setCurrentIndex(2);
+        if (ui->btnViewLog) ui->btnViewLog->click();
+        break;
+    }
+
+    if (this->parentWidget() && this->parentWidget()->layout()) {
+        this->parentWidget()->layout()->activate();
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+

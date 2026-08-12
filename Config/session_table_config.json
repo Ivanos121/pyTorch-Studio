@@ -1,0 +1,12 @@
+{
+    "alternating_row_colors": true,
+    "grid_visible": true,
+    "columns": [
+        {"key": "id", "header": "Идентификатор сессии", "width": 260, "visible": true},
+        {"key": "date", "header": "Дата запуска", "width": 150, "visible": true},
+        {"key": "optimizer", "header": "Оптимизатор", "width": 100, "visible": true},
+        {"key": "epochs", "header": "Эпох", "width": 70, "visible": true},
+        {"key": "val_mae", "header": "Val MAE (°C)", "width": 100, "visible": true},
+        {"key": "comment", "header": "Комментарий к тексту эксперимента", "width": -1, "visible": true}
+        ]
+    }

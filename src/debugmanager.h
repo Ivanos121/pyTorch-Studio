@@ -37,22 +37,16 @@ public:
     void evaluateWatchExpression(int rowId, const QString &expression);
 
 signals:
-    // Вывод системных сообщений дебаггера напрямую в статусбар главного окна
     void statusMessageReady(const QString &message, int timeout = 0);
-
-    // Передает реальную строку останова в текстовый редактор для подсветки
     void breakpointHit(int line, const QString &sourceFile);
-
-    // Передает массив для нижней таблицы Стек вызовов (Уровень, Функция, Файл, Строка, Адрес)
     void stackTraceReceived(const QList<QStringList> &stackFrames);
-
-    // Передает массив для правой таблицы Локальных переменных (Имя, Значение, Тип)
     void variablesReceived(const QList<QStringList> &variables);
-
-    // Сигнал о полном закрытии процесса отладки
     void sessionFinished();
     void loadedSourcesReceived(const QStringList &sourcePaths);
     void watchResultReady(int rowId, const QString &resultValue);
+    void debugSessionError(QString title, QString details);
+    void syntaxValidationFinished(QString filePath, QStringList errors);
+
 
 private slots:
     // Обработчики потоков ввода-вывода QProcess
@@ -77,6 +71,7 @@ private:
     QByteArray m_networkBuffer;
     int m_currentThreadId = 1;
     QMap<int, int> m_watchSeqMap;
+    QString m_accumulatedErrors;
 };
 
 #endif // DEBUGMANAGER_H

@@ -1,8 +1,7 @@
 #ifndef NEURO_PROGRAMM_H
 #define NEURO_PROGRAMM_H
 #include "settings.h"
-#include "statusbuttonstyle.h"
-#include "aiprojectmodel.h"
+//#include "aiprojectmodel.h"
 #include "about_program.h"
 #include "projectrootproxymodel.h"
 #include "start_progect.h"
@@ -18,13 +17,14 @@
 #include "debugmanager.h"
 #include "projectmanager.h"
 #include "documentmanager.h"
-#include "stlink.h"
 #include "prog_stm.h"
-#include "stacktablehandler.h"
+//#include "stacktablehandler.h"
 #include "variablestablehandler.h"
 #include "savedata.h"
 #include "localaimanager.h"
 #include "aipromptwidget.h"
+#include "sessiontablewidget.h"
+#include "sessiondetailswidget.h"
 
 #include <QMainWindow>
 #include <QCompleter>
@@ -48,6 +48,7 @@
 
 class JupyterClient;
 class JupyterManager;
+class AI_panel;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -74,6 +75,14 @@ public:
     void processEnvironmentAndSync(const QString &projectPath, const QString &architecture = "AUTO");
     QString calculateFileMd5(const QString &filePath);
     void syncVenvToRequirements();
+    QString getCurrentProjectPath() const { return this->currentOpenProjectPath; }
+    void updateStatusLogText(const QString &text, const QString &colorHtml = QStringLiteral("#eff0f1")) {
+        // Проверяем живой указатель на метку, сохраненную на страницах 2 и 24 вашего лога
+        if (this->statusLogLabel) {
+            this->statusLogLabel->setStyleSheet(QString("color: %1; font-weight: bold;").arg(colorHtml));
+            this->statusLogLabel->setFullText(text); // Используем ваш кастомный метод setFullText
+        }
+    }
     void updateProjectsListFromSettings();
     QElapsedTimer m_aiGenerationTimer;
     static Neuro_programm* self;
@@ -159,16 +168,15 @@ private:
     void detectCudaDevices();
     void sendSystemNotification(const QString &title, const QString &text);
     void initProjectTreeModel(QString path);
-    //void initLossChart();
-    void updateRecentProjectActions();   // Метод перерисовки списка в меню
-    void addProjectToRecent(const QString &projectPath); // Метод добавления нового пути
+    void updateRecentProjectActions();
+    void addProjectToRecent(const QString &projectPath);
     void initLspServer();
     QWidget *activeCompletionPopup = nullptr;
     void sendInitialWelcomeRequest();
     int codeBlockCounter = 0;
     int responseCounter = 0;
     QMap<QString, QString> aiResponsesMap;
-    QMap<QString, QString> codeBlocksMap; // Хранилище: ID блока -> Чистый код
+    QMap<QString, QString> codeBlocksMap;
     void onChatAnchorClicked(const QUrl &link);
     QString parseMarkdownCodeBlocks(const QString &rawText);
     void handlePythonErrors();
@@ -191,18 +199,20 @@ private:
     bool showSaveConfirmationDialog();
     void injectFinalMetricsToVariableTree(const QString &name, const QString &value, const QString &type);
     void jumpToCodeLine(const QString &filePath, int lineNumber);
+    void validatePythonSyntax(const QString &filePath);
+    void setupSessionTableConnections();
+    QTimer *linterDebounceTimer = nullptr;
 
 private slots:
     void onFileDoubleClicked(const QModelIndex &index);
     void onCloseCurrentFileClicked();
     void onOpenFileListItemDoubleClicked(QListWidgetItem *item);
-    void onStartTrainingClicked();   // Нажатие на "Начать обучение"
-    void onStopTrainingClicked();    // Нажатие на "Остановить"
-    void readTrainingOutput();       // Асинхронное построчное чтение логов лосса
+    //void onStopTrainingClicked();
+    void readTrainingOutput();
     void trainingFinished(int exitCode);
     void save_project_config();
-    void openRecentProject(); // Слот, который срабатывает при клике на недавний проект
-    void saveCurrentActiveFile(); // Сохранить текущий открытый файл (Ctrl + S)
+    void openRecentProject();
+    void saveCurrentActiveFile();
     void saveAllProjectChanges();
     void onCurrentFileTextChanged();
     void onCloseProjectClicked();
@@ -236,14 +246,25 @@ private slots:
     void onPromptSubmitted(const QString &promptText);
 
 private:
+    QMetaObject::Connection jupyterLogConnection;
+    QMetaObject::Connection jupyterFinishConnection;
+    QMetaObject::Connection jupyterReadyConnection;
+    SessionDetailsWidget *detailsDashboard;
+    SessionTableWidget *sessionTable{nullptr};
+    AI_panel *m_aiPanel = nullptr;
+    bool m_isOpeningFile = false;
     bool isAiProcessing = false;
     LocalAiManager* m_aiManager;
     QMenu *toolsMenu;
     QMenuBar *customMenuBar;
+    QAction *actControlPanel = nullptr;
+    QAction *actDebug = nullptr;
+    QAction *actProject = nullptr;
     QAction *actResume = nullptr;
     QAction *actStepOver = nullptr;
     QAction *actStepInto = nullptr;
     QAction *actStopDebug = nullptr;
+    QAction *actTrainConfig = nullptr;
     VariablesTableHandler *m_variablesHandler = nullptr;
     int m_previousPageIndex = 0;
     QAction *actSTM;
@@ -251,7 +272,6 @@ private:
     QAction *EraseFlash;
     QAction *WrightFlash;
     QString m_firmwarePath;
-    stlink_t* m_slContext = nullptr;
     DocumentManager *docMgr;
     ProjectManager *projectMgr;
     DebugManager *pyDebugger;
@@ -270,7 +290,6 @@ private:
     QWidget *rsc4;
     Savedata *rsc5;
     Search *search;
-    QAction *actProject;
     QFileSystemModel *projectModel = nullptr;
     ProjectRootProxyModel *projectProxyModel = nullptr;
     QSplitter   *mainVerticalSplitter;
@@ -287,7 +306,7 @@ private:
     QString currentOpenProjectPath;
     void sendChatMessageToAI();
     static const int MaxRecentFiles = 5;
-    QMenu *recentProjectsMenu;           // Подменю "Открыть недавние"
+    QMenu *recentProjectsMenu;
     QAction *recentProjectActions[MaxRecentFiles];
     QCompleter *codeCompleter = nullptr;
     QStringListModel *completerModel = nullptr;
@@ -307,27 +326,24 @@ private:
     QWidget *statusSpacer = nullptr;
     QByteArray m_lspAccumulatedBuffer;
     QWidget *leftSideBarContainer = nullptr;
-    QAction *actDebug;
     CodeEditor *currentEditor;
     bool isDocWindowActive = false;
     bool m_dragging = false;
     bool m_isDragging = false;
-    class QSpacerItem *leftPaddingSpacer = nullptr; // Указатель на левый отступ фальш-панели
+    class QSpacerItem *leftPaddingSpacer = nullptr;
     void updateWidget3Padding();
     QString currentFilePath;
     QTimer *monitorTimer;
     QProcess *debuggedScriptProcess;
-    QAction *actControlPanel;
-    QAction *actTensor;
-    QAction *actPip;
-    QAction *actSearch;
-    QAction *actStartTrain;
+    QAction *actTensor = nullptr;
+    QAction *actPip = nullptr;
+    QAction *actSearch = nullptr;
+    QAction *actStartTrain = nullptr;
     QAction *actStop;
     QAction *actStepOut;
     void updateTabName();
     void setFileModifiedState(CodeEditor *editor, bool modified);
     bool archiveProject(const QString &sourceDir, const QString &outputSavePath);
-    //bool unarchiveProject(const QString &saveFilePath, const QString &targetExtractDir);
     void saveProjectParameters(const QString &tmpDir);
     void loadProjectParameters(const QString &tmpDir);
     void sendLspDidOpenForFile(const QString &filePath, const QString &fileContent);
@@ -353,5 +369,6 @@ private:
     void createMenus();
     void showPreferences();
     void insertGeneratedCodeIntoEditor(const QString &generatedCode);
+    QString generateSessionId(const QString &modelTag, const QString &optimizer, const QString &device, const QString &shortComment);
 };
 #endif // NEURO_PROGRAMM_H

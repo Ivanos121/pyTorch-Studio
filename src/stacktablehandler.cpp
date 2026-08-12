@@ -59,6 +59,10 @@ void StackTableHandler::updateTable(const QList<StackFrame> &frames) {
         m_table->setItem(row, ColLine, itemLine);
         m_table->setItem(row, ColAddress, itemAddress);
     }
+
+    // Принудительно заставляем Qt перерисовать ячейки и вернуть стрелку
+    m_table->viewport()->update();
+    m_table->update();
 }
 
 void StackTableHandler::onCellDoubleClicked(int row, int column) {

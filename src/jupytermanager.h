@@ -17,6 +17,7 @@ public:
 
     // Мягкая остановка фонового сервера
     void stopServer();
+    void startThermalTraining(const QString &projectRootPath);
 
     // Проверка текущего состояния процесса
     bool isRunning() const;

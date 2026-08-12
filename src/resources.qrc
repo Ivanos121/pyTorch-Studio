@@ -29,15 +29,6 @@
         <file>../Data/system_icons/go-next.svg</file>
         <file>../Data/system_icons/go-previous.svg</file>
         <file>../Data/system_icons/help-about.svg</file>
-        <file>../Data/system_icons/IM_256x256.png</file>
-        <file>../Data/system_icons/IM_256x256.svg</file>
-        <file>../Data/system_icons/IM_256x256_gray.png</file>
-        <file>../Data/system_icons/IM_96x96.svg</file>
-        <file>../Data/system_icons/IM_96x96_vm.svg</file>
-        <file>../Data/system_icons/labplot-axis-vertical.svg</file>
-        <file>../Data/system_icons/labplot-matrix-new.svg</file>
-        <file>../Data/system_icons/labplot-xy-interpolation-curve.svg</file>
-        <file>../Data/system_icons/labplot-zoom-out-y.svg</file>
         <file>../Data/system_icons/map-flat.svg</file>
         <file>../Data/system_icons/markasblank.svg</file>
         <file>../Data/system_icons/media-playback-paused.svg</file>
@@ -58,5 +49,17 @@
         <file>../Data/system_icons/media-playlist-normal.svg</file>
         <file>../Data/system_icons/media-playlist-play.svg</file>
         <file>../Data/system_icons/media-skip-forward.svg</file>
+        <file>../Data/system_icons/labplot-xy-interpolation-curve.svg</file>
+        <file>../Data/system_icons/table.svg</file>
+        <file>../Data/system_icons/computer.svg</file>
+        <file>../Data/system_icons/view-certificate.svg</file>
+        <file>../Data/Icons/pytorch-studio_16.png</file>
+        <file>../Data/Icons/pytorch-studio_24.png</file>
+        <file>../Data/Icons/pytorch-studio_32.png</file>
+        <file>../Data/Icons/pytorch-studio_36.png</file>
+        <file>../Data/Icons/pytorch-studio_48.png</file>
+        <file>../Data/Icons/pytorch-studio_64.png</file>
+        <file>../Data/Icons/pytorch-studio_128.png</file>
+        <file>../Data/Icons/pytorch-studio_256.png</file>
     </qresource>
 </RCC>

@@ -11,6 +11,8 @@
 #include <QVBoxLayout>
 #include <QGraphicsDropShadowEffect>
 #include <QFontInfo>
+#include <execinfo.h>
+#include <unistd.h>
 
 // =========================================================================
 // ШАГ 1.1: СОЗДАЕМ ГЛОБАЛЬНЫЙ ОБЪЕКТ ФАЙЛА ДЛЯ ДОСТУПА ИЗ ХЕНДЛЕРА
@@ -75,6 +77,34 @@ void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &contex
         }
         abort();
     }
+
+    // -------------------------------------------------------------------------
+    // 4. ПЕРЕХВАТЧИК SVG-ОШИБКИ И ПОИСК ИМЕНИ ФАЙЛА
+    // -------------------------------------------------------------------------
+    if (msg.contains("Invalid path data")) {
+        std::cerr << "\n\033[31m[SVG ERROR DETECTED] ===\033[0m" << std::endl;
+
+        // Выводим имя исходного файла Qt и строчку кода, где возник варнинг
+        if (context.file) {
+            std::cerr << "\033[33mВызов из кода: " << context.file << ":" << context.line << "\033[0m" << std::endl;
+        }
+
+        // Печатаем стек, чтобы увидеть, какой именно файл сейчас парсится модулем QIcon/QSvg
+        void* callstack[30];
+        int frames = backtrace(callstack, 30);
+        char** strs = backtrace_symbols(callstack, frames);
+
+        if (strs != nullptr) {
+            // Выведем первые 12 строк стека — там будет имя функции загрузки
+            for (int i = 0; i < 12; ++i) {
+                std::cerr << "\033[35m" << strs[i] << "\033[0m" << std::endl;
+            }
+            free(strs);
+        }
+        std::cerr << "\033[31m=======================================\033[0m\n" << std::endl;
+
+        // В этот раз НЕ вызываем _exit(1) — даем программе работать дальше!
+    }
 }
 
 
@@ -84,6 +114,7 @@ int main(int argc, char *argv[])
     qputenv("XDG_CURRENT_DESKTOP", "KDE");
     qputenv("FONTCONFIG_FILE", "/etc/fonts/fonts.conf");
     qputenv("FONTCONFIG_PATH", "/etc/fonts");
+    qputenv("QTWEBENGINE_DISABLE_SANDBOX", "1");
 
     // Разрешаем Chromium загружать JS-модули xterm.js напрямую с жесткого диска
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-web-security --allow-file-access-from-files");
@@ -101,17 +132,18 @@ int main(int argc, char *argv[])
 
     QApplication a(argc, argv);
 
-    const QString systemIconPath = QDir::home().absoluteFilePath(QStringLiteral(".local/share/icons/hicolor/scalable/apps/pytorch-studio.svg"));
-    const QString fallbackResourcePath = QStringLiteral(":/Data/Icons/pytorch-studio.svg");
-
-    QIcon appIcon = QIcon::fromTheme(QStringLiteral("pytorch-studio"));
-
-    // Резервный вариант: если программа запущена в режиме разработки и ярлыки еще не установлены
-    if (appIcon.isNull()) {
-        appIcon = QIcon(QStringLiteral(":/Data/Icons/pytorch-studio.svg"));
-    }
+    // Сборка контейнера для заголовка окна (внутри qrc ресурсов суффиксы допустимы)
+    QIcon appIcon;
+    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_16.png"), QSize(16, 16));
+    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_32.png"), QSize(32, 32));
+    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_48.png"), QSize(48, 48));
+    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_64.png"), QSize(64, 64));
+    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_256.png"), QSize(256, 256));
 
     a.setWindowIcon(appIcon);
+
+    // КРИТИЧЕСКИ ДЛЯ WAYLAND: Задаем AppID, который Wayland-композитор сопоставит с ярлыком
+    a.setDesktopFileName(QStringLiteral("pytorch-studio"));
 
     QFont globalFixedFont;
     globalFixedFont.setFamily("Liberation Mono"); // Ваш проверенный шрифт

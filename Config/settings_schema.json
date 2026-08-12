@@ -1,289 +1,468 @@
 [
-  {
-    "category": "1. Общие настройки",
-    "key": "General/Theme",
-    "type": "enum",
-    "label": "Тема оформления",
-    "description": "Визуальный стиль интерфейса PyTorch Studio.",
-    "options": ["Системная", "Тёмная (Studio Dark)", "Светлая (Studio Light)"],
-    "default": 0
-  },
-  {
-    "category": "1. Общие настройки",
-    "key": "General/Language",
-    "type": "enum",
-    "label": "Язык приложения",
-    "description": "Язык локализации элементов интерфейса и логов диагностики.",
-    "options": ["Русский", "English"],
-    "default": 0
-  },
-  {
-    "category": "1. Общие настройки",
-    "key": "General/SaveOnFocusLoss",
-    "type": "bool",
-    "label": "Сохранять файлы при потере фокуса",
-    "description": "Автоматически записывать изменения в файлы кода при переключении на другое окно.",
-    "default": true
-  },
-  {
-    "category": "1. Общие настройки",
-    "key": "General/AutoSaveInterval",
-    "type": "int",
-    "label": "Интервал автосохранения скриптов (мин)",
-    "description": "Периодичность фонового сохранения открытых файлов (0 — отключить).",
-    "min": 0,
-    "max": 60,
-    "default": 5
-  },
-  {
-    "category": "1. Общие настройки",
-    "key": "General/CheckUpdates",
-    "type": "bool",
-    "label": "Проверять обновления при запуске",
-    "description": "Автоматический поиск обновлений для ядра IDE и вычислительного движка.",
-    "default": true
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Font/Family",
-    "type": "string",
-    "label": "Семейство шрифта",
-    "description": "Название моноширинного шрифта для редактора кода.",
-    "default": "JetBrains Mono"
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Font/Size",
-    "type": "int",
-    "label": "Размер шрифта (px)",
-    "description": "Высота символов в коде.",
-    "min": 8,
-    "max": 48,
-    "default": 14
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Font/LineSpacing",
-    "type": "int",
-    "label": "Межстрочный интервал",
-    "description": "Расстояние между строками кода в пикселях.",
-    "min": 1,
-    "max": 20,
-    "default": 4
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Format/UseSpaces",
-    "type": "bool",
-    "label": "Использовать пробелы вместо табуляции",
-    "description": "Вставлять пробелы при нажатии клавиши Tab (согласно PEP 8).",
-    "default": true
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Format/IndentSize",
-    "type": "int",
-    "label": "Размер отступа (пробелов)",
-    "description": "Количество пробелов в одном уровне отступа.",
-    "min": 2,
-    "max": 8,
-    "default": 4
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Format/TrimWhitespace",
-    "type": "bool",
-    "label": "Удалять концевые пробелы при сохранении",
-    "description": "Автоматически очищает невидимые пробелы на пустых строках (исключает ошибку W293).",
-    "default": true
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Assist/AutoComplete",
-    "type": "bool",
-    "label": "Включить автодополнение (IntelliSense/LSP)",
-    "description": "Показывать контекстные подсказки функций и методов PyTorch при вводе.",
-    "default": true
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Assist/SyntaxHighlighting",
-    "type": "bool",
-    "label": "Подсветка синтаксиса",
-    "description": "Цветное выделение ключевых слов, классов и строк кода Python.",
-    "default": true
-  },
-  {
-    "category": "2. Редактор кода",
-    "key": "Editor/Assist/LineNumbers",
-    "type": "bool",
-    "label": "Отображать номера строк",
-    "description": "Показывать вертикальную панель с нумерацией строк слева от кода.",
-    "default": true
-  },
-  {
-    "category": "3. Движок PyTorch",
-    "key": "Engine/TargetDevice",
-    "type": "enum",
-    "label": "Устройство для расчетов (Target Device)",
-    "description": "Принудительный выбор тензорного девайса по умолчанию для вычислений.",
-    "options": ["cpu", "cuda:0", "mps"],
-    "default": 0
-  },
-  {
-    "category": "3. Движок PyTorch",
-    "key": "Engine/Vram/MaxSplitSize",
-    "type": "int",
-    "label": "Лимит max_split_size_mb",
-    "description": "Ограничение размера дробления блоков памяти CUDA для предотвращения фрагментации VRAM.",
-    "min": 32,
-    "max": 2048,
-    "default": 128
-  },
-  {
-    "category": "3. Движок PyTorch",
-    "key": "Engine/LoggingLevel",
-    "type": "enum",
-    "label": "Уровень детализации логов",
-    "description": "Глубина логирования внутренних процессов работы тензорного ядра PyTorch.",
-    "options": ["DEBUG", "INFO", "WARNING", "ERROR"],
-    "default": 1
-  },
-  {
-    "category": "3. Движок PyTorch",
-    "key": "Engine/Deterministic",
-    "type": "bool",
-    "label": "Детерминированный режим (Воспроизводимость)",
-    "description": "Принудительно включает torch.backends.cudnn.deterministic = True. Гарантирует идентичность весов при перезапусках, но снижает производительность.",
-    "default": false
-  },
-  {
-    "category": "4. Окружение и Интерпретатор",
-    "key": "Python/InterpreterPath",
-    "type": "string",
-    "label": "Путь к интерпретатору Python",
-    "description": "Абсолютный путь к файлу python (venv, conda или системный), где развернуто окружение PyTorch.",
-    "default": "/usr/bin/python3"
-  },
-  {
-    "category": "4. Окружение и Интерпретатор",
-    "key": "Python/AutoUpdatePackages",
-    "type": "bool",
-    "label": "Разрешить обновление пакетов из GUI",
-    "description": "Позволяет менеджеру пакетов выполнять команды pip install --upgrade прямо из среды Studio.",
-    "default": true
-  },
-  {
-    "category": "5. Сбор Данных и Сессии",
-    "key": "Data/DefaultDatasetPath",
-    "type": "string",
-    "label": "Рабочая директория датасетов",
-    "description": "Путь по умолчанию для автоматического сканирования и поиска тренировочных .csv сессий.",
-    "default": "./datasets/train"
-  },
-  {
-    "category": "5. Сбор Данных и Сессии",
-    "key": "Data/LogsExportPath",
-    "type": "string",
-    "label": "Папка сохранения весов и логов",
-    "description": "Директория, куда будут экспортироваться файлы весов моделей (.pth) и логи обучения.",
-    "default": "./weights"
-  },
-  {
-    "category": "5. Сбор Данных и Сессии",
-    "key": "Data/ClearCudaCacheOnClose",
-    "type": "bool",
-    "label": "Очищать кэш CUDA при выходе",
-    "description": "Автоматически выполнять команду torch.cuda.empty_cache() при закрытии сессии Studio.",
-    "default": true
-  },
-  {
-    "category": "5. Сбор Данных и Сессии",
-    "key": "Data/PurgeTempLogs",
-    "type": "bool",
-    "label": "Удалять временные логи сессий",
-    "description": "Автоматическая очистка кэшированных промежуточных графиков после закрытия программы.",
-    "default": false
-  },
-  {
-    "category": "6. Мониторинг и Графика",
-    "key": "Metrics/RefreshRate",
-    "type": "int",
-    "label": "Частота обновления графиков (мс)",
-    "description": "Периодичность, с которой GUI запрашивает у вычислительного ядра свежие маркеры PROGRESS и METRICS.",
-    "min": 100,
-    "max": 5000,
-    "default": 500
-  },
-  {
-    "category": "6. Мониторинг и Графика",
-    "key": "Metrics/IntegrationType",
-    "type": "enum",
-    "label": "Интеграция трекинга",
-    "description": "Сторонняя система для удаленного мониторинга и сохранения хода экспериментов.",
-    "options": ["Отключено (Локально)", "TensorBoard", "Weights & Biases (WandB)"],
-    "default": 0
-  },
-  {
-    "category": "6. Мониторинг и Графика",
-    "key": "Metrics/ApiToken",
-    "type": "string",
-    "label": "API Токен / Ключ доступа",
-    "description": "Ключ аутентификации для выбранной внешней системы логирования (например, WandB API Key).",
-    "default": ""
-  },
-  {
-    "category": "7. Работа с ИИ",
-    "key": "AI/Agent/ModelType",
-    "type": "enum",
-    "label": "Модель ИИ-Агента",
-    "description": "Основной движок для ведения диалога и генерации архитектур нейросетей.",
-    "options": ["Локальная (Llama-3-8B-Instruct)", "Внешняя (OpenAI API / Claude)", "Фоновый сервер (Ollama)"],
-    "default": 0
-  },
-  {
-    "category": "7. Работа с ИИ",
-    "key": "AI/Agent/ApiPath",
-    "type": "string",
-    "label": "Адрес локального сервера / API URL",
-    "description": "Базовый URL для подключения к ИИ-агенту (например, http://localhost:11434).",
-    "default": "http://localhost:11434"
-  },
-  {
-    "category": "7. Работа с ИИ",
-    "key": "AI/Autocomplete/Enabled",
-    "type": "bool",
-    "label": "Включить умное автодополнение (AI Tab-Completion)",
-    "description": "Построчный предиктивный ввод кода на лету с использованием легковесной локальной модели.",
-    "default": true
-  },
-  {
-    "category": "7. Работа с ИИ",
-    "key": "AI/Memory/Strategy",
-    "type": "enum",
-    "label": "Стратегия распределения VRAM",
-    "description": "Управление видеопамятью для предотвращения конфликтов между ИИ и процессом обучения ваших моделей.",
-    "options": ["Агрессивное кэширование (Макс. скорость)", "Баланс (Совместное использование)", "Экономия VRAM (Выгружать ИИ при старте обучения)"],
-    "default": 1
-  },
-  {
-    "category": "7. Работа с ИИ",
-    "key": "AI/Memory/OffloadLayers",
-    "type": "int",
-    "label": "Количество слоев на CPU (CPU Offload)",
-    "description": "Сколько слоев ИИ-модели принудительно выгрузить в системную оперативную память, чтобы освободить место для PyTorch-движка.",
-    "min": 0,
-    "max": 32,
-    "default": 8
-  },
-  {
-    "category": "7. Работа с ИИ",
-    "key": "AI/Memory/MaxContext",
-    "type": "int",
-    "label": "Максимальное окно контекста (Токенов)",
-    "description": "Ограничение размера истории чата. Чем выше значение, тем больше памяти потребляет ИИ-агент.",
-    "min": 512,
-    "max": 8192,
-    "default": 2048
-  }
-]
+ {
+   "category": "1. Общие настройки",
+   "key": "General/Theme",
+   "type": "enum",
+   "label": "Тема оформления",
+   "description": "Визуальный стиль интерфейса PyTorch Studio.",
+   "options": ["Системная", "Тёмная (Studio Dark)", "Светлая (Studio Light)"],
+   "default": 0
+   },
+ {
+   "category": "1. Общие настройки",
+   "key": "General/Language",
+   "type": "enum",
+   "label": "Язык приложения",
+   "description": "Язык локализации элементов интерфейса и логов диагностики.",
+   "options": ["Русский", "English"],
+   "default": 0
+   },
+ {
+   "category": "1. Общие настройки",
+   "key": "General/SaveOnFocusLoss",
+   "type": "bool",
+   "label": "Сохранять файлы при потере фокуса",
+   "description": "Автоматически записывать изменения в файлы кода при переключении на другое окно.",
+   "default": true
+   },
+ {
+   "category": "1. Общие настройки",
+   "key": "General/AutoSaveInterval",
+   "type": "int",
+   "label": "Интервал автосохранения скриптов (мин)",
+   "description": "Периодичность фонового сохранения открытых файлов (0 — отключить).",
+   "min": 0,
+   "max": 60,
+   "default": 5
+   },
+ {
+   "category": "1. Общие настройки",
+   "key": "General/CheckUpdates",
+   "type": "bool",
+   "label": "Проверять обновления при запуске",
+   "description": "Автоматический поиск обновлений для ядра IDE и вычислительного движка.",
+   "default": true
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Font/Family",
+   "type": "string",
+   "label": "Семейство шрифта",
+   "description": "Название моноширинного шрифта для редактора кода.",
+   "default": "JetBrains Mono"
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Font/Size",
+   "type": "int",
+   "label": "Размер шрифта (px)",
+   "description": "Высота символов в коде.",
+   "min": 8,
+   "max": 48,
+   "default": 14
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Font/LineSpacing",
+   "type": "int",
+   "label": "Межстрочный интервал",
+   "description": "Расстояние между строками кода в пикселях.",
+   "min": 1,
+   "max": 20,
+   "default": 4
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Format/UseSpaces",
+   "type": "bool",
+   "label": "Использовать пробелы вместо табуляции",
+   "description": "Вставлять пробелы при нажатии клавиши Tab (согласно PEP 8).",
+   "default": true
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Format/IndentSize",
+   "type": "int",
+   "label": "Размер отступа (пробелов)",
+   "description": "Количество пробелов в одном уровне отступа.",
+   "min": 2,
+   "max": 8,
+   "default": 4
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Format/TrimWhitespace",
+   "type": "bool",
+   "label": "Удалять концевые пробелы при сохранении",
+   "description": "Автоматически очищает невидимые пробелы на пустых строках (исключает ошибку W293).",
+   "default": true
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Assist/AutoComplete",
+   "type": "bool",
+   "label": "Включить автодополнение (IntelliSense/LSP)",
+   "description": "Показывать контекстные подсказки функций и методов PyTorch при вводе.",
+   "default": true
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Assist/SyntaxHighlighting",
+   "type": "bool",
+   "label": "Подсветка синтаксиса",
+   "description": "Цветное выделение ключевых слов, классов и строк кода Python.",
+   "default": true
+   },
+ {
+   "category": "2. Редактор кода",
+   "key": "Editor/Assist/LineNumbers",
+   "type": "bool",
+   "label": "Отображать номера строк",
+   "description": "Показывать вертикальную панель с нумерацией строк слева от кода.",
+   "default": true
+   },
+ {
+   "category": "3. Движок PyTorch",
+   "key": "Engine/TargetDevice",
+   "type": "enum",
+   "label": "Устройство для расчетов (Target Device)",
+   "description": "Принудительный выбор тензорного девайса по умолчанию для вычислений.",
+   "options": ["cpu", "cuda:0", "mps"],
+   "default": 0
+   },
+ {
+   "category": "3. Движок PyTorch",
+   "key": "Engine/Vram/MaxSplitSize",
+   "type": "int",
+   "label": "Лимит max_split_size_mb",
+   "description": "Ограничение размера дробления блоков памяти CUDA для предотвращения фрагментации VRAM.",
+   "min": 32,
+   "max": 2048,
+   "default": 128
+   },
+ {
+   "category": "3. Движок PyTorch",
+   "key": "Engine/LoggingLevel",
+   "type": "enum",
+   "label": "Уровень детализации логов",
+   "description": "Глубина логирования внутренних процессов работы тензорного ядра PyTorch.",
+   "options": ["DEBUG", "INFO", "WARNING", "ERROR"],
+   "default": 1
+   },
+ {
+   "category": "3. Движок PyTorch",
+   "key": "Engine/Deterministic",
+   "type": "bool",
+   "label": "Детерминированный режим (Воспроизводимость)",
+   "description": "Принудительно включает torch.backends.cudnn.deterministic = True. Гарантирует идентичность весов при перезапусках, но снижает производительность.",
+   "default": false
+   },
+ {
+   "category": "3. Движок PyTorch",
+   "key": "Engine/TaskType",
+   "type": "enum",
+   "label": "Текущий тип задачи обучения",
+   "description": "Переключает режим работы кнопки запуска обучения на главном дашборде Studio.",
+   "options": ["Стандартная (Временные ряды / Интерактивный Jupyter)", "Контроль нагрева (Сверточные сети / Теплограммы .jpeg)"],
+   "default": 0
+   },
+ {
+   "category": "4. Окружение и Интерпретатор",
+   "key": "Python/InterpreterPath",
+   "type": "string",
+   "label": "Путь к интерпретатору Python",
+   "description": "Абсолютный путь к файлу python (venv, conda или системный), где развернуто окружение PyTorch.",
+   "default": "/usr/bin/python3"
+   },
+ {
+   "category": "4. Окружение и Интерпретатор",
+   "key": "Python/AutoUpdatePackages",
+   "type": "bool",
+   "label": "Разрешить обновление пакетов из GUI",
+   "description": "Позволяет менеджеру пакетов выполнять команды pip install --upgrade прямо из среды Studio.",
+   "default": true
+   },
+ {
+   "category": "5. Сбор Данных и Сессии",
+   "key": "Data/DefaultDatasetPath",
+   "type": "string",
+   "label": "Рабочая директория датасетов",
+   "description": "Путь по умолчанию для автоматического сканирования и поиска тренировочных .csv сессий.",
+   "default": "./datasets/train"
+   },
+ {
+   "category": "5. Сбор Данных и Сессии",
+   "key": "Data/LogsExportPath",
+   "type": "string",
+   "label": "Папка сохранения весов и логов",
+   "description": "Директория, куда будут экспортироваться файлы весов моделей (.pth) и логи обучения.",
+   "default": "./weights"
+   },
+ {
+   "category": "5. Сбор Данных и Сессии",
+   "key": "Data/ClearCudaCacheOnClose",
+   "type": "bool",
+   "label": "Очищать кэш CUDA при выходе",
+   "description": "Автоматически выполнять команду torch.cuda.empty_cache() при закрытии сессии Studio.",
+   "default": true
+   },
+ {
+   "category": "5. Сбор Данных и Сессии",
+   "key": "Data/PurgeTempLogs",
+   "type": "bool",
+   "label": "Удалять временные логи сессий",
+   "description": "Автоматическая очистка кэшированных промежуточных графиков после закрытия программы.",
+   "default": false
+   },
+ {
+   "category": "5. Сбор Данных и Сессии",
+   "key": "Data/ThermalHeatingDatasetPath",
+   "type": "string",
+   "label": "Путь к датасету теплограмм",
+   "description": "Директория с папками 'normal' и 'overheat' внутри структуры проекта z1.",
+   "default": "./data/raw"
+   },
+ {
+   "category": "6. Мониторинг и Графика",
+   "key": "Metrics/RefreshRate",
+   "type": "int",
+   "label": "Частота обновления графиков (мс)",
+   "description": "Периодичность, с которой GUI запрашивает у вычислительного ядра свежие маркеры PROGRESS и METRICS.",
+   "min": 100,
+   "max": 5000,
+   "default": 500
+   },
+ {
+   "category": "6. Мониторинг и Графика",
+   "key": "Metrics/IntegrationType",
+   "type": "enum",
+   "label": "Интеграция трекинга",
+   "description": "Сторонняя система для удаленного мониторинга и сохранения хода экспериментов.",
+   "options": ["Отключено (Локально)", "TensorBoard", "Weights & Biases (WandB)"],
+   "default": 0
+   },
+ {
+   "category": "6. Мониторинг и Графика",
+   "key": "Metrics/ApiToken",
+   "type": "string",
+   "label": "API Токен / Ключ доступа",
+   "description": "Ключ аутентификации для выбранной внешней системы логирования (например, WandB API Key).",
+   "default": ""
+   },
+ {
+   "category": "7. Работа с ИИ",
+   "key": "AI/Agent/ModelType",
+   "type": "enum",
+   "label": "Модель ИИ-Агента",
+   "description": "Основной движок для ведения диалога и генерации архитектур нейросетей.",
+   "options": ["Локальная (Llama-3-8B-Instruct)", "Внешняя (OpenAI API / Claude)", "Фоновый сервер (Ollama)"],
+   "default": 0
+   },
+ {
+   "category": "7. Работа с ИИ",
+   "key": "AI/Agent/ApiPath",
+   "type": "string",
+   "label": "Адрес локального сервера / API URL",
+   "description": "Базовый URL для подключения к ИИ-агенту (например, http://localhost:11434).",
+   "default": "http://localhost:11434"
+   },
+ {
+   "category": "7. Работа с ИИ",
+   "key": "AI/Autocomplete/Enabled",
+   "type": "bool",
+   "label": "Включить умное автодополнение (AI Tab-Completion)",
+   "description": "Построчный предиктивный ввод кода на лету с использованием легковесной локальной модели.",
+   "default": true
+   },
+ {
+   "category": "7. Работа с ИИ",
+   "key": "AI/Memory/Strategy",
+   "type": "enum",
+   "label": "Стратегия распределения VRAM",
+   "description": "Управление видеопамятью для предотвращения конфликтов между ИИ и процессом обучения ваших моделей.",
+   "options": ["Агрессивное кэширование (Макс. скорость)", "Баланс (Совместное использование)", "Экономия VRAM (Выгружать ИИ при старте обучения)"],
+   "default": 1
+   },
+ {
+   "category": "7. Работа с ИИ",
+   "key": "AI/Memory/OffloadLayers",
+   "type": "int",
+   "label": "Количество слоев на CPU (CPU Offload)",
+   "description": "Сколько слоев ИИ-модели принудительно выгрузить в системную оперативную память, чтобы освободить место для PyTorch-движка.",
+   "min": 0,
+   "max": 32,
+   "default": 8
+   },
+ {
+   "category": "7. Работа с ИИ",
+   "key": "AI/Memory/MaxContext",
+   "type": "int",
+   "label": "Максимальное окно контекста (Токенов)",
+   "description": "Ограничение размера истории чата. Чем выше значение, тем больше памяти потребляет ИИ-агент.",
+   "min": 512,
+   "max": 8192,
+   "default": 2048
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/LoggingSystem/Enabled",
+   "type": "bool",
+   "label": "Активировать MLOps-логирование сессий",
+   "description": "Включает глобальное отслеживание экспериментов, изоляцию папок run_XXX и генерацию паспортов сессий.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/LoggingSystem/VerboseMode",
+   "type": "bool",
+   "label": "Детализированный вывод (Verbose Mode)",
+   "description": "Разрешает вывод расширенных сервисных MLOps-сообщений ядра вычислений в консоль логов.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/LoggingSystem/TrackGitCommit",
+   "type": "bool",
+   "label": "Фиксировать ревизию Git коммита",
+   "description": "Автоматически считывает хэш коммита для жесткой привязки версии кода к паспорту сессии.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/TensorBoard/Enabled",
+   "type": "bool",
+   "label": "Логировать метрики в TensorBoard",
+   "description": "Разрешает SummaryWriter записывать графики потерь по эпохам в сессионную подпакпу.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/TensorBoard/ExportSubdir",
+   "type": "string",
+   "label": "Директория экспорта логов TensorBoard",
+   "description": "Имя подпапки внутри проекта (по умолчанию logs), куда SummaryWriter будет складывать бинарные события.",
+   "default": "logs"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/TensorBoard/HorizontalAxis",
+   "type": "string",
+   "label": "Тип горизонтальной оси TensorBoard",
+   "description": "Базовая разметка оси абсцисс для отображения кривых обучения.",
+   "default": "epoch"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/Models/Enabled",
+   "type": "bool",
+   "label": "Сохранять веса моделей (.pth)",
+   "description": "Включает автоматическое резервирование чекпоинтов весов обученной нейросети.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/Models/ExportSubdir",
+   "type": "string",
+   "label": "Директория сохранения моделей (.pth)",
+   "description": "Имя подпапки внутри проекта (по умолчанию models), куда PyTorch будет записывать финальные веса сети.",
+   "default": "models"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/Models/SaveBestOnly",
+   "type": "bool",
+   "label": "Сохранять только лучшую эпоху (Best Only)",
+   "description": "Перезаписывает веса только в случае улучшения целевой метрики Validation Loss.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/Models/CheckpointFrequency",
+   "type": "int",
+   "label": "Частота сохранения чекпоинтов (эпох)",
+   "description": "Интервал эпох, через который веса принудительно сбрасываются на жесткий диск.",
+   "min": 1,
+   "max": 100,
+   "default": 1
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/Metrics/Enabled",
+   "type": "bool",
+   "label": "Генерировать паспорта и отчеты сессий",
+   "description": "Включает создание PNG-графиков верификации и JSON-паспортов для Сводной Таблицы.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/Metrics/ExportSubdir",
+   "type": "string",
+   "label": "Папка сохранения отчетов",
+   "description": "Имя подпапки внутри проекта (по умолчанию metrics), куда будут падать результаты.",
+   "default": "metrics"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/Metrics/ManifestFilename",
+   "type": "string",
+   "label": "Имя JSON-файла манифеста",
+   "description": "Имя паспорта сессии (по умолчанию session_meta.json), который сканирует Сводная Таблица.",
+   "default": "session_meta.json"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/Metrics/ReportImageFilename",
+   "type": "string",
+   "label": "Имя PNG-файла графика",
+   "description": "Название отчетного графика часовой верификации цифрового двойника (по умолчанию thermal_identification_report.png).",
+   "default": "thermal_identification_report.png"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/CodeVersioning/Enabled",
+   "type": "bool",
+   "label": "Архивировать исходный код скриптов",
+   "description": "Включает автосохранение точной копии файлов train.py и model.py на момент старта обучения.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/CodeVersioning/Strategy",
+   "type": "string",
+   "label": "Стратегия версионирования кода",
+   "description": "Метод архивации исходных файлов нейросети (например, archive_folder).",
+   "default": "archive_folder"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/CodeVersioning/ArchiveSubdir",
+   "type": "string",
+   "label": "Папка архива исходных скриптов",
+   "description": "Относительный путь внутри папки scripts, куда улетают бэкапы исходного кода.",
+   "default": "scripts/archive"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/CodeVersioning/FilesToBackup",
+   "type": "string",
+   "label": "Список файлов для бэкапа (через запятую)",
+   "description": "Имена исходных скриптов в папке scripts, которые будут заархивированы при старте (например: train.py, model.py).",
+   "default": "train.py, model.py"
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/HfHub/Enabled",
+   "type": "bool",
+   "label": "Копировать артефакты в hf_hub",
+   "description": "Включает автоматическое дублирование весов и графиков отчетов в локальный кэш хаба.",
+   "default": true
+   },
+ {
+   "category": "8. MLOps и Сессии",
+   "key": "MLOps/HfHub/ExportSubdir",
+   "type": "string",
+   "label": "Папка кэша Hugging Face Hub",
+   "description": "Имя подпапки внутри проекта (по умолчанию hf_hub), куда дублируются готовые к деплою артефакты.",
+   "default": "hf_hub"
+   }
+ ]

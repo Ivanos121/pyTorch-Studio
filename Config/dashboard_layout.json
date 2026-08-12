@@ -1,0 +1,53 @@
+[
+  {
+    "section": "summary",
+    "section_title": "Общие итоги сессии",
+    "fields": [
+      {"source": "session_id", "label": "Идентификатор запуска", "color": "#00ff00", "font_size": "14px", "bold": true},
+      {"source": "timestamp", "label": "Дата вычислений", "type": "date"},
+      {"source": "comment", "label": "Комментарий инженера", "color": "#ffaa00"}
+    ]
+  },
+  {
+    "section": "hyperparameters",
+    "section_title": "Конфигурация обучения (Jupyter)",
+    "fields": [
+      {"source": "hyperparameters/optimizer", "label": "Оптимизатор сети", "uppercase": true},
+      {"source": "hyperparameters/epochs", "label": "Количество эпох"},
+      {"source": "hyperparameters/batch_size", "label": "Размер пакета (batch)"},
+      {"source": "hyperparameters/learning_rate", "label": "Скорость обучения (lr)"},
+      {"source": "hyperparameters/device", "label": "Вычислительный девайс", "uppercase": true}
+    ]
+  },
+  {
+    "section": "metrics",
+    "section_title": "Теплофизическая точность цифрового двойника",
+    "fields": [
+      {"source": "metrics/stator_mae", "label": "MAE по СТАТОРУ мотора", "suffix": " °C", "bold": true},
+      {"source": "metrics/rotor_mae", "label": "MAE по РОТОРУ мотора", "suffix": " °C", "bold": true},
+      {"source": "metrics/final_val_mae", "label": "Усредненная точность сессии", "suffix": " °C", "color": "#00ff00", "bold": true}
+    ]
+  },
+  {
+    "section": "web_services",
+    "section_title": "Служебные конфигурации MLOps",
+    "services": [
+      {
+        "name": "tensorboard",
+        "base_url": "http://127.0.0.1",
+        "port": 6006,
+        "url_filter_param": "/?runFilter=",
+        "binary_path": "/home/elf/venv/bin/tensorboard",
+        "log_dir_rel": "logs"
+      },
+      {
+        "name": "streamlit",
+        "base_url": "http://127.0.0.1",
+        "port": 8501,
+        "url_filter_param": "?session_id=",
+        "binary_path": "/home/elf/venv/bin/streamlit",
+        "script_path_rel": "scripts/app.py"
+      }
+    ]
+  }
+]
