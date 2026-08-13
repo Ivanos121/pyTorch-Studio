@@ -1,41 +1,74 @@
 {
-    "current_settings": {
-        "selected_mode": "sensors",
-        "selected_architecture": "thermal_gru"
-    },
-    "schema": {
-        "modes": [
-            {
-                "id": "sensors",
-                "label": "Временные ряды (Токи статора)",
-                "tag": "@sensors_task",
-                "min_files_required": 1,
-                "architectures": [
-                    {"id": "thermal_gru", "label": "Рекуррентная сеть (Thermal_GRU)", "desc": "Быстрая модель для динамики нагрева."},
-                    {"id": "thermal_lstm", "label": "Длинная краткосрочная память (LSTM)", "desc": "Для длинных временных последовательностей."},
-                    {"id": "mlp_regressor", "label": "Полносвязный регрессор (MLP)", "desc": "Легковесная математическая модель."}
-                ]
-            },
-            {
-                "id": "thermal",
-                "label": "Тепловизионный контроль (ИК)",
-                "tag": "@thermal_task",
-                "min_files_required": 10,
-                "architectures": [
-                    {"id": "resnet18_unet", "label": "Мультизадачный ResNet-18 + U-Net", "desc": "Баланс скорости и точности ИК-анализа."},
-                    {"id": "mobilenet_lraspp", "label": "Легковесный MobileNetV3", "desc": "Оптимизировано под слабые процессоры."}
-                ]
-            },
-            {
-                "id": "hybrid",
-                "label": "Комплексный гибрид (ПАК)",
-                "tag": "@hybrid_fusion",
-                "min_files_required": 10,
-                "architectures": [
-                    {"id": "early_fusion", "label": "Раннее слияние (Early Fusion)", "desc": "Объединение признаков на входе сети."},
-                    {"id": "late_fusion", "label": "Позднее слияние (Late Fusion)", "desc": "Раздельный анализ с финальным слиянием."}
-                ]
-            }
+  "current_settings": {
+    "selected_mode": "sensors",
+    "selected_architecture": "thermal_gru"
+  },
+  "schema": {
+    "modes": [
+      {
+        "id": "sensors",
+        "label": "Временные ряды (Токи статора)",
+        "tag": "@sensors_task",
+        "min_files_required": 1,
+        "architectures": [
+          {
+            "id": "thermal_gru",
+            "label": "Рекуррентная сеть (Thermal_GRU)",
+            "desc": "Быстрая модель для динамики нагрева."
+          },
+          {
+            "id": "thermal_lstm",
+            "label": "Длинная краткосрочная память (LSTM)",
+            "desc": "Для длинных временных последовательностей."
+          },
+          {
+            "id": "mlp_regressor",
+            "label": "Полносвязный регрессор (MLP)",
+            "desc": "Легковесная математическая модель."
+          }
         ]
-    }
+      },
+      {
+        "id": "thermal",
+        "label": "Тепловизионный контроль (ИК)",
+        "tag": "@thermal_task",
+        "min_files_required": 10,
+        "architectures": [
+          {
+            "id": "resnet18_regressor",
+            "label": "Базовый регрессор (ResNet-18)",
+            "desc": "Быстрое бесконтактное определение скалярной температуры статора."
+          },
+          {
+            "id": "resnet18_unet",
+            "label": "Мультизадачный ResNet-18 + U-Net",
+            "desc": "Одновременная сегментация дефектов и классификация аномалий нагрева."
+          },
+          {
+            "id": "mobilenet_lraspp",
+            "label": "Легковесный MobileNetV3",
+            "desc": "Оптимизировано под ускоренный инференс на слабых процессорах CPU."
+          }
+        ]
+      },
+      {
+        "id": "hybrid",
+        "label": "Комплексный гибрид (ПАК)",
+        "tag": "@hybrid_fusion",
+        "min_files_required": 10,
+        "architectures": [
+          {
+            "id": "early_fusion",
+            "label": "Раннее слияние (Early Fusion)",
+            "desc": "Объединение признаков на входе сети."
+          },
+          {
+            "id": "late_fusion",
+            "label": "Позднее слияние (Late Fusion)",
+            "desc": "Раздельный анализ с финальным слиянием."
+          }
+        ]
+      }
+    ]
+  }
 }

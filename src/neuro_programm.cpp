@@ -3492,16 +3492,18 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
         this->update();
     });
 
+    // =========================================================================
+    // ЧАСТЬ 1. ИНИЦИАЛИЗАЦИЯ И НАСТРОЙКА МОНОХРОМНОГО ИНТЕРФЕЙСА ЛОГА
+    // =========================================================================
     if (actStartTrain)
     {
-        //QObject::disconnect(actStartTrain, &QAction::triggered, nullptr, nullptr);
         connect(actStartTrain, &QAction::triggered, this, [this](bool checked) {
             QToolButton *btn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>(QStringLiteral("Обучение")) : nullptr;
             QLabel *lbl = btn ? btn->findChild<QLabel*>() : nullptr;
             qDebug() << ">>> [ТРИГГЕР] Кнопка Обучение нажата! checked =" << checked;
 
             if (checked) {
-                // 1. ПЕРВИЧНЫЕ ПРОВЕРКИ И КРАШ-ЗАЩИТА
+                // 1. Первичные проверки и краш-защита ПАК
                 if (!this->showSaveConfirmationDialog()) {
                     qDebug() << " [СТОП] Ранний выход: showSaveConfirmationDialog() вернул false!";
                     actStartTrain->setChecked(false);
@@ -3514,19 +3516,21 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                     return;
                 }
 
-                // Жесткая MLOps-фиксация параметров перед отправкой в ядро вычислений
+                // Фиксация параметров MLOps перед отправкой в ядро
                 if (this->m_aiPanel) {
                     this->m_aiPanel->saveFieldsToYaml(this->currentOpenProjectPath);
                 }
 
-                // 2. СИЛОВОЕ РАЗВЕРТЫВАНИЕ ИНТЕРФЕЙСА ТЕРМИНАЛА ВНИЗУ ЭКРАНА
+                // Развертывание интерфейса терминала внизу экрана
                 if (this->panelOther) {
                     this->panelOther->show();
                     this->panelOther->setVisible(true);
                     QStackedWidget *bottomStacked = this->panelOther->findChild<QStackedWidget*>();
                     if (bottomStacked) bottomStacked->setCurrentIndex(2); // Переключаем на logEdit
+
                     QStackedWidget *menuSwitcherStack = this->panelOther->findChild<QStackedWidget*>(QStringLiteral("menuSwitcherStack"));
                     if (menuSwitcherStack) menuSwitcherStack->setCurrentIndex(0);
+
                     QPushButton *btnViewLog = this->panelOther->findChild<QPushButton*>(QStringLiteral("btnViewLog"));
                     if (btnViewLog) btnViewLog->click();
                 }
@@ -3540,38 +3544,50 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                 QWidget *problemsContainer = this->findChild<QWidget*>(QStringLiteral("problemsContainer"));
                 if (problemsContainer) problemsContainer->hide();
 
-                // Очищаем консоль текстовых логов
+                // ЖЕСТКАЯ СТИЛИЗАЦИЯ ИНТЕРФЕЙСА (БЕЛЫЙ ФОН / ЧЕРНЫЙ ТЕКСТ)
                 QPlainTextEdit *logEdit = this->panelOther ? this->panelOther->findChild<QPlainTextEdit*>(QStringLiteral("logEdit")) : nullptr;
-                if (logEdit) logEdit->clear();
+                if (logEdit) {
+                    logEdit->setStyleSheet(
+                        "QPlainTextEdit {"
+                        "   background-color: #ffffff;"
+                        "   color: #000000;"
+                        "   font-family: 'Monospace', 'Courier New', monospace;"
+                        "   font-size: 10pt;"
+                        "}"
+                    );
+                    logEdit->clear();
+                    // Вывод строго регламентированной стартовой строки
+                    logEdit->appendPlainText(QStringLiteral("--- Ожидание готовности сетевой инфраструктуры Jupyter ---\n"));
+                }
 
-                // Переключаем визуальный статус кнопки на "Stop"
+                // Переключение статуса кнопки
                 actStartTrain->setIcon(QIcon(QStringLiteral(":/Data/system_icons/media-playback-stop.svg")));
                 if (lbl) lbl->setText(QStringLiteral("Stop"));
 
-                // Силовая предварительная настройка Chromium-окна перед стартом веб-серверов
+                // Настройка Chromium-окна перед стартом веб-серверов (белая палитра)
                 if (this->ui->tensorboardWebView) {
                     QWebEngineSettings *ws = this->ui->tensorboardWebView->settings();
                     ws->setAttribute(QWebEngineSettings::LocalStorageEnabled, true);
                     ws->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
                     ws->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
                     this->ui->tensorboardWebView->setHtml(
-                        "<html><body style='background:#121212; color:#00ff00; font-family:monospace; padding-top:15%; text-align:center;'>"
+                        "<html><body style='background:#ffffff; color:#000000; font-family:monospace; padding-top:15%; text-align:center;'>"
                         "<h2>[SYSTEM]: ЗАПУСК КОНВЕЙЕРА ОБУЧЕНИЯ...</h2>"
-                        "<p style='color:#aeaeae;'>Ожидание готовности сокетов Jupyter, TensorBoard и HuggingFace</p>"
+                        "<p style='color:#555555;'>Ожидание готовности сокетов Jupyter, TensorBoard и HuggingFace</p>"
                         "</body></html>"
                     );
                 }
 
-                // Считываем тип задачи: 0 - Jupyter, 1 - Теплограммы
                 int taskType = ConfigManager::instance().getValue("Engine/TaskType", 0).toInt();
-                // 3. ОБЩИЙ ИНТЕРФЕЙСНЫЙ ФИЛЬТР ЛОГОВ (Перехват realtime-вывода ядра)
+                // =========================================================================
+                // ЧАСТЬ 2. ИНТЕРФЕЙСНЫЙ ФИЛЬТР ЛОГОВ С ТЕМНО-СИНИМ ВЫДЕЛЕНИЕМ (БЕЗ ИКОНОК)
+                // =========================================================================
                 auto checkThermalOutput = [this, lbl]() {
                     QProcess *serverProc = this->jupyterServer ? this->jupyterServer->findChild<QProcess*>() : nullptr;
                     if (!serverProc) return;
 
                     QByteArray output = serverProc->readAllStandardOutput() + serverProc->readAllStandardError();
                     QString rawLog = QString::fromUtf8(output);
-
                     QPlainTextEdit *logEditInner = this->panelOther ? this->panelOther->findChild<QPlainTextEdit*>(QStringLiteral("logEdit")) : nullptr;
                     if (!logEditInner || rawLog.isEmpty()) return;
 
@@ -3579,8 +3595,10 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                     for (const QString &line : std::as_const(lines)) {
                         QString trimmedLine = line.trimmed();
                         if (trimmedLine.startsWith(QStringLiteral("PROGRESS:")) || trimmedLine.startsWith(QStringLiteral("METRICS:"))) { continue; }
-                        if (trimmedLine.startsWith(QStringLiteral("Эпоха"))) {
-                            logEditInner->appendHtml(QStringLiteral("<span style='color:#00ff00;'><b>[ПРОГРЕСС]</b></span> %1").arg(trimmedLine));
+
+                        // Перехват эпох: Салатовый цвет заменяется на контрастный темно-синий (#1b3a4b)
+                        if (trimmedLine.startsWith(QStringLiteral("Эпоха")) || trimmedLine.startsWith(QStringLiteral("● Эпоха"))) {
+                            logEditInner->appendHtml(QStringLiteral("<br><span style='color:#1b3a4b;'><b>[ПРОГРЕСС]</b></span> %1").arg(trimmedLine));
                             continue;
                         }
 
@@ -3589,7 +3607,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                             if (this->ui->tensorboardWebView) {
                                 this->ui->tensorboardWebView->setUrl(QUrl(QStringLiteral("http://127.0.0.1:6006")));
                             }
-                            logEditInner->appendHtml(QStringLiteral("<span style='color:#00aaff;'><b>[ИНФО]</b></span> Мониторинг TensorBoard успешно подключен к порту 6006."));
+                            logEditInner->appendHtml(QStringLiteral("<br><span style='color:#0055ff;'><b>[ИНФО]</b></span> Мониторинг TensorBoard успешно подключен к порту 6006.<br>"));
                             continue;
                         }
                         if (trimmedLine.contains(QStringLiteral("[TENSORBOARD_READY]"))) { continue; }
@@ -3605,10 +3623,12 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                         if (this->ui->tensorboardWebView) this->ui->tensorboardWebView->reload();
                     }
                 };
-                // 4. НАЧАЛО ВТЕВЛЕНИЯ РЕЖИМОВ ОБУЧЕНИЯ
+                // =========================================================================
+                // ЧАСТЬ 3. ВЕТВЛЕНИЕ РЕЖИМОВ, WEBSOCKET СЕТЬ И ЭКСПОРТ АРТЕФАКТОВ ПАК
+                // =========================================================================
                 if (taskType == 1)
                 {
-                    if (logEdit) logEdit->appendPlainText(QStringLiteral("--- Инициализация изолированного конвейера расчетов PyTorch ---"));
+                    if (logEdit) logEdit->appendPlainText(QStringLiteral("\n--- Инициализация изолированного конвейера расчетов PyTorch ---\n"));
                     this->sendSystemNotification(QStringLiteral("PyTorch Studio"), QStringLiteral("Запуск обучения модели контроля нагрева..."));
 
                     QProcess *serverProc = this->jupyterServer ? this->jupyterServer->findChild<QProcess*>() : nullptr;
@@ -3622,28 +3642,20 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                 }
                 else
                 {
-                    if (logEdit) logEdit->appendPlainText(QStringLiteral("--- Ожидание готовности сетевой инфраструктуры Jupyter ---"));
                     this->sendSystemNotification(QStringLiteral("PyTorch Studio"), QStringLiteral("Запуск фонового сервера вычислений..."));
-
                     QString scriptPath = this->currentOpenProjectPath + QStringLiteral("/scripts/train.py");
 
                     if (this->jupyterClient && this->jupyterServer) {
-
-                        // =========================================================================
-                        // ТОЧЕЧНЫЙ И БЕЗОПАСНЫЙ СБРОС СТАРЫХ КОННЕКТОВ ПРОШЛОГО ЗАПУСКА
-                        // Это вернет логи в консоль и позволит запускать обучение бесконечно!
-                        // =========================================================================
+                        // Точечный безопасный сброс коннектов прошлого запуска (исключает зависания лога)
                         QObject::disconnect(jupyterLogConnection);
                         QObject::disconnect(jupyterFinishConnection);
                         QObject::disconnect(jupyterReadyConnection);
 
-                        // 1. Перехватчик realtime логов WebSocket-канала Jupyter
-                        // СОХРАНЯЕМ коннект в переменную jupyterLogConnection
+                        // Перехватчик realtime логов WebSocket-канала Jupyter
                         jupyterLogConnection = connect(this->jupyterClient, &JupyterClient::codeOutputReceived, this, [this](const QString &rawLog) {
                             QPlainTextEdit *logEditInner = this->panelOther ? this->panelOther->findChild<QPlainTextEdit*>(QStringLiteral("logEdit")) : nullptr;
                             if (!logEditInner || rawLog.isEmpty()) return;
 
-                            // ДУБЛИРОВАНИЕ ЛОГА ЮПИТЕРА В ФАЙЛ НА ДИСК
                             QFile logFile(this->currentOpenProjectPath + QStringLiteral("/training_console.log"));
                             if (logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
                                 QTextStream stream(&logFile);
@@ -3663,7 +3675,12 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                                 cleanLine = cleanLine.trimmed();
                                 if (cleanLine.isEmpty()) continue;
 
-                                if (cleanLine.contains(QStringLiteral("<font")) || cleanLine.contains(QStringLiteral("<b>")) || cleanLine.contains(QStringLiteral("<span"))) {
+                                // Перехват и перекраска системных уведомлений ПАК в строгий темно-синий цвет (#1b3a4b)
+                                if (cleanLine.contains(QStringLiteral(">>> [КОНВЕЙЕР")) || cleanLine.contains(QStringLiteral(">>> [MLOPS"))) {
+                                    cleanLine.replace(QStringLiteral("color:#00ff00"), QStringLiteral("color:#1b3a4b"));
+                                    cleanLine.replace(QStringLiteral("color:green"), QStringLiteral("color:#1b3a4b"));
+                                    logEditInner->appendHtml(QStringLiteral("<br>") + cleanLine + QStringLiteral("<br>"));
+                                } else if (cleanLine.contains(QStringLiteral("<font")) || cleanLine.contains(QStringLiteral("<b>")) || cleanLine.contains(QStringLiteral("<span"))) {
                                     logEditInner->appendHtml(cleanLine);
                                 } else {
                                     logEditInner->appendPlainText(cleanLine);
@@ -3672,8 +3689,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                             logEditInner->moveCursor(QTextCursor::End);
                         });
 
-                        // 2. СЛОТ ОКОНЧАНИЯ ВЫЧИСЛЕНИЙ (Выдает DBus-уведомление и генерирует output_report.ipynb)
-                        // СОХРАНЯЕМ коннект в переменную jupyterFinishConnection
+                        // Слот окончания вычислений (Выдает DBus-уведомление и сохраняет output_report.ipynb)
                         jupyterFinishConnection = connect(this->jupyterClient, &JupyterClient::executionFinished, this, [this, lbl](bool success) {
                             qDebug() << "[JUPYTER] Выполнение ноутбука завершено. Статус:" << success;
 
@@ -3686,10 +3702,8 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                             if (success) {
                                 this->sendSystemNotification(QStringLiteral("PyTorch Studio: Успех"), QStringLiteral("Обучение временных рядов успешно завершено!"));
 
-                                // Принудительный экспорт отчета output_report.ipynb
                                 QStringList convertArgs;
-                                convertArgs << QStringLiteral("nbconvert")
-                                            << QStringLiteral("--to") << QStringLiteral("notebook")
+                                convertArgs << QStringLiteral("nbconvert") << QStringLiteral("--to") << QStringLiteral("notebook")
                                             << this->currentOpenProjectPath + QStringLiteral("/notebooks/train_model.ipynb")
                                             << QStringLiteral("--output") << this->currentOpenProjectPath + QStringLiteral("/output_report.ipynb");
                                 QProcess::startDetached(QStringLiteral("jupyter"), convertArgs);
@@ -3698,18 +3712,13 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                             }
                         });
 
-                        // 3. СЛОТ ГОТОВНОСТИ КЛИЕНТА ДЛЯ СТАРТА ВЫЧИСЛЕНИЙ
-                        // СОХРАНЯЕМ коннект в переменную jupyterReadyConnection
-                        // =========================================================================
-                        // 3. СЛОТ ГОТОВНОСТИ КЛИЕНТА ДЛЯ СТАРТА ВЫЧИСЛЕНИЙ (neuro_programm.cpp)
-                        // =========================================================================
-                        jupyterReadyConnection = connect(this->jupyterClient, &JupyterClient::jupyterClientReady, this, [this, scriptPath, lbl]() {
+                        // Слот готовности клиента для старта вычислений
+                        jupyterReadyConnection = connect(this->jupyterClient, &JupyterClient::jupyterClientReady, this, [this, lbl]() {
                             qDebug() << ">>> [MLOps PIPELINE] Сеть готова. Инициализация независимого процесса...";
 
                             QDir metricsBaseDir(this->currentOpenProjectPath + QStringLiteral("/metrics"));
-                            if (!metricsBaseDir.exists()) {
-                                metricsBaseDir.mkpath(QStringLiteral("."));
-                            }
+                            if (!metricsBaseDir.exists()) { metricsBaseDir.mkpath(QStringLiteral(".")); }
+
                             int nextRunNumber = metricsBaseDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot).count() + 1;
                             QString runNumberStr = QString("%1").arg(nextRunNumber, 3, 10, QChar('0'));
                             QString sessionId = QStringLiteral("run_%1_lstm_adam_cuda").arg(runNumberStr);
@@ -3719,29 +3728,20 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                             projectDir.mkpath(QStringLiteral("models/") + sessionId);
                             projectDir.mkpath(QStringLiteral("metrics/") + sessionId);
 
-                            // =====================================================================
-                            // ЖЕСТКИЙ СИЛОВОЙ ШАГ:ЗАПУСКАЕМ ВЫПОЛНЕНИЕ БЛОКНОТА ПО АБСОЛЮТНОМУ ПУТИ
-                            // =====================================================================
                             qDebug() << ">>> [JUPYTER API]: Выталкиваю команду выполнения по абсолютному пути...";
-
-                            // Собираем полный абсолютный путь: /home/elf/zcc/z1/notebooks/train_model.ipynb
-                            // Обязательно заворачиваем путь в одинарные кавычки (\') для защиты от спецсимволов Linux
                             QString absoluteNotebookPath = this->currentOpenProjectPath + QStringLiteral("/notebooks/train_model.ipynb");
                             QString notebookCommand = QStringLiteral("%run '%1'").arg(absoluteNotebookPath);
 
-                            qDebug() << ">>> [JUPYTER COMMAND]:" << notebookCommand;
-
-                            // Вызываем метод клиента и передаем туда монолитную строку [PER_QUERY:0.1.238]
                             this->jupyterClient->executePythonCode(notebookCommand);
-
                         });
                     }
 
-                    // Инфраструктура старта фонового Jupyter сервера
+                    // НАЙДИТЕ ЭТОТ БЛОК И ЗАМЕНИТЕ НА ИСПРАВЛЕННУЮ ВЕРСИЮ:
                     QProcess *serverProc = this->jupyterServer ? this->jupyterServer->findChild<QProcess*>() : nullptr;
                     if (serverProc) {
                         QObject::disconnect(serverProc, &QProcess::readyReadStandardOutput, nullptr, nullptr);
                         QObject::disconnect(serverProc, &QProcess::readyReadStandardError, nullptr, nullptr);
+
                         static bool isApiConnected = false;
                         isApiConnected = false;
 
@@ -3756,27 +3756,31 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                                 });
                             }
                         };
-                        connect(serverProc, &QProcess::readyReadStandardOutput, this, [this, checkServerOutput]() { static bool api = false; checkServerOutput(api); });
-                        connect(serverProc, &QProcess::readyReadStandardError, this, [this, checkServerOutput]() { static bool api = false; checkServerOutput(api); });
+
+                        // ИСПРАВЛЕНО СИНТАКСИС: убраны дублирующиеся аргументы 'this' и выровнен захват
+                        connect(serverProc, &QProcess::readyReadStandardOutput, this, [this, checkServerOutput]() {
+                            static bool api = false;
+                            checkServerOutput(api);
+                        });
+
+                        connect(serverProc, &QProcess::readyReadStandardError, this, [this, checkServerOutput]() {
+                            static bool api = false;
+                            checkServerOutput(api);
+                        });
                     }
-                    if (this->jupyterServer && !this->jupyterServer->isRunning()) {
-                        this->jupyterServer->startServer(this->currentOpenProjectPath);
+
+                    if (this->jupyterServer && !this->jupyterServer->isRunning())
+                    {this->jupyterServer->startServer(this->currentOpenProjectPath);
                     }
                 }
-
             }
             else
-            {
-                // =========================================================================
-                // ВЕТКА ОСТАНОВКИ (Экстренное прерывание расчета пользователем по кнопке Stop)
-                // =========================================================================
+            {// Ветка экстренной остановки расчета по кнопке Stop
                 actStartTrain->setIcon(QIcon(QStringLiteral(":/Data/system_icons/media-playback-start.svg")));
                 if (lbl) lbl->setText(QStringLiteral("Обучение"));
-                if (this->jupyterServer) {
-                    this->jupyterServer->stopServer();
+                if (this->jupyterServer)
+                { this->jupyterServer->stopServer();
                 }
-
-                // АВТОМАТИЧЕСКАЯ ОЧИСТКА ПОРТА ПРИ КЛИКЕ НА STOP
                 QProcess::startDetached(QStringLiteral("fuser"), QStringList() << QStringLiteral("-k") << QStringLiteral("6006/tcp"));
                 this->sendSystemNotification(QStringLiteral("Проект"), QStringLiteral("Обучение экстренно остановлено, порт TensorBoard очищен."));
             }

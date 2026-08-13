@@ -420,7 +420,7 @@ bool AI_panel::saveFieldsToYaml(const QString& projectPath) {
 
     // Парсинг активной задачи и выбранного селектора архитектур нейросетей
     int checkedId = m_modeGroup ? m_modeGroup->checkedId() : 0;
-    QString modeId = (checkedId == 0) ? "sensors" : ((checkedId == 1) ? "thermal" : "hybrid");
+    QString modeId = (checkedId == 0) ? "sensors" : ((checkedId == 1) ? "thermograms" : "hybrid");
     QString archId = m_comboArchitecture ? m_comboArchitecture->currentData().toString() : QStringLiteral("thermal_gru");
 
     mlopsBlock << QString("  control_mode: '%1'").arg(modeId);
