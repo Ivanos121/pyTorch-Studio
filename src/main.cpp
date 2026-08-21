@@ -77,34 +77,6 @@ void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &contex
         }
         abort();
     }
-
-    // -------------------------------------------------------------------------
-    // 4. ПЕРЕХВАТЧИК SVG-ОШИБКИ И ПОИСК ИМЕНИ ФАЙЛА
-    // -------------------------------------------------------------------------
-    if (msg.contains("Invalid path data")) {
-        std::cerr << "\n\033[31m[SVG ERROR DETECTED] ===\033[0m" << std::endl;
-
-        // Выводим имя исходного файла Qt и строчку кода, где возник варнинг
-        if (context.file) {
-            std::cerr << "\033[33mВызов из кода: " << context.file << ":" << context.line << "\033[0m" << std::endl;
-        }
-
-        // Печатаем стек, чтобы увидеть, какой именно файл сейчас парсится модулем QIcon/QSvg
-        void* callstack[30];
-        int frames = backtrace(callstack, 30);
-        char** strs = backtrace_symbols(callstack, frames);
-
-        if (strs != nullptr) {
-            // Выведем первые 12 строк стека — там будет имя функции загрузки
-            for (int i = 0; i < 12; ++i) {
-                std::cerr << "\033[35m" << strs[i] << "\033[0m" << std::endl;
-            }
-            free(strs);
-        }
-        std::cerr << "\033[31m=======================================\033[0m\n" << std::endl;
-
-        // В этот раз НЕ вызываем _exit(1) — даем программе работать дальше!
-    }
 }
 
 
@@ -133,17 +105,33 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
 
     // Сборка контейнера для заголовка окна (внутри qrc ресурсов суффиксы допустимы)
-    QIcon appIcon;
-    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_16.png"), QSize(16, 16));
-    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_32.png"), QSize(32, 32));
-    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_48.png"), QSize(48, 48));
-    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_64.png"), QSize(64, 64));
-    appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_256.png"), QSize(256, 256));
+    //QIcon appIcon;
+    // appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_16.png"), QSize(16, 16));
+    // appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_32.png"), QSize(32, 32));
+    // appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_48.png"), QSize(48, 48));
+    // appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_64.png"), QSize(64, 64));
+    // appIcon.addFile(QStringLiteral(":/Data/app_icons/pytorch-studio_256.png"), QSize(256, 256));
 
-    a.setWindowIcon(appIcon);
+    //a.setWindowIcon(appIcon);
 
     // КРИТИЧЕСКИ ДЛЯ WAYLAND: Задаем AppID, который Wayland-композитор сопоставит с ярлыком
     a.setDesktopFileName(QStringLiteral("pytorch-studio"));
+
+    // =========================================================================
+    // УЛЬТИМАТИВНЫЙ ХАК ДЛЯ СТИЛЯ FUSION: РАСТВОРЯЕМ КРАЕВУЮ БЕЛУЮ ЛИНИЮ
+    // =========================================================================
+    QPalette globalPalette = a.palette();
+    QColor breezeLightColor(239, 240, 241); // Наш эталонный #eff0f1
+
+    // Насильно подменяем цвета всех краевых линий, рамок и бликов
+    globalPalette.setColor(QPalette::Light, breezeLightColor);
+    globalPalette.setColor(QPalette::Midlight, breezeLightColor);
+    globalPalette.setColor(QPalette::Dark, breezeLightColor);
+    globalPalette.setColor(QPalette::Shadow, breezeLightColor);
+
+    // Применяем палитру глобально ко всей программе
+    a.setPalette(globalPalette);
+    // =========================================================================
 
     QFont globalFixedFont;
     globalFixedFont.setFamily("Liberation Mono"); // Ваш проверенный шрифт
@@ -153,13 +141,6 @@ int main(int argc, char *argv[])
 
     // Накатываем шрифт глобально на все будущие виджеты программы
     a.setFont(globalFixedFont);
-
-    QFontInfo appFontInfo(a.font());
-    qDebug() << "================== ТЕСТ ЯДРА QT (main.cpp) ==================";
-    qDebug() << "Реальное семейство шрифта приложения:" << appFontInfo.family();
-    qDebug() << "Флаг моноширинности (Fixed Pitch):"
-             << (appFontInfo.fixedPitch() ? " ДА, МОНОШИРИННЫЙ" : " НЕТ, ПРОПОРЦИОНАЛЬНЫЙ");
-    qDebug() << "============================================================";
 
     // Формируем строковую версию из макросов сборщика: "2026.1-LTS"
     QString appVersion = QString("%1.%2-%3")

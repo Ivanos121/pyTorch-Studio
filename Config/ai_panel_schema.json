@@ -1,163 +1,241 @@
 [
-    {
-        "meta_config": {
-            "use_scroll_area": true,
-            "layout_policy": "vertical_stacked",
-            "pystudio_version": "2.x"
-        }
-    },
-    {
-        "group": "hyper",
-        "group_title": "Блок гиперпараметров",
-        "name": "epochs",
-        "label": "Количество эпох",
-        "type": "int",
-        "default": 10,
-        "min": 1,
-        "max": 1000
-    },
-    {
-        "group": "hyper",
-        "group_title": "Блок гиперпараметров",
-        "name": "batch_size",
-        "label": "Размер пакета (батча)",
-        "type": "enum",
-        "options": ["16", "32", "64", "128"],
-        "default": "32"
-    },
-    {
-        "group": "hyper",
-        "group_title": "Блок гиперпараметров",
-        "name": "learning_rate",
-        "label": "Шаг обучения (Learning Rate)",
-        "type": "double",
-        "default": 0.00100,
-        "min": 0.00001,
-        "max": 1.0,
-        "decimals": 5
-    },
-    {
-        "group": "hyper",
-        "group_title": "Блок гиперпараметров",
-        "name": "optimizer",
-        "label": "Оптимизатор",
-        "type": "enum",
-        "options": ["Adam", "SGD", "AdamW", "RMSprop"],
-        "default": "Adam"
-    },
-    {
-        "group": "hyper",
-        "group_title": "Блок гиперпараметров",
-        "name": "Training/Comment",
-        "type": "text",
-        "label": "Описание эксперимента / Комментарий",
-        "description": "Краткое текстовое описание текущего запуска (цель, изменения в архитектуре), которое запишется в паспорт сессии.",
-        "default": "Базовый запуск модели"
-    },
-    {
-        "group": "hardware",
-        "group_title": "Аппаратная конфигурация и логирование",
-        "name": "device",
-        "label": "Вычислительное устройство",
-        "type": "enum",
-        "options": ["CPU", "CUDA"],
-        "default": "CPU"
-    },
-    {
-        "group": "hardware",
-        "group_title": "Аппаратная конфигурация и логирование",
-        "name": "num_workers",
-        "label": "Фоновые потоки загрузки",
-        "type": "int",
-        "default": 0,
-        "min": 0,
-        "max": 16
-    },
-    {
-        "group": "hardware",
-        "group_title": "Аппаратная конфигурация и логирование",
-        "name": "mixed_precision",
-        "label": "Смешанная точность (AMP FP16)",
-        "type": "bool",
-        "default": false
-    },
-    {
-        "group": "hardware",
-        "group_title": "Аппаратная конфигурация и логирование",
-        "name": "checkpoint_frequency",
-        "label": "Частота чекпоинтов (эпох)",
-        "type": "enum",
-        "options": ["1", "2", "5", "10"],
-        "default": "1"
-    },
-    {
-        "group": "hardware",
-        "group_title": "Аппаратная конфигурация и логирование",
-        "name": "monitor_metric",
-        "label": "Метрика для сохранения",
-        "type": "enum",
-        "options": ["Validation Loss", "Train Loss", "Accuracy"],
-        "default": "Validation Loss"
-    },
-    {
-        "group": "hardware",
-        "group_title": "Аппаратная конфигурация и логирование",
-        "name": "push_to_hub",
-        "label": "Пушить веса на Hugging Face",
-        "type": "bool",
-        "default": false
-    },
-    {
-        "group": "hardware",
-        "group_title": "Аппаратная конфигурация и логирование",
-        "name": "repo_id",
-        "label": "ID репозитория",
-        "type": "text",
-        "default": "your-username/thermal-motor-pystudio"
-    },
-    {
-        "group": "mlops",
-        "group_title": "Панель настройки конвейера MLOps",
-        "name": "control_mode",
-        "label": "1. Режим контроля ПАК (Фильтрация тегов ячеек Jupyter)",
-        "type": "radio_group",
-        "options": [
-            {"id": "sensors", "label": "Временные ряды статора [@sensors_task]", "min_files": 1},
-            {"id": "thermal", "label": "Тепловизионный контроль (ИК) [@thermal_task]", "min_files": 10},
-            {"id": "hybrid", "label": "Комплексный гибрид (ПАК) [@hybrid_fusion]", "min_files": 10}
-        ],
-        "default": "sensors"
-    },
-    {
-        "group": "mlops",
-        "group_title": "Панель настройки конвейера MLOps",
-        "name": "model_architecture",
-        "label": "2. Архитектура нейросетевого движка Jupyter",
-        "type": "dynamic_enum",
-        "depends_on": "control_mode",
-        "mapping": {
-            "sensors": [
-                {"id": "thermal_gru", "label": "Рекуррентная сеть (Thermal_GRU)", "desc": "Быстрая модель для динамики нагрева."},
-                {"id": "thermal_lstm", "label": "Длинная краткосрочная память (LSTM)", "desc": "Для длинных последовательностей."},
-                {"id": "mlp_regressor", "label": "Полносвязный регрессор (MLP)", "desc": "Легковесная математическая модель."}
-            ],
-            "thermal": [
-                {"id": "resnet18_unet", "label": "Мультизадачный ResNet-18 + U-Net", "desc": "Баланс скорости и точности ИК-анализа."},
-                {"id": "mobilenet_lraspp", "label": "Легковесный MobileNetV3", "desc": "Оптимизировано под слабые процессоры."}
-            ],
-            "hybrid": [
-                {"id": "early_fusion", "label": "Раннее слияние (Early Fusion)", "desc": "Объединение признаков на входе сети."},
-                {"id": "late_fusion", "label": "Позднее слияние (Late Fusion)", "desc": "Раздельный анализ с финальным слиянием."}
-            ]
-        },
-        "default": "thermal_gru"
-    },
-    {
-        "group": "mlops",
-        "group_title": "Панель настройки конвейера MLOps",
-        "name": "pipeline_activator",
-        "label": "🔓 АКТИВИРОВАТЬ КОНВЕЙЕР ОБУЧЕНИЯ (ПОЛНАЯ ПРОВЕРКА)",
-        "type": "action_button",
-        "action_target": "verify_and_unlock_sidebar"
+  {
+    "meta_config": {
+      "use_scroll_area": true,
+      "layout_policy": "vertical_stacked",
+      "pystudio_version": "2.x"
     }
+  },
+  {
+    "group": "hyper",
+    "group_title": "Блок гиперпараметров",
+    "name": "epochs",
+    "label": "Количество эпох",
+    "type": "int",
+    "default": 10,
+    "min": 1,
+    "max": 1000
+  },
+  {
+    "group": "hyper",
+    "group_title": "Блок гиперпараметров",
+    "name": "batch_size",
+    "label": "Размер пакета (батча)",
+    "type": "enum",
+    "options": [
+      "16",
+      "32",
+      "64",
+      "128"
+    ],
+    "default": "32"
+  },
+  {
+    "group": "hyper",
+    "group_title": "Блок гиперпараметров",
+    "name": "learning_rate",
+    "label": "Шаг обучения (Learning Rate)",
+    "type": "double",
+    "default": 0.001,
+    "min": 1e-05,
+    "max": 1.0,
+    "decimals": 5
+  },
+  {
+    "group": "hyper",
+    "group_title": "Блок гиперпараметров",
+    "name": "optimizer",
+    "label": "Оптимизатор",
+    "type": "enum",
+    "options": [
+      "Adam",
+      "SGD",
+      "AdamW",
+      "RMSprop"
+    ],
+    "default": "Adam"
+  },
+  {
+    "group": "hyper",
+    "group_title": "Блок гиперпараметров",
+    "name": "Training/Comment",
+    "type": "text",
+    "label": "Описание эксперимента / Комментарий",
+    "description": "Краткое текстовое описание текущего запуска (цель, изменения в архитектуре), которое запишется в паспорт сессии.",
+    "default": "Базовый запуск модели"
+  },
+  {
+    "group": "hardware",
+    "group_title": "Аппаратная конфигурация и логирование",
+    "name": "device",
+    "label": "Вычислительное устройство",
+    "type": "enum",
+    "options": [
+      "CPU",
+      "CUDA"
+    ],
+    "default": "CPU"
+  },
+  {
+    "group": "hardware",
+    "group_title": "Аппаратная конфигурация и логирование",
+    "name": "num_workers",
+    "label": "Фоновые потоки загрузки",
+    "type": "int",
+    "default": 0,
+    "min": 0,
+    "max": 16
+  },
+  {
+    "group": "hardware",
+    "group_title": "Аппаратная конфигурация и логирование",
+    "name": "mixed_precision",
+    "label": "Смешанная точность (AMP FP16)",
+    "type": "bool",
+    "default": false
+  },
+  {
+    "group": "hardware",
+    "group_title": "Аппаратная конфигурация и логирование",
+    "name": "checkpoint_frequency",
+    "label": "Частота чекпоинтов (эпох)",
+    "type": "enum",
+    "options": [
+      "1",
+      "2",
+      "5",
+      "10"
+    ],
+    "default": "1"
+  },
+  {
+    "group": "hardware",
+    "group_title": "Аппаратная конфигурация и логирование",
+    "name": "monitor_metric",
+    "label": "Метрика для сохранения",
+    "type": "enum",
+    "options": [
+      "Validation Loss",
+      "Train Loss",
+      "Accuracy"
+    ],
+    "default": "Validation Loss"
+  },
+  {
+    "group": "hardware",
+    "group_title": "Аппаратная конфигурация и логирование",
+    "name": "push_to_hub",
+    "label": "Пушить веса на Hugging Face",
+    "type": "bool",
+    "default": false
+  },
+  {
+    "group": "hardware",
+    "group_title": "Аппаратная конфигурация и логирование",
+    "name": "repo_id",
+    "label": "ID репозитория",
+    "type": "text",
+    "default": "your-username/thermal-motor-pystudio"
+  },
+    {
+    "group": "mlops",
+    "group_title": "Панель настройки конвейера MLOps",
+    "name": "control_mode",
+    "label": "1. Режим контроля ПАК (Фильтрация тегов ячеек Jupyter)",
+    "type": "radio_group",
+    "options": [
+      {
+        "id": "sensors",
+        "label": "Временные ряды статора [@sensors_task]",
+        "min_files": 1
+      },
+      {
+        "id": "thermograms",
+        "label": "Тепловизионный контроль (ИК) [@thermal_task]",
+        "min_files": 10
+      },
+      {
+        "id": "hybrid",
+        "label": "Комплексный гибрид (ПАК) [@hybrid_fusion]",
+        "min_files": 10
+      }
+    ],
+    "default": "sensors"
+  },
+  {
+    "group": "mlops",
+    "group_title": "Панель настройки конвейера MLOps",
+    "name": "model_architecture",
+    "label": "2. Архитектура нейросетевого движка Jupyter",
+    "type": "dynamic_enum",
+    "depends_on": "control_mode",
+    "mapping": {
+      "sensors": [
+        {
+          "id": "thermal_gru",
+          "label": "Рекуррентная сеть (Thermal_GRU)",
+          "desc": "Быстрая модель для динамики нагрева."
+        },
+        {
+          "id": "thermal_lstm",
+          "label": "Длинная краткосрочная память (LSTM)",
+          "desc": "Для длинных последовательностей."
+        },
+        {
+          "id": "mlp_regressor",
+          "label": "Полносвязный регрессор (MLP)",
+          "desc": "Легковесная математическая модель."
+        }
+      ],
+      "thermograms": [
+        {
+          "id": "resnet18_regressor",
+          "label": "Базовый регрессор (ResNet-18)",
+          "desc": "Быстрое бесконтактное определение скалярной температуры статора."
+        },
+        {
+          "id": "resnet18_unet",
+          "label": "Мультизадачный ResNet-18 + U-Net",
+          "desc": "Баланс скорости и точности ИК-анализа."
+        },
+        {
+          "id": "mobilenet_lraspp",
+          "label": "Легковесный MobileNetV3",
+          "desc": "Оптимизировано под слабые процессоры."
+        }
+      ],
+      "hybrid": [
+        {
+          "id": "early_fusion",
+          "label": "Раннее слияние (Early Fusion)",
+          "desc": "Объединение признаков на входе сети."
+        },
+        {
+          "id": "late_fusion",
+          "label": "Позднее слияние (Late Fusion)",
+          "desc": "Раздельный анализ с финальным слиянием."
+        }
+      ]
+    },
+    "default": "thermal_gru"
+  },
+  {
+    "group": "mlops",
+    "group_title": "Панель настройки конвейера MLOps",
+    "name": "thermal_visualization_mode",
+    "label": "3. Режим вывода верификации и отчетов ПАК",
+    "type": "enum",
+    "options": [
+      "[НЕ ПРИМЕНЯЕТСЯ ДЛЯ ДАТЧИКОВ]"
+    ],
+    "default": "[НЕ ПРИМЕНЯЕТСЯ ДЛЯ ДАТЧИКОВ]"
+  },
+  {
+    "group": "mlops",
+    "group_title": "Панель настройки конвейера MLOps",
+    "name": "pipeline_activator",
+    "label": " АКТИВИРОВАТЬ КОНВЕЙЕР ОБУЧЕНИЯ (ПОЛНАЯ ПРОВЕРКА)",
+    "type": "action_button",
+    "action_target": "verify_and_unlock_sidebar"
+  }
 ]

@@ -2,6 +2,7 @@
 //#include "replwidget.h"
 #include "ui_panel_other.h"
 #include "neuro_programm.h"
+#include "neuro_programm.h"
 
 #include <QTextBlock>
 #include <QDir>
@@ -18,6 +19,13 @@
 #include <QJsonObject>
 #include <QTimer>
 #include <QAction>
+#include <QFileDialog>
+#include <QFile>
+#include <QTextStream>
+#include <QMessageBox>
+#include <QPdfWriter>
+#include <QPainter>
+ #include <QDir>
 
 panel_other::panel_other(QWidget *parent) :
     QWidget(parent),
@@ -353,6 +361,232 @@ panel_other::panel_other(QWidget *parent) :
             emit errorItemDoubleClicked(fileItem->text(), rowItem->text().toInt());
         }
     });
+
+    QPushButton *btnToggleView = ui->menuSwitcherStack->findChild<QPushButton*>(QStringLiteral("btnToggleView"));
+
+    if (btnToggleView) {
+        // Задаем исходное состояние кнопки (текст и иконку)
+        btnToggleView->setText(QStringLiteral("Показать график"));
+        btnToggleView->setIcon(QIcon(QStringLiteral(":/Data/system_icons/office-chart.svg"))); // Укажите ваш путь к иконке графика
+
+        // Гарантированно сносим старые коннекты, чтобы кнопка не кликалась дважды
+        QObject::disconnect(btnToggleView, &QPushButton::clicked, nullptr, nullptr);
+
+        // Подключаем реактивное переключение страниц по клику
+        connect(btnToggleView, &QPushButton::clicked, this, [this, btnToggleView]() {
+            // Безопасная проверка, что ui и кнопка существуют в памяти
+            if (!this->ui || !this->ui->stackedWidget || !btnToggleView) return;
+
+            // Если сейчас открыт текстовый лог (Index 2) — включаем страницу нативного графика (Index 3)
+            if (this->ui->stackedWidget->currentIndex() == 2) {
+                this->ui->stackedWidget->setCurrentIndex(3); // Включаем QCustomPlot
+
+                btnToggleView->setText(QStringLiteral("Показать лог"));
+                btnToggleView->setIcon(QIcon(QStringLiteral(":/Data/system_icons/document-edit.svg")));
+            }
+            // Если открыт график — возвращаем текстовый лог обратно на экран
+            else {
+                this->ui->stackedWidget->setCurrentIndex(2); // Возврат на logEdit
+
+                btnToggleView->setText(QStringLiteral("Показать график"));
+                btnToggleView->setIcon(QIcon(QStringLiteral(":/Data/system_icons/office-chart.svg")));
+            }
+        });
+
+    }
+
+    // Ищем кнопку очистки лога на новой панели инструментов (Index 3)
+    QPushButton *btnClearLog = ui->menuSwitcherStack->findChild<QPushButton*>(QStringLiteral("btnClearLog"));
+
+    if (btnClearLog) {
+        // Гарантированно сносим старые коннекты, чтобы не плодить вызовы в ОЗУ
+        QObject::disconnect(btnClearLog, &QPushButton::clicked, nullptr, nullptr);
+
+        // Подключаем очистку текстового поля по клику
+        connect(btnClearLog, &QPushButton::clicked, this, [this]() {
+            // Проверяем, что ui существует в памяти
+            if (!this->ui) return;
+
+            // Находим logEdit на индексе 2 вашего stackedWidget
+            QPlainTextEdit *logEdit = this->ui->stackedWidget->widget(2) ?
+                                          this->ui->stackedWidget->widget(2)->findChild<QPlainTextEdit*>() : nullptr;
+
+            // Если logEdit доступен напрямую как поле ui (например, this->ui->logEdit),
+            // то код ниже можно упростить до: this->ui->logEdit->clear();
+            if (logEdit) {
+                logEdit->clear(); // Жестко очищаем текстовое поле от логов
+                qDebug() << " [UI] Лог обучения успешно очищен оператором.";
+            } else if (this->ui->stackedWidget->currentIndex() == 2) {
+                // Если logEdit сам является виджетом страницы 2
+                QPlainTextEdit *directLogEdit = qobject_cast<QPlainTextEdit*>(this->ui->stackedWidget->widget(2));
+                if (directLogEdit) directLogEdit->clear();
+            }
+        });
+    }
+
+    if (ui->btnSaveLog) {
+        QObject::disconnect(ui->btnSaveLog, &QPushButton::clicked, nullptr, nullptr);
+        connect(ui->btnSaveLog, &QPushButton::clicked, this, [this]() {
+            if (!this->ui || !this->ui->stackedWidget) return;
+
+            // 1. Ищем logEdit на 2-й странице stackedWidget
+            QPlainTextEdit *logEdit = nullptr;
+            if (this->ui->stackedWidget->widget(2)) {
+                logEdit = this->ui->stackedWidget->widget(2)->findChild<QPlainTextEdit*>();
+                if (!logEdit) logEdit = qobject_cast<QPlainTextEdit*>(this->ui->stackedWidget->widget(2));
+            }
+
+            // =========================================================================
+            // [СВЯЗЬ С ГЛАВНЫМ ОКНОМ]: Динамический поиск NeuroProgramm по дереву Qt
+            // =========================================================================
+            Neuro_programm *mainWin = nullptr;
+            QObject *currentParent = this->parent();
+            while (currentParent) {
+                mainWin = qobject_cast<Neuro_programm*>(currentParent);
+                if (mainWin) break;
+                currentParent = currentParent->parent();
+            }
+
+            // Защита от сохранения пустого лога через DBus без вызова диалоговых окон
+            if (!logEdit || logEdit->toPlainText().isEmpty()) {
+                if (mainWin) {
+                    mainWin->sendSystemNotification(QStringLiteral("Экспорт отчета"),
+                                                    QStringLiteral("Предупреждение: Невозможно сохранить пустой лог!"));
+                }
+                return;
+            }
+
+            // Извлекаем путь к проекту, либо берем домашнюю папку как запасной вариант
+            QString projectPath = mainWin ? mainWin->currentOpenProjectPath : QDir::homePath();
+
+            // 2. Открываем системный диалог выбора пути
+            QString defaultName = QStringLiteral("%1/training_report").arg(projectPath);
+            QString filePath = QFileDialog::getSaveFileName(this,
+                                                            QStringLiteral("Экспортировать отчет конвейера MLOps"),
+                                                            defaultName,
+                                                            QStringLiteral("Документы PDF (*.pdf);;Файлы журналов (*.log);;Текстовые документы (*.txt)"));
+
+            if (filePath.isEmpty()) return; // Оператор отменил операцию
+
+            // =========================================================================
+            // ВЕТВЛЕНИЕ 1: ГЕНЕРАЦИЯ PDF-ДОКУМЕНТА СТАНДАРТА А4
+            // =========================================================================
+            if (filePath.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+                QPdfWriter pdfWriter(filePath);
+                pdfWriter.setPageSize(QPageSize(QPageSize::A4));
+                pdfWriter.setPageOrientation(QPageLayout::Portrait);
+                pdfWriter.setPageMargins(QMarginsF(15, 15, 15, 15));
+
+                logEdit->print(&pdfWriter);
+
+                // Вызов DBus-уведомления ОС Linux через главное окно
+                if (mainWin) {
+                    mainWin->sendSystemNotification(QStringLiteral("Экспорт PDF"),
+                                                    QStringLiteral("Печатный ГОСТ-отчет сессии обучения успешно сформирован!"));
+                }
+            }
+            // =========================================================================
+            // ВЕТВЛЕНИЕ 2: СТАНДАРТНАЯ ЗАПИСЬ ТЕКСТОВЫХ ФАЙЛОВ (.LOG / .TXT)
+            // =========================================================================
+            else {
+                if (!filePath.endsWith(QStringLiteral(".log")) && !filePath.endsWith(QStringLiteral(".txt"))) {
+                    filePath += QStringLiteral(".log");
+                }
+
+                QFile file(filePath);
+                if (file.open(QFile::WriteOnly | QFile::Text)) {
+                    QTextStream out(&file);
+                    out.setEncoding(QStringConverter::Utf8); // Защита ГОСТ-символов
+                    out << logEdit->toPlainText();
+                    file.close();
+
+                    // Вызов DBus-уведомления ОС Linux через главное окно
+                    if (mainWin) {
+                        mainWin->sendSystemNotification(QStringLiteral("Экспорт лога"),
+                                                        QStringLiteral("Текстовый журнал успешно записан на диск Linux!"));
+                    }
+                } else {
+                    // Ошибка записи на диск транслируется также строго через DBus-сервис
+                    if (mainWin) {
+                        mainWin->sendSystemNotification(QStringLiteral("Ошибка файла"),
+                                                        QStringLiteral("Критическая ошибка: Не удалось создать файл на диске!"));
+                    }
+                }
+            }
+        });
+    }
+
+    // 1. Ищем виджет QCustomPlot на новой 3-й странице вашего stackedWidget
+    // (this->ui->stackedWidget используется, так как внутри panel_other.cpp у вас есть доступ к собственному UI)
+    QCustomPlot *lossPlot = nullptr;
+    if (this->ui && this->ui->stackedWidget && this->ui->stackedWidget->widget(3)) {
+        lossPlot = this->ui->stackedWidget->widget(3)->findChild<QCustomPlot*>(QStringLiteral("lossPlot"));
+
+        // Если QCustomPlot сам является корневым виджетом 3-й страницы, делаем каст:
+        if (!lossPlot) {
+            lossPlot = qobject_cast<QCustomPlot*>(this->ui->stackedWidget->widget(3));
+        }
+    }
+
+    // 2. ФИЗИЧЕСКАЯ НАСТРОЙКА И СТИЛИЗАЦИЯ КОРДИАТНОЙ СЕТКИ
+    if (lossPlot) {
+        // Полностью очищаем старые кривые перед запуском сессии
+        lossPlot->clearGraphs();
+
+        // А. График 0: Линия Train Loss (Ошибка на обучающей выборке ПАК)
+        lossPlot->addGraph();
+        lossPlot->graph(0)->setName(QStringLiteral("Train Loss"));
+        lossPlot->graph(0)->setPen(QPen(QColor("#0055ff"), 2.5)); // Синий цвет, толщина 2.5px
+        // Добавляем маркеры-точки на каждом шаге эпохи для наглядности
+        lossPlot->graph(0)->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle,
+                                                            QPen(QColor("#0033cc"), 1), QBrush(QColor("#0055ff")), 6));
+
+        // Б. График 1: Линия Validation Loss (Ошибка на валидационной выборке ПАК)
+        lossPlot->addGraph();
+        lossPlot->graph(1)->setName(QStringLiteral("Validation Loss"));
+        lossPlot->graph(1)->setPen(QPen(QColor("#ff3333"), 2.5)); // Красный цвет, толщина 2.5px
+        lossPlot->graph(1)->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle,
+                                                            QPen(QColor("#cc0000"), 1), QBrush(QColor("#ff3333")), 6));
+
+        // В. Оформление холста под монохромный дизайн современных IDE (Белый фон, тонкая сетка)
+        lossPlot->setBackground(QBrush(QColor("#ffffff")));
+        lossPlot->xAxis->setBasePen(QPen(QColor("#888888"), 1));
+        lossPlot->yAxis->setBasePen(QPen(QColor("#888888"), 1));
+        lossPlot->xAxis->setTickPen(QPen(QColor("#888888"), 1));
+        lossPlot->yAxis->setTickPen(QPen(QColor("#888888"), 1));
+
+        // Настраиваем пунктирные светлые линии сетки (DotLine)
+        lossPlot->xAxis->grid()->setPen(QPen(QColor("#e2e8f0"), 1, Qt::DotLine));
+        lossPlot->yAxis->grid()->setPen(QPen(QColor("#e2e8f0"), 1, Qt::DotLine));
+
+        // Названия осей по ГОСТ стандарту MLOps
+        lossPlot->xAxis->setLabel(QStringLiteral("Эпохи обучения"));
+        lossPlot->yAxis->setLabel(QStringLiteral("Ошибка (Loss)"));
+
+        // Применяем профессиональный моноширинный шрифт JetBrains Mono
+        QFont plotFont(QStringLiteral("JetBrains Mono"), 10);
+        lossPlot->xAxis->setLabelFont(plotFont);
+        lossPlot->yAxis->setLabelFont(plotFont);
+        lossPlot->xAxis->setTickLabelFont(plotFont);
+        lossPlot->yAxis->setTickLabelFont(plotFont);
+
+        // Включаем интерактивность: оператор может перемещать график мышкой и зумить колесиком
+        lossPlot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
+
+        // Настройка плавающей легенды (индикаторы линеек в углу экрана)
+        lossPlot->legend->setVisible(true);
+        lossPlot->legend->setFont(plotFont);
+        lossPlot->legend->setBrush(QBrush(QColor(255, 255, 255, 220))); // Полупрозрачный белый фон
+        lossPlot->legend->setBorderPen(QPen(QColor("#cbd5e1"), 1));     // Светло-серая рамка легенды
+
+        // Устанавливаем базовый стартовый диапазон осей координат (10 эпох, LOSS до 50)
+        lossPlot->xAxis->setRange(1, 10);
+        lossPlot->yAxis->setRange(0, 50);
+
+        // Отрисовываем пустой подготовленный холст в Qt-интерфейсе
+        lossPlot->replot();
+        qDebug() << ">>> [UI] Виджет QCustomPlot успешно инициализирован на Index 3.";
+    }
 
 }
 

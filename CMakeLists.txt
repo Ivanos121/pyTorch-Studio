@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Поиск необходимых модулей Qt6
 find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets DBus Charts Network WebEngineWidgets
-    Concurrent WebChannel WebSockets UiTools SerialPort
+    Concurrent WebChannel WebSockets UiTools SerialPort Test PrintSupport
 )
 
 # Поиск компонентов KDE (KF6)
@@ -65,6 +65,8 @@ set(PROJECT_SOURCES
     src/terminalwidget.h
     src/advancedclosedialog.cpp
     src/advancedclosedialog.h
+    src/qcustomplot.cpp
+    src/qcustomplot.h
 
     # Менеджеры данных, процессов и ИИ
     src/projectmanager.cpp
@@ -148,6 +150,7 @@ add_executable(pytorch-studio ${PROJECT_SOURCES}
     src/sessiontablewidget.h src/sessiontablewidget.cpp
     src/sessiondetailswidget.h src/sessiondetailswidget.cpp src/sessiondetailswidget.ui
     src/trainconfigwizard.h src/trainconfigwizard.cpp
+    src/qcustomplot.cpp src/qcustomplot.h
 )
 
 # Указываем пути поиска заголовочных файлов
@@ -176,6 +179,8 @@ target_link_libraries(pytorch-studio PRIVATE
     Qt6::WebSockets
     Qt6::UiTools
     Qt6::SerialPort
+    Qt6::Test
+    Qt6::PrintSupport
 )
 
 # Настройки свойств исполняемого файла

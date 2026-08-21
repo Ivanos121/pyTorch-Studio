@@ -23,10 +23,13 @@ About_program::About_program(QWidget *parent)
         this->layout()->setSizeConstraint(QLayout::SetMinimumSize);
     }
 
-    // 1. Создаем объект изображения и указываем путь в ресурсах
-    QPixmap logoPixmap(":/Data/Icons/pTS.svg");
+    // 1. Извлекаем иконку из системы по её имени, указывая запасной путь в ресурсах (fallback)
+    QIcon appIconAbout = QIcon::fromTheme(QStringLiteral("pytorch-studio"), QIcon(QStringLiteral(":/Data/Icons/pTS.svg")));
 
-    // 2. Важно для Linux: качественно масштабируем картинку под размер 64x64,
+    // 2. Рендерим пиксмап нужного размера (64x64) напрямую из вектора/растра темы оформления
+    QPixmap logoPixmap = appIconAbout.pixmap(64, 64);
+
+    // 3. Важно для Linux: качественно масштабируем картинку под размер 64x64,
     // чтобы на High-DPI (4K) мониторах она не выглядела размытой (SmoothTransformation)
     QPixmap scaledLogo = logoPixmap.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 

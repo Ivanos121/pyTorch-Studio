@@ -198,7 +198,7 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
                 QVBoxLayout *analysisLayout = new QVBoxLayout(analysisFrame);
 
                 int sensorsFiles = getRealFileCount(QStringLiteral("sensors"));
-                int thermalFiles = getRealFileCount(QStringLiteral("thermal"));
+                int thermalFiles = getRealFileCount(QStringLiteral("thermograms"));
 
                 QLabel *lblSens = new QLabel(QString(" 📊 Временные ряды статора (sensors_csv): Найдено %1 логов").arg(sensorsFiles), m_scrollContentWidget);
                 QLabel *lblTher = new QLabel(QString(" 📷 Теплограммы ИК-камеры (data/raw): Найдено %1 снимков").arg(thermalFiles), m_scrollContentWidget);
@@ -229,10 +229,37 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
                 m_modeGroup->button(0)->setChecked(true);
 
                 connect(m_modeGroup, &QButtonGroup::idClicked, this, [this](int id) {
-                    QString modeId = (id == 0) ? QStringLiteral("sensors") : ((id == 1) ? QStringLiteral("thermal") : QStringLiteral("hybrid"));
+                    // 1. Синхронизируем строковый ID режима контроля ПАК
+                    QString modeId = (id == 0) ? QStringLiteral("sensors") : ((id == 1) ?
+                                                                                  QStringLiteral("thermograms") : QStringLiteral("hybrid"));
+
+                    // Обновляем комбобокс №2 под конкретную задачу
                     updateArchitectureMapping(modeId, m_modelArchFieldObj);
+
+                    // 2. УПРАВЛЕНИЕ АКТИВНОСТЬЮ ТРЕТЬЕГО КОМБОБОКСА
+                    QComboBox* cbVis = qobject_cast<QComboBox*>(m_widgetsMap.value(QStringLiteral("thermal_visualization_mode"), nullptr));
+
+                    if (cbVis) {
+                        // Если выбраны чистые временные ряды датчиков (id == 0)
+                        if (id == 0) {
+                            cbVis->clear();
+                            cbVis->addItem(QStringLiteral("[НЕ ПРИМЕНЯЕТСЯ ДЛЯ ДАТЧИКОВ]"));
+                            cbVis->setEnabled(false); // Делаем неактивным (серым)
+                        }
+                        // Если выбраны Теплограммы (id == 1) или Комплексный гибрид (id == 2)
+                        else {
+                            cbVis->clear();
+                            cbVis->addItem(QStringLiteral("Стандартный (Полупрозрачные маски узлов ИИ)"));
+                            cbVis->addItem(QStringLiteral("Изолированные узлы (Двигатель на черном фоне)"));
+                            cbVis->addItem(QStringLiteral("Бизнес-отчет (Сноски, стрелки и расчет градусов)"));
+                            cbVis->setEnabled(true);
+                                cbVis->setCurrentIndex(0);
+                        }
+                    }
+
                     triggerAutoSave();
                 });
+
             }
             else if (type == "dynamic_enum") {
                 m_modelArchFieldObj = param;
@@ -247,6 +274,25 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
 
                 updateArchitectureMapping(QStringLiteral("sensors"), m_modelArchFieldObj);
                 connect(m_comboArchitecture, &QComboBox::currentIndexChanged, this, &AI_panel::triggerAutoSave);
+            }
+            else if (type == "enum") {
+                // Отрисовываем заголовок для комбобокса визуализации YOLO
+                mlopsLayout->addWidget(new QLabel(QString("<b>%1</b>").arg(labelText), m_scrollContentWidget));
+
+                QComboBox* cbVis = new QComboBox(m_scrollContentWidget);
+                QJsonArray options = param["options"].toArray();
+                for (int j = 0; j < options.size(); ++j) {
+                    cbVis->addItem(options[j].toString());
+                }
+                cbVis->setCurrentText(param["default"].toString());
+
+                mlopsLayout->addWidget(cbVis);
+
+                // Сохраняем указатель в общую карту виджетов по имени "thermal_visualization_mode"
+                m_widgetsMap[name] = cbVis;
+
+                // Подключаем автоматический триггер сохранения при смене варианта визуализации
+                connect(cbVis, &QComboBox::currentIndexChanged, this, &AI_panel::triggerAutoSave);
             }
             else if (type == "action_button") {
                 mlopsLayout->addSpacing(10);
@@ -312,26 +358,36 @@ int AI_panel::getRealFileCount(const QString &modeId) {
 void AI_panel::updateArchitectureMapping(const QString &modeId, const QJsonObject &fieldObj) {
     if (!m_comboArchitecture) return;
 
+    // БЛОКИРУЕМ СИГНАЛЫ, чтобы Qt6 не вызывал автосохранение и очистку лэйаута посреди сборки!
+    m_comboArchitecture->blockSignals(true);
+
     m_comboArchitecture->clear();
-    m_currentArchDescs.clear(); // Очищаем старый кэш описаний
+    m_currentArchDescs.clear();
 
     QJsonArray arr = fieldObj["mapping"].toObject().value(modeId).toArray();
     for (int i = 0; i < arr.size(); ++i) {
         QJsonObject archObj = arr[i].toObject();
         m_comboArchitecture->addItem(archObj["label"].toString(), archObj["id"].toString());
-        m_currentArchDescs.append(archObj["desc"].toString()); // Кэшируем описание
+        m_currentArchDescs.append(archObj["desc"].toString());
     }
 
-    // БЕЗОПАСНЫЙ СВЯЗУЮЩИЙ ШАГ ДЛЯ Qt 6 (Указатель на метод класса + UniqueConnection)
+    // Отключаем старые коннекты, чтобы не дублировать их
+    disconnect(m_comboArchitecture, &QComboBox::currentIndexChanged, this, &AI_panel::onArchitectureChanged);
+
+    // Восстанавливаем чистый безопасный коннект Qt6
     connect(m_comboArchitecture, &QComboBox::currentIndexChanged,
             this, &AI_panel::onArchitectureChanged, Qt::UniqueConnection);
 
     if (m_comboArchitecture->count() > 0) {
         m_comboArchitecture->setCurrentIndex(0);
-        onArchitectureChanged(0); // Принудительно обновляем текст для первой сети
+        onArchitectureChanged(0);
     }
+
+    m_comboArchitecture->blockSignals(false);
 }
 
+#include <QSettings>
+#include <QDebug>
 
 void AI_panel::verifyAndUnlockPipeline() {
     int checkedId = m_modeGroup->checkedId();
@@ -340,16 +396,20 @@ void AI_panel::verifyAndUnlockPipeline() {
     int sensorsCount = getRealFileCount(QStringLiteral("sensors"));
     int thermalCount = getRealFileCount(QStringLiteral("thermal"));
 
+    // 1. Валидация условий ПАК
     if (modeId == "hybrid" && (sensorsCount == 0 || thermalCount < 10)) {
         m_lblPipelineStatus->setText(QStringLiteral("<font color='red'>❌ Ошибка ПАК: Для гибридного режима нужны лог токов и ИК-снимки!</font>"));
         return;
     }
 
+    // 2. Визуальное утверждение конвейера
     m_lblPipelineStatus->setText(QStringLiteral("<font color='#2ecc71'><b>✓ Конвейер ПАК успешно активирован и готов к запуску!</b></font>"));
     m_btnActivate->setEnabled(false);
     m_btnActivate->setText(QStringLiteral("[ 🔒 КОНВЕЙЕР ПАК УТВЕРЖДЕН И АКТИВЕН ]"));
     m_btnActivate->setStyleSheet(QStringLiteral("background-color: #27ae60; color: white; font-weight: bold; height: 35px; border-radius: 4px;"));
 
+    // 3. Отправляем ОДИН сигнал на старт. Вся математика инкремента (+1)
+    // гарантированно выполнится внутри слота jupyterClientReady!
     emit pipelineActivated();
 }
 
@@ -426,28 +486,75 @@ bool AI_panel::saveFieldsToYaml(const QString& projectPath) {
     mlopsBlock << QString("  control_mode: '%1'").arg(modeId);
     mlopsBlock << QString("  model_architecture: '%1'").arg(archId);
 
+    // ДОБАВЛЯЕМ СЮДА СТРОГО СЛЕДУЮЩИЙ КОД:
+    QString visModeId = QStringLiteral("variant_1_masks");
+    if (m_widgetsMap.contains(QStringLiteral("thermal_visualization_mode"))) {
+        if (QComboBox* cbVis = qobject_cast<QComboBox*>(m_widgetsMap[QStringLiteral("thermal_visualization_mode")])) {
+            // Так как тип стал "enum", берем текст текущего выбора
+            visModeId = cbVis->currentText().trimmed();
+        }
+    }
+    mlopsBlock << QString(" thermal_visualization_mode: '%1'").arg(visModeId);
+
     // ДОБАВЛЕНО: Сквозное автоматическое наполнение секции верификации под часовой инференс
     verificationBlock << QStringLiteral("  target_sensor_index: 2"); // 2 - совмещенный лог Статор + Ротор
     verificationBlock << QStringLiteral("  window_size: 900");        // История скользящего окна
     verificationBlock << QStringLiteral("  step_size: 300");
 
     // Формируем итоговую текстовую структуру YAML-документа
+    // --- СБОРКА ИСПРАВЛЕННОГО И ВАЛИДНОГО YAML МАНИФЕСТА ---
     QStringList yamlLines;
     yamlLines << QStringLiteral("# =========================================================================");
     yamlLines << QStringLiteral("# AUTOMATED HYBRID MULTI-TASK PYTORCH STUDIO MANIFEST CONFIGURATION");
     yamlLines << QStringLiteral("# =========================================================================");
-    yamlLines << QStringLiteral("training:") << trainingBlock.join("\n") << QStringLiteral("");
-    yamlLines << QStringLiteral("hardware:") << hardwareBlock.join("\n") << QStringLiteral("");
-    yamlLines << QStringLiteral("logging_and_save:") << loggingBlock.join("\n") << QStringLiteral("");
 
-    // ИНТЕГРИРОВАНО: Запекаем секцию верификации в итоговый массив строк
-    yamlLines << QStringLiteral("verification:") << verificationBlock.join("\n") << QStringLiteral("");
+    // 1. Блок Training
+    yamlLines << QStringLiteral("training:");
+    for(const QString& line : trainingBlock) {
+        yamlLines << QStringLiteral("  ") + line.trimmed(); // Жесткие 2 пробела отступа
+    }
+    yamlLines << QStringLiteral("");
 
-    yamlLines << QStringLiteral("mlops_pipeline:") << mlopsBlock.join("\n") << QStringLiteral("");
+    // 2. Блок Hardware
+    yamlLines << QStringLiteral("hardware:");
+    for(const QString& line : hardwareBlock) {
+        yamlLines << QStringLiteral("  ") + line.trimmed();
+    }
+    yamlLines << QStringLiteral("");
+
+    // 3. Блок Logging
+    yamlLines << QStringLiteral("logging_and_save:");
+    for(const QString& line : loggingBlock) {
+        yamlLines << QStringLiteral("  ") + line.trimmed();
+    }
+    yamlLines << QStringLiteral("");
+
+    // 4. Блок Verification (Наша новая секция)
+    yamlLines << QStringLiteral("verification:");
+    yamlLines << QStringLiteral("  target_sensor_index: 2");
+    yamlLines << QStringLiteral("  window_size: 900");
+    yamlLines << QStringLiteral("  step_size: 300");
+    yamlLines << QStringLiteral("");
+
+    // 5. Блок MLOps Pipeline (Исправляем синтаксический ступор)
+    yamlLines << QStringLiteral("mlops_pipeline:");
+    yamlLines << QStringLiteral("  control_mode: '") + modeId + QStringLiteral("'");
+    yamlLines << QStringLiteral("  model_architecture: '") + archId + QStringLiteral("'");
+    // Добавляем автоматический отступ и для третьего комбобокса визуализации ИК
+    yamlLines << QStringLiteral("  thermal_visualization_mode: '") + visModeId + QStringLiteral("'");
+    yamlLines << QStringLiteral("");
+
+    // 6. Блок Paths
     yamlLines << QStringLiteral("paths:");
     yamlLines << QStringLiteral("  train_dir: 'datasets/training'");
-    yamlLines << QStringLiteral("  val_dir: 'datasets/validate'") << QStringLiteral("");
-    yamlLines << QStringLiteral("huggingface:") << hfBlock.join("\n");
+    yamlLines << QStringLiteral("  val_dir: 'datasets/validate'");
+    yamlLines << QStringLiteral("");
+
+    // 7. Блок HuggingFace
+    yamlLines << QStringLiteral("huggingface:");
+    for(const QString& line : hfBlock) {
+        yamlLines << QStringLiteral("  ") + line.trimmed();
+    }
 
     QFile file(targetYamlPath);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -494,9 +601,14 @@ bool AI_panel::loadFieldsFromYaml(const QString& projectPath) {
     QFile file(finalLoadPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
 
+    // ВРЕМЕННО БЛОКИРУЕМ СИГНАЛЫ ДЛЯ ПРЕДОТВРАЩЕНИЯ ЗАЦИКЛИВАНИЯ ПРИ ЗАГРУЗКЕ
     this->blockSignals(true);
     if (m_modeGroup) m_modeGroup->blockSignals(true);
     if (m_comboArchitecture) m_comboArchitecture->blockSignals(true);
+
+    // Блокируем сигналы третьего комбобокса, если он уже создан
+    QComboBox* cbVis = qobject_cast<QComboBox*>(m_widgetsMap.value(QStringLiteral("thermal_visualization_mode"), nullptr));
+    if (cbVis) cbVis->blockSignals(true);
 
     QTextStream in(&file);
     while (!in.atEnd()) {
@@ -505,21 +617,45 @@ bool AI_panel::loadFieldsFromYaml(const QString& projectPath) {
         if (line.contains(':')) {
             QString key = line.section(':', 0, 0).trimmed();
             QString value = line.section(':', 1).trimmed();
-            if (value.startsWith('\'') && value.endsWith('\'')) value = value.mid(1, value.length() - 2);
+            if (value.startsWith('\'') && value.endsWith('\'')) {
+                value = value.mid(1, value.length() - 2);
+            }
 
             if (m_widgetsMap.contains(key)) {
                 QWidget* widget = m_widgetsMap[key];
                 if (QSpinBox* sb = qobject_cast<QSpinBox*>(widget)) sb->setValue(value.toInt());
-                else if (QDoubleSpinBox* dsb = qobject_cast<QDoubleSpinBox*>(widget)) { value.replace(',', '.'); dsb->setValue(value.toDouble()); }
-                else if (QComboBox* cb = qobject_cast<QComboBox*>(widget)) { if (key == "device") value = value.toUpper(); cb->setCurrentText(value); }
+                else if (QDoubleSpinBox* dsb = qobject_cast<QDoubleSpinBox*>(widget)) {
+                    value.replace(',', '.'); dsb->setValue(value.toDouble());
+                }
+                else if (QComboBox* cb = qobject_cast<QComboBox*>(widget)) {
+                    if (key == "device") value = value.toUpper();
+                    cb->setCurrentText(value);
+                }
                 else if (QCheckBox* chb = qobject_cast<QCheckBox*>(widget)) chb->setChecked(value == "true");
                 else if (QLineEdit* le = qobject_cast<QLineEdit*>(widget)) le->setText(value);
             }
             else if (key == "control_mode" && m_modeGroup) {
-                int id = (value == "sensors") ? 0 : ((value == "thermal") ? 1 : 2);
+                int id = (value == "sensors") ? 0 : ((value == "thermograms" || value == "thermal") ? 1 : 2);
                 if (m_modeGroup->button(id) && m_modeGroup->button(id)->isEnabled()) {
                     m_modeGroup->button(id)->setChecked(true);
+
+                    // Обновляем комбобокс №2 под загруженную задачу
                     updateArchitectureMapping(value, m_modelArchFieldObj);
+
+                    // --- СИНХРОНИЗАЦИЯ И БЛОКИРОВКА ТРЕТЬЕГО КОМБОБОКСА ПРИ ЗАГРУЗКЕ ---
+                    if (cbVis) {
+                        if (id == 0) {
+                            cbVis->clear();
+                            cbVis->addItem(QStringLiteral("[НЕ ПРИМЕНЯЕТСЯ ДЛЯ ДАТЧИКОВ]"));
+                            cbVis->setEnabled(false); // Замораживаем
+                        } else {
+                            cbVis->clear();
+                            cbVis->addItem(QStringLiteral("Стандартный (Полупрозрачные маски узлов ИИ)"));
+                            cbVis->addItem(QStringLiteral("Изолированные узлы (Двигатель на черном фоне)"));
+                            cbVis->addItem(QStringLiteral("Бизнес-отчет (Сноски, стрелки и расчет градусов)"));
+                            cbVis->setEnabled(true);  // Оживляем
+                        }
+                    }
                 }
             }
             else if (key == "model_architecture" && m_comboArchitecture) {
@@ -529,9 +665,29 @@ bool AI_panel::loadFieldsFromYaml(const QString& projectPath) {
     }
     file.close();
 
+    // ЕСЛИ В СЕССИИ БЫЛ СОХРАНЕН КОНКРЕТНЫЙ РЕЖИМ ВИЗУАЛИЗАЦИИ, ВОССТАНАВЛИВАЕМ ЕГО ТЕКСТ
+    if (cbVis && cbVis->isEnabled()) {
+        // Мы повторно читаем файл только ради этого ключа, чтобы гарантировать точность
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream in_retry(&file);
+            while (!in_retry.atEnd()) {
+                QString line = in_retry.readLine().trimmed();
+                if (line.startsWith(QStringLiteral("thermal_visualization_mode:"))) {
+                    QString val = line.section(':', 1).trimmed();
+                    if (val.startsWith('\'') && val.endsWith('\'')) val = val.mid(1, val.length() - 2);
+                    if (!val.isEmpty()) cbVis->setCurrentText(val);
+                    break;
+                }
+            }
+            file.close();
+        }
+    }
+
+    // СНИМАЕМ БЛОКИРОВКУ СИГНАЛОВ — ИНТЕРФЕЙС ГОТОВ
     this->blockSignals(false);
     if (m_modeGroup) m_modeGroup->blockSignals(false);
     if (m_comboArchitecture) m_comboArchitecture->blockSignals(false);
+    if (cbVis) cbVis->blockSignals(false);
 
     if (finalLoadPath == appCacheYamlPath) this->saveFieldsToYaml(projectPath);
     return true;

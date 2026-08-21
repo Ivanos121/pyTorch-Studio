@@ -164,6 +164,7 @@ protected slots:
     bool unarchiveProject(const QString &archivePath, const QString &targetExtractDir);
 
 private:
+    bool hasPythonCrashOccurred;
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
     void sendSystemNotification(const QString &title, const QString &text);
@@ -341,6 +342,7 @@ private:
     QAction *actStartTrain = nullptr;
     QAction *actStop;
     QAction *actStepOut;
+    QPlainTextEdit *logEdit;
     void updateTabName();
     void setFileModifiedState(CodeEditor *editor, bool modified);
     bool archiveProject(const QString &sourceDir, const QString &outputSavePath);

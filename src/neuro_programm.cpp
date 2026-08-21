@@ -93,6 +93,7 @@
 #include <QCryptographicHash>
 #include <QPushButton>
 #include <QFile>
+#include <QSignalSpy>
 #include <csignal>
 
 #ifndef Q_OS_WIN
@@ -251,12 +252,6 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
         }
     }
 
-    // if (this->m_aiPanel)
-    // {
-    //     QString schema = this->currentOpenProjectPath + QStringLiteral("/config/ui_schema.json");
-    //     this->m_aiPanel->buildUiFromConfig(schema);
-    // }
-
     // =========================================================================
     // КОННЕКТ ДЛЯ ВЫВОДА МОДАЛЬНОГО ОКНА С ТЕКСТОМ ОШИБКИ ИЗ ПИТОНА
     // =========================================================================
@@ -295,7 +290,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     {
         // Пауза 500 мс, чтобы контроллер STM32 успел поднять USB CDC стек после Reset
         QTimer::singleShot(500, usbDriver, [usbDriver]()
-        {
+                           {
             qDebug() << "🔄 Попытка автоматического фонового подключения к miniUSB...";
             usbDriver->connectToNucleo();
         });
@@ -482,6 +477,21 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
 
     connect(ui->centralStackedWidget, &QStackedWidget::currentChanged, this, [this](int index) {
         Q_UNUSED(index);
+
+        // =========================================================================
+        // УЛЬТИМАТИВНЫЙ ФИКС ВЫСОТЫ ПРИ СМЕНЕ ЛЮБОЙ СТРАНИЦЫ СТЭКА
+        // =========================================================================
+        QScreen *primaryScreen = QGuiApplication::primaryScreen();
+        if (primaryScreen) {
+            // Запрашиваем у KDE Plasma чистую рабочую зону БЕЗ панели задач
+            QRect availableRect = primaryScreen->availableGeometry();
+
+            // Насильно фиксируем геометрию главного окна в безопасных границах.
+            // Это мгновенно вернет статусбар на экран, если страница попыталась его вытолкнуть!
+            this->setGeometry(availableRect);
+            this->setFixedHeight(availableRect.height());
+        }
+        // =========================================================================
 
         int placeholderIndex = this->property("placeholderIndex").toInt();
         if (index == placeholderIndex || index == 0) {
@@ -732,7 +742,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     }
     this->setMenuBar(nullptr);
     this->setContentsMargins(0, 0, 0, 0);
-    this->setStyleSheet("QMainWindow { background-color: blue; }");
+    //this->setStyleSheet("QMainWindow { background-color: blue; }");
 
     // =========================================================================
     // 1. СОЗДАНИЕ ВЕРТИКАЛЬНОЙ ПАНЕЛИ НА БАЗЕ QWIDGET (IDE СТИЛЬ)
@@ -813,7 +823,6 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
         {&actPip, "Сессии", QIcon(":/Data/system_icons/table.svg")},
         {&actSearch, "Поиск", QIcon(":/Data/system_icons/edit-find.svg")},
         {nullptr, "", QIcon()},
-        {&actTrainConfig, "Настройки обучения", QIcon(":/Data/system_icons/media-playback-start_2.svg")},
         {&actStartTrain, "Обучение", QIcon(":/Data/system_icons/media-playback-start_2.svg")},
         {&actDebug, "Дебаг", QIcon(":/Data/system_icons/media-playback-start_3.svg")},
         {&actSTM, "Прошивка", QIcon(":/Data/system_icons/view-certificate.svg")},
@@ -855,13 +864,13 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
 
         // Настраиваем режим залипания для триады инженерных кнопок сайдбара
         if (config.text == QStringLiteral("Дебаг") ||
-            config.text == QStringLiteral("Обучение") ||
-            config.text == QStringLiteral("Настройки ИИ") ||
-            config.text == QStringLiteral("Настройки ИИ") ||
-            config.text == QStringLiteral("Прошивка") ||
-            config.text == QStringLiteral("Работа STM") ||
-            config.text == QStringLiteral("Графики") ||
-            config.text == QStringLiteral("Сессии"))
+                config.text == QStringLiteral("Обучение") ||
+                config.text == QStringLiteral("Настройки ИИ") ||
+                config.text == QStringLiteral("Настройки ИИ") ||
+                config.text == QStringLiteral("Прошивка") ||
+                config.text == QStringLiteral("Работа STM") ||
+                config.text == QStringLiteral("Графики") ||
+                config.text == QStringLiteral("Сессии"))
         {
             currentAction->setCheckable(true);
         }
@@ -950,8 +959,8 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
             qDebug() << ">>> [SESSIONS BUTTON CLICK]: checked =" << checked;
 
             const int placeholderPageIndex = this->property("placeholderIndex").isValid()
-                                             ? this->property("placeholderIndex").toInt()
-                                             : 1;
+                    ? this->property("placeholderIndex").toInt()
+                    : 1;
 
             // ПРОВЕРКА ПОВТОРНОГО КЛИКА: Если Таблица сессий УЖЕ открыта на экране
             bool isAlreadyActive = (ui->centralStackedWidget && ui->centralStackedWidget->currentIndex() == 4);
@@ -1096,6 +1105,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
 
     // 3. Заставляем тулбар намертво подчиняться цветам темной/светлой темы
     topContainerBar->setAttribute(Qt::WA_StyledBackground, true);
+
     topContainerBar->setStyleSheet(
                 "QToolBar#topContainerBar {"
                 "   background-color: #eff0f1;" // Светлый фон по дефолту (перекрасится в settings.cpp)
@@ -1105,12 +1115,8 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                 "}"
                 );
 
-    // 4. Помещаем вашу готовую внутреннюю обертку (topWrapper) внутрь тулбара
-    // Убедитесь, что внутри topWrapper->layout() (ваш topLayout) уже уложены:
-    // customTitleBarPanel, customMenuBar и widget_3!
-
     // 5. Жестко фиксируем итоговую высоту (35 шапка + 35 меню + 30 чипы = 100px)
-    topContainerBar->setFixedHeight(100);
+    topContainerBar->setFixedHeight(85);
 
     // 6. НАДЁЖНЫЙ МОНТАЖ В ОКНО: Тулбар встает на самый верхний слой приложения, прижимая доки вниз!
     this->addToolBar(Qt::TopToolBarArea, topContainerBar);
@@ -1129,8 +1135,111 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     topLayout->setSpacing(0);
     topContainerBar->addWidget(topWrapper);
 
+    // 1. Включаем поддержку стилей для обертки (topWrapper) и несущего бара
+    topWrapper->setAttribute(Qt::WA_StyledBackground, true);
+
+    // 2. Красим сам тулбар и промежуточный контейнер
+    topContainerBar->setStyleSheet("QToolBar#topContainerBar { background-color: #eff0f1 !important; border: none !important; }");
+
+    // 3. Накатываем сквозной StyleSheet на внутренние панели, принудительно затирая градиенты Fusion
+    topWrapper->setStyleSheet(
+                // Красим подложку всех трех панелей внутри вертикального стека
+                "QWidget {"
+                "   background-color: #eff0f1 !important;"
+                "   border: none !important;"
+                "}"
+                // Настройка текстовых элементов меню ("Файл", "Правка")
+                "QMenuBar {"
+                "   background-color: #eff0f1 !important;"
+                "}"
+                "QMenuBar::item {"
+                "   background: transparent !important;"
+                "   color: #232629 !important;" // Контрастный темный текст
+                "   padding: 4px 8px !important;"
+                "}"
+                "QMenuBar::item:selected {" // Эффект наведения на пункт меню
+                "   background-color: #e4e5e6 !important;"
+                "   color: #000000 !important;"
+                "}"
+                // Дополнительно страхуем кастомную шапку и панель виджетов
+                "QWidget#customTitleBarPanel, QWidget#widget_3 {"
+                "   background-color: #eff0f1 !important;"
+                "}"
+                );
+
+    // =========================================================================
+    // АППАРАТНЫЙ ФИКС ЦВЕТА #eff0f1 ЧЕРЕЗ ПАЛИТРУ (ИГНОРИРУЕТ ЛЮБОЙ CSS И FUSION)
+    // =========================================================================
+    QColor breezeLightColor(239, 240, 241); // Эквивалент #eff0f1 в RGB
+    QColor darkTextColor(35, 38, 41);      // Контрастный темный текст для меню
+
+    // 1. Красим ПАНЕЛЬ 1 (Кастомная шапка с кнопками управления)
+    if (ui->customTitleBarPanel) {
+        ui->customTitleBarPanel->setAutoFillBackground(true);
+        QPalette p1 = ui->customTitleBarPanel->palette();
+        p1.setColor(QPalette::Window, breezeLightColor);
+        p1.setColor(QPalette::WindowText, darkTextColor);
+        ui->customTitleBarPanel->setPalette(p1);
+    }
+
+    // // 2. Красим ПАНЕЛЬ 2 (Файловое меню)
+    // if (customMenuBar) {
+    //     customMenuBar->setAutoFillBackground(true);
+    //     QPalette p2 = customMenuBar->palette();
+    //     p2.setColor(QPalette::Window, breezeLightColor);     // Фон менюбара
+    //     p2.setColor(QPalette::WindowText, darkTextColor); // Текст "Файл", "Правка"
+    //     p2.setColor(QPalette::Button, breezeLightColor);
+    //     p2.setColor(QPalette::Text, darkTextColor);
+    //     customMenuBar->setPalette(p2);
+
+    //     // Сбрасываем старый CSS, который мог удерживать темный цвет
+    //     customMenuBar->setStyleSheet("QMenuBar::item { color: #232629; background: transparent; } "
+    //                                  "QMenuBar::item:selected { background-color: #e4e5e6; }");
+    // }
+
+    // 3. Красим ПАНЕЛЬ 3 (Панель с виджетами / чипами / комбобоксом)
+    if (ui->widget_3) {
+        ui->widget_3->setAutoFillBackground(true);
+        QPalette p3 = ui->widget_3->palette();
+        p3.setColor(QPalette::Window, breezeLightColor);
+        ui->widget_3->setPalette(p3);
+    }
+
+    // 4. Красим ОБЩИЙ несущий контейнер (Тулбар и обертку)
+    if (topWrapper) {
+        topWrapper->setAutoFillBackground(true);
+        QPalette pWrap = topWrapper->palette();
+        pWrap.setColor(QPalette::Window, breezeLightColor);
+        topWrapper->setPalette(pWrap);
+    }
+    if (topContainerBar) {
+        topContainerBar->setAutoFillBackground(true);
+        QPalette pBar = topContainerBar->palette();
+        pBar.setColor(QPalette::Window, breezeLightColor);
+        topContainerBar->setPalette(pBar);
+        topContainerBar->setStyleSheet("QToolBar#topContainerBar { border: none !important; background: #eff0f1; }");
+    }
+    // =========================================================================
+
     // 5. Создаем новый ручной QMenuBar, который будет вести себя как послушный виджет
     customMenuBar = new QMenuBar(topWrapper);
+
+    if (customMenuBar != nullptr) {
+        customMenuBar->setStyleSheet(
+                    "QMenuBar {"
+                    "   background-color: #eff0f1 !important;" // Наш светлый цвет
+                    "   border: none !important;"               // Полностью убирает рамки
+                    "}"
+                    "QMenuBar::item {"
+                    "   background: transparent !important;"
+                    "   color: #232629 !important;"            // Темный читаемый текст
+                    "}"
+                    "QMenuBar::item:selected {"                 // Ховер при наведении мыши
+                    "   background-color: #e4e5e6 !important;"
+                    "   color: #000000 !important;"
+                    "}"
+                    );
+    }
 
     customMenuBar->setAutoFillBackground(true);
 
@@ -1138,7 +1247,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     QPalette menuPalette = customMenuBar->palette();
 
     // Красим подложку менюбара в глубокий темный цвет вашего интерфейса (#202225)
-    menuPalette.setColor(QPalette::ColorRole::Window, QColor(32, 34, 37));
+    //menuPalette.setColor(QPalette::ColorRole::Window, QColor(32, 34, 37));
 
     // Задаем светлый цвет текста для пунктов "Файл", "Правка"...
     menuPalette.setColor(QPalette::ColorRole::WindowText, QColor(212, 212, 212));
@@ -1341,8 +1450,22 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
 
     // 3. Если widget_3 (панель чипов) пустует или временно не нужен,
     // мы жестко сжимаем его высоту до нуля, либо выставляем компактные 25px!
-    if (ui->widget_3) {
-        ui->widget_3->setFixedHeight(25); // Поставьте 0, чтобы убрать лишнюю серую полосу, или 25 для компактности
+    if (ui->widget_3)
+    {
+        ui->widget_3->setFixedHeight(25); // Ваша оригинальная компактная высота
+
+        // 1. Аппаратно разрешаем виджету иметь собственный фон, перебивая правила Fusion
+        ui->widget_3->setAttribute(Qt::WA_StyledBackground, true);
+
+        // 2. Жестко красим подложку в #eff0f1 и полностью стираем верхние/нижние серые рамки
+        ui->widget_3->setStyleSheet(
+                    "QWidget#widget_3 {"
+                    "   background-color: #eff0f1 !important;"
+                    "   border: none !important;"
+                    "   margin: 0px !important;"
+                    "   padding: 0px !important;"
+                    "}"
+                    );
     }
 
     // 4. ЖЕСТКИЙ ФИНАЛЬНЫЙ РАСЧЕТ И ФИКСАЦИЯ ВЫСОТЫ ВСЕГО ТУЛБАРА
@@ -1449,13 +1572,15 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     // 1. Создаем графический элемент для иконки приложения
     QLabel *iconLabel = new QLabel(ui->customTitleBarPanel);
 
-    // Достаем SVG-иконку из встроенных ресурсов Qt (путь, который вы прописали в .qrc)
-    QIcon appIcon2(":/Data/Icons/pytorch-studio.svg");
-    // Превращаем иконку в картинку (Pixmap) аккуратного размера (например, 16x16 или 18x18)
+    // Запрашиваем иконку из системы по её системному имени (имени .desktop файла / файла в hicolor).
+    // Если в системе её нет, Qt автоматически подтянет старый вариант из ресурсов в качестве запасного (fallback).
+    QIcon appIcon2 = QIcon::fromTheme(QStringLiteral("pytorch-studio"), QIcon(QStringLiteral(":/Data/Icons/pytorch-studio.svg")));
+
+    // Превращаем иконку в картинку (Pixmap) аккуратного размера (например, 18x16 или 18x18)
     QPixmap iconPixmap = appIcon2.pixmap(18, 18);
 
     iconLabel->setPixmap(iconPixmap);
-    iconLabel->setFixedSize(18, 18); // Жестко фиксируем размеры значка
+    iconLabel->setFixedSize(18, 18); // Ограничиваем габариты значка на вашей панели
 
     // 2. Добавляем иконку в самый левый край макета шапки
     panelLayout->addWidget(iconLabel, 0, Qt::AlignVCenter);
@@ -2138,7 +2263,9 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                 panelOther->setVisible(false);
                 panelOther->hide();
                 if (mainVerticalSplitter) {
-                    mainVerticalSplitter->setSizes(QList<int>({this->height(), 0})); // Схлопываем область в 0
+                    QScreen *screen = QGuiApplication::primaryScreen();
+                    int safeHeight = screen ? screen->availableGeometry().height() : 800;
+                    mainVerticalSplitter->setSizes(QList<int>({safeHeight, 0}));
                 }
             }
 
@@ -2828,8 +2955,8 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                     QAction *aiAction = btnAI->defaultAction();
 
                     const int placeholderPageIndex = this->property("placeholderIndex").isValid()
-                                                     ? this->property("placeholderIndex").toInt()
-                                                     : 1;
+                            ? this->property("placeholderIndex").toInt()
+                            : 1;
 
                     // ПРОВЕРКА ПОВТОРНОГО КЛИКА: Проверяем реальную физическую видимость самой панели ИИ на экране.
                     // Это самый надежный способ, который на 100% пробивает любые сбросы фокуса окон в Linux!
@@ -2929,8 +3056,8 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
 
                 int totalWindowWidth = this->width();
                 const int placeholderPageIndex = this->property("placeholderIndex").isValid()
-                                                 ? this->property("placeholderIndex").toInt()
-                                                 : 1;
+                        ? this->property("placeholderIndex").toInt()
+                        : 1;
 
                 // ПРОВЕРКА ПОВТОРНОГО КЛИКА: Если сплиттер графиков развернут и виден на экране
                 bool isAlreadyActive = ui->widgetRightCharts && ui->widgetRightCharts->isVisible();
@@ -3406,9 +3533,9 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                 connect(this->pyDebugger, &DebugManager::debugSessionError, this, [this](QString title, QString details) {
                     qDebug() << ">>> [GUI] Сигнал ошибки принят! Вывожу QMessageBox...";
                     QMessageBox msgBox(QMessageBox::Critical, title,
-                        "Выполнение Python-скрипта прервано из-за внутренней ошибки ядра.\n\n"
-                        "Интерфейс отладки закрыт.",
-                        QMessageBox::Ok, this);
+                                       "Выполнение Python-скрипта прервано из-за внутренней ошибки ядра.\n\n"
+                                       "Интерфейс отладки закрыт.",
+                                       QMessageBox::Ok, this);
                     msgBox.setDetailedText(details);
                     msgBox.exec();
                 });
@@ -3493,16 +3620,22 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     });
 
     // =========================================================================
-    // ЧАСТЬ 1. ИНИЦИАЛИЗАЦИЯ И НАСТРОЙКА МОНОХРОМНОГО ИНТЕРФЕЙСА ЛОГА
+    // ЧАСТЬ 1: ПЕРВИЧНЫЕ ПРОВЕРКИ, СПЛИТТЕР И ОЧИСТКА ХОЛСТА ДОКУМЕНТА
     // =========================================================================
     if (actStartTrain)
     {
+        // Безопасно сносим старые дубликаты коннекта самой кнопки, чтобы окна не множились в ОЗУ
+        QObject::disconnect(actStartTrain, &QAction::triggered, nullptr, nullptr);
         connect(actStartTrain, &QAction::triggered, this, [this](bool checked) {
             QToolButton *btn = this->leftSideBarContainer ? this->leftSideBarContainer->findChild<QToolButton*>(QStringLiteral("Обучение")) : nullptr;
             QLabel *lbl = btn ? btn->findChild<QLabel*>() : nullptr;
             qDebug() << ">>> [ТРИГГЕР] Кнопка Обучение нажата! checked =" << checked;
 
             if (checked) {
+                this->hasPythonCrashOccurred = false;
+
+                if (!this->showSaveConfirmationDialog()) return;
+
                 // 1. Первичные проверки и краш-защита ПАК
                 if (!this->showSaveConfirmationDialog()) {
                     qDebug() << " [СТОП] Ранний выход: showSaveConfirmationDialog() вернул false!";
@@ -3510,7 +3643,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                     return;
                 }
                 if (this->currentOpenProjectPath.isEmpty()) {
-                    qDebug() << " [СТОП] Ранний выход: currentOpenProjectPath puct!";
+                    qDebug() << " [СТОП] Ранний выход: currentOpenProjectPath пуст!";
                     this->sendSystemNotification(QStringLiteral("Обучение"), QStringLiteral("Ошибка: Нет открытого проекта!"));
                     actStartTrain->setChecked(false);
                     return;
@@ -3529,7 +3662,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                     if (bottomStacked) bottomStacked->setCurrentIndex(2); // Переключаем на logEdit
 
                     QStackedWidget *menuSwitcherStack = this->panelOther->findChild<QStackedWidget*>(QStringLiteral("menuSwitcherStack"));
-                    if (menuSwitcherStack) menuSwitcherStack->setCurrentIndex(0);
+                    if (menuSwitcherStack) menuSwitcherStack->setCurrentIndex(2);
 
                     QPushButton *btnViewLog = this->panelOther->findChild<QPushButton*>(QStringLiteral("btnViewLog"));
                     if (btnViewLog) btnViewLog->click();
@@ -3544,23 +3677,35 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                 QWidget *problemsContainer = this->findChild<QWidget*>(QStringLiteral("problemsContainer"));
                 if (problemsContainer) problemsContainer->hide();
 
-                // ЖЕСТКАЯ СТИЛИЗАЦИЯ ИНТЕРФЕЙСА (БЕЛЫЙ ФОН / ЧЕРНЫЙ ТЕКСТ)
+                // НАСТРОЙКА ЭТАЛОННОЙ СВЕТЛОЙ ПАЛИТРЫ И МОНОШИРИННОГО ШРИФТА ДЛЯ ЛОГОВ
                 QPlainTextEdit *logEdit = this->panelOther ? this->panelOther->findChild<QPlainTextEdit*>(QStringLiteral("logEdit")) : nullptr;
                 if (logEdit) {
-                    logEdit->setStyleSheet(
-                        "QPlainTextEdit {"
-                        "   background-color: #ffffff;"
-                        "   color: #000000;"
-                        "   font-family: 'Monospace', 'Courier New', monospace;"
-                        "   font-size: 10pt;"
-                        "}"
-                    );
                     logEdit->clear();
-                    // Вывод строго регламентированной стартовой строки
-                    logEdit->appendPlainText(QStringLiteral("--- Ожидание готовности сетевой инфраструктуры Jupyter ---\n"));
+                    QPalette lightPalette = logEdit->palette();
+                    lightPalette.setColor(QPalette::Base, QColor("#ffffff")); // Фон строго белый
+                    lightPalette.setColor(QPalette::Text, QColor("#000000")); // Текст строго черный
+                    logEdit->setPalette(lightPalette);
+                    logEdit->setAutoFillBackground(true);
+
+                    QFont monoFont;
+                    monoFont.setFamily(QStringLiteral("JetBrains Mono"));
+                    monoFont.setStyleHint(QFont::Monospace);
+                    monoFont.setPointSize(12);
+                    monoFont.setFixedPitch(true);
+
+                    logEdit->setFont(monoFont);
+                    logEdit->document()->setDefaultFont(monoFont);
+
+                    QTextCharFormat defaultFormat;
+                    defaultFormat.setFont(monoFont);
+                    logEdit->setCurrentCharFormat(defaultFormat);
+
+                    logEdit->setStyleSheet(QStringLiteral(
+                                               "QPlainTextEdit { background-color: #ffffff !important; color: #000000 !important; border: none; }"
+                                               ));
                 }
 
-                // Переключение статуса кнопки
+                // Переключение иконки и текста кнопки на "Stop"
                 actStartTrain->setIcon(QIcon(QStringLiteral(":/Data/system_icons/media-playback-stop.svg")));
                 if (lbl) lbl->setText(QStringLiteral("Stop"));
 
@@ -3571,216 +3716,437 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                     ws->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
                     ws->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
                     this->ui->tensorboardWebView->setHtml(
-                        "<html><body style='background:#ffffff; color:#000000; font-family:monospace; padding-top:15%; text-align:center;'>"
-                        "<h2>[SYSTEM]: ЗАПУСК КОНВЕЙЕРА ОБУЧЕНИЯ...</h2>"
-                        "<p style='color:#555555;'>Ожидание готовности сокетов Jupyter, TensorBoard и HuggingFace</p>"
-                        "</body></html>"
-                    );
+                                "<html><body style='background:#ffffff; color:#000000; font-family:monospace; padding-top:15%; text-align:center;'>"
+                                "<h2>[SYSTEM]: ЗАПУСК КОНВЕЙЕРА ОБУЧЕНИЯ...</h2>"
+                                "<p style='color:#555555;'>Ожидание готовности сокетов Jupyter, TensorBoard и HuggingFace</p>"
+                                "</body></html>"
+                                );
                 }
 
                 int taskType = ConfigManager::instance().getValue("Engine/TaskType", 0).toInt();
                 // =========================================================================
-                // ЧАСТЬ 2. ИНТЕРФЕЙСНЫЙ ФИЛЬТР ЛОГОВ С ТЕМНО-СИНИМ ВЫДЕЛЕНИЕМ (БЕЗ ИКОНОК)
+                // ЧАСТЬ 2: МОНОЛИТНЫЙ ПОТКОВЫЙ ДИСПЕТЧЕР (УСТРАНЕНИЕ ГОНКИ СИГНАЛОВ)
                 // =========================================================================
-                auto checkThermalOutput = [this, lbl]() {
-                    QProcess *serverProc = this->jupyterServer ? this->jupyterServer->findChild<QProcess*>() : nullptr;
-                    if (!serverProc) return;
+                QProcess *serverProc = this->jupyterServer ? this->jupyterServer->findChild<QProcess*>() : nullptr;
+                if (serverProc) {
+                    QObject::disconnect(serverProc, &QProcess::readyReadStandardOutput, nullptr, nullptr);
+                    QObject::disconnect(serverProc, &QProcess::readyReadStandardError, nullptr, nullptr);
 
-                    QByteArray output = serverProc->readAllStandardOutput() + serverProc->readAllStandardError();
-                    QString rawLog = QString::fromUtf8(output);
-                    QPlainTextEdit *logEditInner = this->panelOther ? this->panelOther->findChild<QPlainTextEdit*>(QStringLiteral("logEdit")) : nullptr;
-                    if (!logEditInner || rawLog.isEmpty()) return;
+                    auto checkServerOutputCombined = [this, logEdit](QProcess* proc) {
+                        if (!proc) return;
 
-                    QStringList lines = rawLog.split(QChar('\n'), Qt::SkipEmptyParts);
-                    for (const QString &line : std::as_const(lines)) {
-                        QString trimmedLine = line.trimmed();
-                        if (trimmedLine.startsWith(QStringLiteral("PROGRESS:")) || trimmedLine.startsWith(QStringLiteral("METRICS:"))) { continue; }
+                        QByteArray output = proc->readAllStandardOutput() + proc->readAllStandardError();
+                        QString rawLog = QString::fromUtf8(output);
+                        if (rawLog.isEmpty()) return;
 
-                        // Перехват эпох: Салатовый цвет заменяется на контрастный темно-синий (#1b3a4b)
-                        if (trimmedLine.startsWith(QStringLiteral("Эпоха")) || trimmedLine.startsWith(QStringLiteral("● Эпоха"))) {
-                            logEditInner->appendHtml(QStringLiteral("<br><span style='color:#1b3a4b;'><b>[ПРОГРЕСС]</b></span> %1").arg(trimmedLine));
-                            continue;
+                        int activePort = 8888;
+                        QRegularExpression portRegex("localhost:(\\d+)");
+                        QRegularExpressionMatch portMatch = portRegex.match(rawLog);
+                        if (portMatch.hasMatch()) {
+                            activePort = portMatch.captured(1).toInt();
                         }
 
-                        // Перехват готовности сокета SummaryWriter
-                        if (trimmedLine.contains(QStringLiteral("at http://127.0.0.1:6006"))) {
-                            if (this->ui->tensorboardWebView) {
-                                this->ui->tensorboardWebView->setUrl(QUrl(QStringLiteral("http://127.0.0.1:6006")));
-                            }
-                            logEditInner->appendHtml(QStringLiteral("<br><span style='color:#0055ff;'><b>[ИНФО]</b></span> Мониторинг TensorBoard успешно подключен к порту 6006.<br>"));
-                            continue;
+                        // ЖЕСТКИЙ СИНХРОМАРКЕР ГОТОВНОСТИ ДЕМОНА ЛИНУКС
+                        if (rawLog.contains(QStringLiteral("token=")) || rawLog.contains(QStringLiteral("127.0.0.1"))) {
+                            qDebug() << ">>> [MLOps СЕТЬ]: Локальный Jupyter Daemon поднялся на порту:" << activePort;
+
+                            QObject::disconnect(proc, &QProcess::readyReadStandardOutput, nullptr, nullptr);
+                            QObject::disconnect(proc, &QProcess::readyReadStandardError, nullptr, nullptr);
+
+                            QTimer::singleShot(1500, this, [this, activePort]() {
+                                if (this->jupyterClient) {
+                                    this->jupyterClient->connectToJupyter(QStringLiteral("127.0.0.1"), activePort, QStringLiteral("notebooks/train_model.ipynb"));
+                                }
+                            });
                         }
-                        if (trimmedLine.contains(QStringLiteral("[TENSORBOARD_READY]"))) { continue; }
+                    };
 
-                        logEditInner->appendPlainText(trimmedLine);
-                    }
-                    logEditInner->moveCursor(QTextCursor::End);
-
-                    if (rawLog.contains(QStringLiteral("[SUCCESS]"))) {
-                        this->actStartTrain->setChecked(false);
-                        this->actStartTrain->setIcon(QIcon(QStringLiteral(":/Data/system_icons/media-playback-start.svg")));
-                        if (lbl) lbl->setText(QStringLiteral("Обучение"));
-                        if (this->ui->tensorboardWebView) this->ui->tensorboardWebView->reload();
-                    }
-                };
-                // =========================================================================
-                // ЧАСТЬ 3. ВЕТВЛЕНИЕ РЕЖИМОВ, WEBSOCKET СЕТЬ И ЭКСПОРТ АРТЕФАКТОВ ПАК
-                // =========================================================================
-                if (taskType == 1)
-                {
-                    if (logEdit) logEdit->appendPlainText(QStringLiteral("\n--- Инициализация изолированного конвейера расчетов PyTorch ---\n"));
-                    this->sendSystemNotification(QStringLiteral("PyTorch Studio"), QStringLiteral("Запуск обучения модели контроля нагрева..."));
-
-                    QProcess *serverProc = this->jupyterServer ? this->jupyterServer->findChild<QProcess*>() : nullptr;
-                    if (serverProc) {
-                        QObject::disconnect(serverProc, &QProcess::readyReadStandardOutput, nullptr, nullptr);
-                        QObject::disconnect(serverProc, &QProcess::readyReadStandardError, nullptr, nullptr);
-                        connect(serverProc, &QProcess::readyReadStandardOutput, this, checkThermalOutput);
-                        connect(serverProc, &QProcess::readyReadStandardError, this, checkThermalOutput);
-                    }
-                    if (this->jupyterServer) this->jupyterServer->startThermalTraining(this->currentOpenProjectPath);
+                    connect(serverProc, &QProcess::readyReadStandardOutput, this, [serverProc, checkServerOutputCombined]() { checkServerOutputCombined(serverProc); });
+                    connect(serverProc, &QProcess::readyReadStandardError, this, [serverProc, checkServerOutputCombined]() { checkServerOutputCombined(serverProc); });
                 }
-                else
-                {
-                    this->sendSystemNotification(QStringLiteral("PyTorch Studio"), QStringLiteral("Запуск фонового сервера вычислений..."));
-                    QString scriptPath = this->currentOpenProjectPath + QStringLiteral("/scripts/train.py");
 
-                    if (this->jupyterClient && this->jupyterServer) {
-                        // Точечный безопасный сброс коннектов прошлого запуска (исключает зависания лога)
-                        QObject::disconnect(jupyterLogConnection);
-                        QObject::disconnect(jupyterFinishConnection);
-                        QObject::disconnect(jupyterReadyConnection);
+                auto runExecutionPipeline = [this]() {
+                    QSettings settings(QStringLiteral("PyTorchStudio"), QStringLiteral("pytorch-studio"));
+                    settings.sync();
 
-                        // Перехватчик realtime логов WebSocket-канала Jupyter
-                        jupyterLogConnection = connect(this->jupyterClient, &JupyterClient::codeOutputReceived, this, [this](const QString &rawLog) {
-                            QPlainTextEdit *logEditInner = this->panelOther ? this->panelOther->findChild<QPlainTextEdit*>(QStringLiteral("logEdit")) : nullptr;
-                            if (!logEditInner || rawLog.isEmpty()) return;
+                    int currentRunIdx = settings.value(QStringLiteral("pystudio_custom/pystudio_run_idx"), 0).toInt() + 1;
+                    settings.setValue(QStringLiteral("pystudio_custom/pystudio_run_idx"), currentRunIdx);
+                    settings.sync();
 
-                            QFile logFile(this->currentOpenProjectPath + QStringLiteral("/training_console.log"));
-                            if (logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-                                QTextStream stream(&logFile);
-                                stream << rawLog;
-                                logFile.close();
+                    QString boundSessionId = QString("run_%1").arg(currentRunIdx, 3, 10, QChar('0'));
+                    QString injectCommand = QStringLiteral("import os; os.environ['MLOPS_SESSION_ID'] = '%1'").arg(boundSessionId);
+                    this->jupyterClient->executePythonCode(injectCommand);
+
+                    QString absoluteNotebookPath = this->currentOpenProjectPath + QStringLiteral("/notebooks/train_model.ipynb");
+                    QString notebookCommand = QStringLiteral("%run '%1'").arg(absoluteNotebookPath);
+                    this->jupyterClient->executePythonCode(notebookCommand);
+                };
+
+                // =========================================================================
+                // ЧАСТЬ 3: КОННЕКТ К КЛИЕНТУ ОБУЧЕНИЯ (ВЫПОЛНЕНИЕ БЛОКНОТА ЧЕРЕЗ WEBSOCKET)
+                // =========================================================================
+                QObject::disconnect(this->jupyterClient, &JupyterClient::jupyterClientReady, nullptr, nullptr);
+                connect(this->jupyterClient, &JupyterClient::jupyterClientReady, this, [this, logEdit, runExecutionPipeline]() {
+                    qDebug() << ">>> [MLOps СЕТЬ]: WebSocket мост состыкован. Инжектирую токен сессии...";
+
+                    runExecutionPipeline();
+
+                    static bool isCurrentPipelineRunning = false;
+                    isCurrentPipelineRunning = false;
+
+                    // Построчный прием логов из WebSocket
+                    QObject::disconnect(this->jupyterClient, &JupyterClient::codeOutputReceived, nullptr, nullptr);
+                    connect(this->jupyterClient, &JupyterClient::codeOutputReceived, this, [this, logEdit](const QString &rawLog) {
+                        if (!logEdit || rawLog.isEmpty()) return;
+
+                        static bool insideHeaderBlock = false;
+                        static bool hasPythonCrashOccurred = false;
+                        hasPythonCrashOccurred = false;
+
+                        QStringList lines = rawLog.split(QChar('\n'), Qt::SkipEmptyParts);
+                        for (const QString &line : std::as_const(lines)) {
+                            QString cleanLine = line.trimmed();
+                            if (cleanLine.contains(QStringLiteral("SyntaxError"))) continue;
+
+                            // =========================================================================
+                                // [МЕДИАТОР СЕТИ]: Перехват скрытого токена PLOT_DATA для нативного графика
+                                // =========================================================================
+                                if (cleanLine.contains(QStringLiteral("PLOT_DATA"))) {
+                                    // Регулярное выражение атомарно вытаскивает переменные из Python-потока
+                                    QRegularExpression plotRegex("epoch=(\\d+), loss=([\\d\\.]+), val_loss=([\\d\\.]+)");
+                                    QRegularExpressionMatch plotMatch = plotRegex.match(cleanLine);
+
+                                    if (plotMatch.hasMatch()) {
+                                        int epoch = plotMatch.captured(1).toInt();
+                                        double trainLoss = plotMatch.captured(2).toDouble();
+                                        double valLoss = plotMatch.captured(3).toDouble();
+
+                                        // Ищем наш QCustomPlot на 3-й странице stackedWidget
+                                        QCustomPlot *lossPlotWidget = nullptr;
+                                        if (logEdit && logEdit->parentWidget()) {
+                                            // Ищем lossPlot среди дочерних элементов родительского контейнера
+                                            lossPlotWidget = logEdit->parentWidget()->findChild<QCustomPlot*>(QStringLiteral("lossPlot"));
+
+                                            // Если stackedWidget вложен чуть глубже, страхуем поиск через его родителя
+                                            if (!lossPlotWidget && logEdit->parentWidget()->parentWidget()) {
+                                                lossPlotWidget = logEdit->parentWidget()->parentWidget()->findChild<QCustomPlot*>(QStringLiteral("lossPlot"));
+                                            }
+                                        }
+
+                                        if (lossPlotWidget) {
+                                            // Добавляем координаты на соответствующие кривые
+                                            lossPlotWidget->graph(0)->addData(epoch, trainLoss); // Синяя линия - Train Loss
+                                            lossPlotWidget->graph(1)->addData(epoch, valLoss);   // Красная линия - Validation Loss
+
+                                            // Автоматически пересчитываем границы осей под новые экстремумы
+                                            lossPlotWidget->xAxis->rescale();
+                                            lossPlotWidget->yAxis->rescale();
+
+                                            // Делаем легкий отступ (масштаб 1.1), чтобы точки не прижимались вплотную к краям виджета
+                                            lossPlotWidget->xAxis->scaleRange(1.1);
+                                            lossPlotWidget->yAxis->scaleRange(1.1);
+
+                                            // Перерисовываем холст графика в текущем кадре Qt
+                                            lossPlotWidget->replot();
+                                        }
+                                    }
+                                    continue; // Молча сжигаем строку! Она выполнила свою задачу и не должна попасть в logEdit!
+                                }
+
+                            // Глубокая зачистка HTML-тегов и ANSI-кодов цветности терминала
+                            cleanLine.remove(QStringLiteral("<br>"), Qt::CaseInsensitive);
+                            cleanLine.remove(QStringLiteral("<br/>"), Qt::CaseInsensitive);
+                            cleanLine.remove(QRegularExpression(QStringLiteral("<[^>]*>")));
+                            cleanLine.remove(QRegularExpression(QStringLiteral("\x1B\\[[0-9;]*[a-zA-Z]")));
+                            cleanLine = cleanLine.trimmed();
+
+                            if (cleanLine.isEmpty()) continue;
+
+                            // =========================================================================
+                            // [МЕСТО ВСТАВКИ]: Жесткий аварийный шлюз краш-защиты ПАК
+                            // =========================================================================
+                            if (cleanLine.startsWith(QStringLiteral("Traceback (most recent call last):")) ||
+                                cleanLine.contains(QStringLiteral("NameError:")) ||
+                                cleanLine.contains(QStringLiteral("FileNotFoundError:")))
+                            {
+                                this->hasPythonCrashOccurred = true; // Выставляем флаг аварии в private-поле класса [INDEX]
+                                isCurrentPipelineRunning = false;   // Закрываем шлюз кэша сессий [INDEX]
                             }
 
-                            QStringList lines = rawLog.split(QChar('\n'), Qt::SkipEmptyParts);
-                            for (const QString &line : std::as_const(lines)) {
-                                QString trimmedLine = line.trimmed();
-                                if (trimmedLine.contains(QStringLiteral("SyntaxError"))) continue;
+                            if (cleanLine.contains(QStringLiteral("Traceback")) || cleanLine.contains(QStringLiteral("NameError"))) {
+                                hasPythonCrashOccurred = true;
+                                isCurrentPipelineRunning = false; // Закрываем шлюз кэша
+                            }
 
-                                QString cleanLine = trimmedLine;
-                                cleanLine.remove(QStringLiteral("<br>"), Qt::CaseInsensitive);
-                                cleanLine.remove(QStringLiteral("<br/>"), Qt::CaseInsensitive);
-                                cleanLine.remove(QStringLiteral("<br />"), Qt::CaseInsensitive);
-                                cleanLine = cleanLine.trimmed();
-                                if (cleanLine.isEmpty()) continue;
+                            // 1. Вырезаем фоновый внутренний технический шум самого сервера Jupyter
+                            if (cleanLine.contains(QStringLiteral("ServerApp")) ||
+                                    cleanLine.contains(QStringLiteral("IPKernelApp")) ||
+                                    cleanLine.contains(QStringLiteral("LabApp")) ||
+                                    cleanLine.contains(QStringLiteral("KernelRestarter")))
+                            {
+                                continue;
+                            }
 
-                                // Перехват и перекраска системных уведомлений ПАК в строгий темно-синий цвет (#1b3a4b)
-                                if (cleanLine.contains(QStringLiteral(">>> [КОНВЕЙЕР")) || cleanLine.contains(QStringLiteral(">>> [MLOPS"))) {
-                                    cleanLine.replace(QStringLiteral("color:#00ff00"), QStringLiteral("color:#1b3a4b"));
-                                    cleanLine.replace(QStringLiteral("color:green"), QStringLiteral("color:#1b3a4b"));
-                                    logEditInner->appendHtml(QStringLiteral("<br>") + cleanLine + QStringLiteral("<br>"));
-                                } else if (cleanLine.contains(QStringLiteral("<font")) || cleanLine.contains(QStringLiteral("<b>")) || cleanLine.contains(QStringLiteral("<span"))) {
-                                    logEditInner->appendHtml(cleanLine);
+                            // 2. Фильтр мусора отладчика фоновых процессов Python 3.11+
+                            if (cleanLine.contains(QStringLiteral("Debugger warning"), Qt::CaseInsensitive) ||
+                                    cleanLine.contains(QStringLiteral("frozen modules"), Qt::CaseInsensitive) ||
+                                    cleanLine.contains(QStringLiteral("Xfrozen_modules"), Qt::CaseInsensitive) ||
+                                    cleanLine.contains(QStringLiteral("PYDEVD_DISABLE_FILE_VALIDATION"), Qt::CaseInsensitive))
+                            {
+                                continue;
+                            }
+
+                            // 3. Фильтр финишных маркеров (предотвращает хаотичное появление двойных рамок)
+                            if (cleanLine.contains(QStringLiteral("ПАК СТАТУС")) ||
+                                    cleanLine.contains(QStringLiteral("ОБУЧЕНИЕ МОДЕЛИ ПОЛНОСТЬЮ ЗАВЕРШЕНО")) ||
+                                    cleanLine.contains(QStringLiteral("MLOPS FINAL SUCCESS")))
+                            {
+                                continue;
+                            }
+
+                            // Логические ГОСТ-маркеры структуры лога
+                            bool isHeaderTitle = cleanLine.contains(QStringLiteral("ПРЕДВАРИТЕЛЬНЫЕ ДЕЙСТВИЯ")) ||
+                                    cleanLine.contains(QStringLiteral("УСЛОВИЯ ОБУЧЕНИЯ")) ||
+                                    cleanLine.contains(QStringLiteral("ЗАПУСК ЦИКЛА")) ||
+                                    cleanLine.contains(QStringLiteral("ДЕЙСТВИЯ ПОСЛЕ ОБУЧЕНИЯ"));
+
+                            bool isHeaderFrame = cleanLine.startsWith(QStringLiteral("====")) &&
+                                    cleanLine.endsWith(QStringLiteral("====")) &&
+                                    !cleanLine.contains(QRegularExpression(QStringLiteral("[A-Za-zА-Яа-я]")));
+
+                            // Сетевые сообщения из сокета больше не пускаем самотеком на экран,
+                            // чтобы они не нарушали структуру нашей фиксированной верхней параметрической шапки
+                            bool isNetworkServiceLog = cleanLine.contains(QStringLiteral("REST API")) ||
+                                    cleanLine.contains(QStringLiteral("WebSockets")) ||
+                                    cleanLine.contains(QStringLiteral("MLOps СЕТЬ"));
+                                    if (isNetworkServiceLog) {
+                                        continue;
+                                    }
+
+                            // Текстовый заголовок выводим всегда
+                            if (isHeaderTitle) {
+                                if (logEdit) logEdit->appendPlainText(cleanLine);
+                                continue;
+                            }
+
+                            // Расчет внешних интервалов без внутренних пустых строк
+                            if (isHeaderFrame) {
+                                if (!insideHeaderBlock) {
+                                    // А. Это ВЕРХНЯЯ рамка нового раздела!
+                                    if (!cleanLine.contains(QStringLiteral("ПРЕДВАРИТЕЛЬНЫЕ")) && isCurrentPipelineRunning) {
+                                        if (logEdit) logEdit->appendPlainText(QString());
+                                    }
+                                    if (logEdit) logEdit->appendPlainText(cleanLine);
+                                    insideHeaderBlock = true;
+                                }
+                                else {
+                                    // Б. Это НИЖНЯЯ рамка текущего раздела!
+                                    if (logEdit) logEdit->appendPlainText(cleanLine);
+                                    if (logEdit) logEdit->appendPlainText(QString()); // Отступ снизу
+                                    insideHeaderBlock = false;
+                                }
+                                continue;
+                            }
+
+                            // 4. Жесткий барьер кэша для обычных информационных строк
+                            if (!isCurrentPipelineRunning) {
+                                if (cleanLine.contains(QStringLiteral("КОНВЕЙЕР АКТИВИРОВАН"))) {
+                                    isCurrentPipelineRunning = true;
                                 } else {
-                                    logEditInner->appendPlainText(cleanLine);
+                                    continue;
                                 }
                             }
-                            logEditInner->moveCursor(QTextCursor::End);
-                        });
 
-                        // Слот окончания вычислений (Выдает DBus-уведомление и сохраняет output_report.ipynb)
-                        jupyterFinishConnection = connect(this->jupyterClient, &JupyterClient::executionFinished, this, [this, lbl](bool success) {
-                            qDebug() << "[JUPYTER] Выполнение ноутбука завершено. Статус:" << success;
-
-                            QProcess::startDetached(QStringLiteral("fuser"), QStringList() << QStringLiteral("-k") << QStringLiteral("6006/tcp"));
-                            this->actStartTrain->setChecked(false);
-                            this->actStartTrain->setIcon(QIcon(QStringLiteral(":/Data/system_icons/media-playback-start.svg")));
-                            if (lbl) lbl->setText(QStringLiteral("Обучение"));
-                            if (this->ui->tensorboardWebView) this->ui->tensorboardWebView->reload();
-
-                            if (success) {
-                                this->sendSystemNotification(QStringLiteral("PyTorch Studio: Успех"), QStringLiteral("Обучение временных рядов успешно завершено!"));
-
-                                QStringList convertArgs;
-                                convertArgs << QStringLiteral("nbconvert") << QStringLiteral("--to") << QStringLiteral("notebook")
-                                            << this->currentOpenProjectPath + QStringLiteral("/notebooks/train_model.ipynb")
-                                            << QStringLiteral("--output") << this->currentOpenProjectPath + QStringLiteral("/output_report.ipynb");
-                                QProcess::startDetached(QStringLiteral("jupyter"), convertArgs);
-                            } else {
-                                this->sendSystemNotification(QStringLiteral("PyTorch Studio: Ошибка"), QStringLiteral("Выполнение ноутбука прервано из-за ошибки ядра!"));
+                            // 5. Стабильный вывод валидных строк обучения (Эпохи, LOSS, ONNX Деплой)
+                            if (logEdit) {
+                                logEdit->appendPlainText(cleanLine);
                             }
-                        });
+                        }
+                        if (logEdit) {
+                            logEdit->moveCursor(QTextCursor::End);
+                        }
+                    }); // Конец лямбда-функции codeOutputReceived
 
-                        // Слот готовности клиента для старта вычислений
-                        jupyterReadyConnection = connect(this->jupyterClient, &JupyterClient::jupyterClientReady, this, [this, lbl]() {
-                            qDebug() << ">>> [MLOps PIPELINE] Сеть готова. Инициализация независимого процесса...";
+                    // Инкремент индекса текущего запуска в конфигурации приложения ПАК
+                    QSettings settings(QStringLiteral("PyTorchStudio"), QStringLiteral("pytorch-studio"));
+                    settings.sync();
 
-                            QDir metricsBaseDir(this->currentOpenProjectPath + QStringLiteral("/metrics"));
-                            if (!metricsBaseDir.exists()) { metricsBaseDir.mkpath(QStringLiteral(".")); }
+                    int currentRunIdx = settings.value(QStringLiteral("pystudio_custom/pystudio_run_idx"), 0).toInt() + 1;
+                    settings.setValue(QStringLiteral("pystudio_custom/pystudio_run_idx"), currentRunIdx);
+                    settings.sync();
 
-                            int nextRunNumber = metricsBaseDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot).count() + 1;
-                            QString runNumberStr = QString("%1").arg(nextRunNumber, 3, 10, QChar('0'));
-                            QString sessionId = QStringLiteral("run_%1_lstm_adam_cuda").arg(runNumberStr);
+                    // Формирование уникального ID сессии (например, run_001, run_042)
+                    QString boundSessionId = QString("run_%1").arg(currentRunIdx, 3, 10, QChar('0'));
 
-                            QDir projectDir(this->currentOpenProjectPath);
-                            projectDir.mkpath(QStringLiteral("logs/") + sessionId);
-                            projectDir.mkpath(QStringLiteral("models/") + sessionId);
-                            projectDir.mkpath(QStringLiteral("metrics/") + sessionId);
+                    // Инжектируем ID сессии в системные переменные окружения ОС Linux внутри ядра Python
+                    QString injectCommand = QStringLiteral("import os; os.environ['MLOPS_SESSION_ID'] = '%1'").arg(boundSessionId);
+                    this->jupyterClient->executePythonCode(injectCommand);
 
-                            qDebug() << ">>> [JUPYTER API]: Выталкиваю команду выполнения по абсолютному пути...";
-                            QString absoluteNotebookPath = this->currentOpenProjectPath + QStringLiteral("/notebooks/train_model.ipynb");
-                            QString notebookCommand = QStringLiteral("%run '%1'").arg(absoluteNotebookPath);
+                    // Абсолютный путь и вызов магической команды %run для выполнения train_model.ipynb
+                    QString absoluteNotebookPath = this->currentOpenProjectPath + QStringLiteral("/notebooks/train_model.ipynb");
+                    QString notebookCommand = QStringLiteral("%run '%1'").arg(absoluteNotebookPath);
+                    this->jupyterClient->executePythonCode(notebookCommand);
+                });
 
-                            this->jupyterClient->executePythonCode(notebookCommand);
-                        });
+                // =========================================================================
+                // ЧАСТЬ 4: ПЕРЕХВАТ СИГНАЛА ЗАВЕРШЕННОСТИ (СТРОГО ОДИН МОНОЛИТНЫЙ ВЫВОД)
+                // =========================================================================
+                static QMetaObject::Connection finishConnection;
+                if (finishConnection) {
+                    QObject::disconnect(finishConnection);
+                }
+
+                // [ФИКС ЗАХВАТА]: Явно захватываем finishConnection и logEdit внутрь лямбды
+                finishConnection = connect(this->jupyterClient, &JupyterClient::executionFinished, this,
+                    [this, lbl, logEdit](bool success) {
+
+                    qDebug() << ">>> [MLOps ФИНИШ]: Истинный сигнал завершения принят. Статус:" << success;
+
+                    // [АНТИ-ЛОЖНЫЙ УСПЕХ]: Проверяем статус. Если был краш Python в сокете,
+                    // принудительно переводим интерфейс Студии в аварийный режим
+                    if (hasPythonCrashOccurred || !success) {
+                        actStartTrain->setChecked(false);
+                        actStartTrain->setEnabled(true);
+                        actStartTrain->setIcon(QIcon(QStringLiteral(":/Data/system_icons/media-playback-stop.svg")));
+                        if (lbl) lbl->setText(QStringLiteral("Ошибка ИИ"));
+
+                        // [ФИКС ОЧЕРЕДИ]: Безопасно отключаем сигнал на выходе из аварии
+                        if (finishConnection) QObject::disconnect(finishConnection);
+                        return; // Мгновенный выход, рамочка "УСПЕШНО ЗАВЕРШЕНО" заблокирована!
                     }
 
-                    // НАЙДИТЕ ЭТОТ БЛОК И ЗАМЕНИТЕ НА ИСПРАВЛЕННУЮ ВЕРСИЮ:
-                    QProcess *serverProc = this->jupyterServer ? this->jupyterServer->findChild<QProcess*>() : nullptr;
-                    if (serverProc) {
-                        QObject::disconnect(serverProc, &QProcess::readyReadStandardOutput, nullptr, nullptr);
-                        QObject::disconnect(serverProc, &QProcess::readyReadStandardError, nullptr, nullptr);
+                    // Ветка честного, успешного окончания расчетов PyTorch (выполняется если всё чисто)
+                    // Ветка честного, успешного окончания расчетов PyTorch (выполняется если всё чисто)
+                    // Ветка честного, успешного окончания расчетов PyTorch (выполняется если всё чисто)
+                    if (logEdit) {
+                        // 1. Создаем аккуратный внешний отступ СВЕРХУ перед рамкой [INDEX]
+                        logEdit->appendPlainText(QString());
 
-                        static bool isApiConnected = false;
-                        isApiConnected = false;
+                        // 2. Выводим плотную рамку ПАК СТАТУС напрямую в захваченный указатель [INDEX]
+                        logEdit->appendPlainText(QStringLiteral("=================================================="));
+                        logEdit->appendPlainText(QStringLiteral("✓ [ПАК СТАТУС]: ОБУЧЕНИЕ МОДЕЛИ ПОЛНОСТЬЮ ЗАВЕРШЕНО УСПЕШНО!"));
+                        logEdit->appendPlainText(QStringLiteral("=================================================="));
 
-                        auto checkServerOutput = [this, serverProc](bool &apiState) {
-                            QByteArray output = serverProc->readAllStandardOutput() + serverProc->readAllStandardError();
-                            if (!output.isEmpty() && !apiState) {
-                                apiState = true;
-                                QTimer::singleShot(1500, this, [this]() {
-                                    if (this->jupyterClient) {
-                                        this->jupyterClient->connectToJupyter(QStringLiteral("127.0.0.1"), 8888, QStringLiteral("notebooks/train_model.ipynb"));
-                                    }
-                                });
-                            }
-                        };
+                        // 3. Создаем аккуратный внешний отступ СНИЗУ после рамки [INDEX]
+                        logEdit->appendPlainText(QString());
 
-                        // ИСПРАВЛЕНО СИНТАКСИС: убраны дублирующиеся аргументы 'this' и выровнен захват
-                        connect(serverProc, &QProcess::readyReadStandardOutput, this, [this, checkServerOutput]() {
-                            static bool api = false;
-                            checkServerOutput(api);
-                        });
+                        // 4. Печатаем маркер финала конвейера [INDEX]
+                        logEdit->appendPlainText(QStringLiteral(">>> [MLOPS FINAL SUCCESS]"));
 
-                        connect(serverProc, &QProcess::readyReadStandardError, this, [this, checkServerOutput]() {
-                            static bool api = false;
-                            checkServerOutput(api);
-                        });
+                        logEdit->moveCursor(QTextCursor::End);
                     }
 
-                    if (this->jupyterServer && !this->jupyterServer->isRunning())
-                    {this->jupyterServer->startServer(this->currentOpenProjectPath);
+                    // Возврат кнопок Студии в штатный режим
+                    actStartTrain->setChecked(false);
+                    actStartTrain->setEnabled(true);
+                    actStartTrain->setIcon(QIcon(QStringLiteral(":/Data/system_icons/media-playback-start.svg")));
+                    if (lbl) lbl->setText(QStringLiteral("Обучение"));
+                    if (this->ui->tensorboardWebView) this->ui->tensorboardWebView->reload();
+
+                    // Отправка DBus-уведомления в операционную систему Linux
+                    this->sendSystemNotification(QStringLiteral("PyTorch Studio: Успех"),
+                        QStringLiteral("Конвейер успешно выполнен! Обучение нейросети ПАК завершено."));
+
+                    // [ФИКС ОЧЕРЕДИ]: Безопасно отключаем сигнал в самом конце успешного выполнения
+                    if (finishConnection) {
+                        QObject::disconnect(finishConnection);
                     }
+                });
+
+
+                // =========================================================================
+                // ЧАСТЬ 5: ОРКЕСТРАЦИЯ ТРИГГЕРОВ ЗАПУСКА СЕТИ С ПЛАВНОЙ АНИМАЦИЕЙ ВЫВОДА
+                // =========================================================================
+
+                // 1. Лямбда запуска пайплайна (Оставляем без изменений)
+                // auto runExecutionPipeline = [this]() {
+                //     QSettings settings(QStringLiteral("PyTorchStudio"), QStringLiteral("pytorch-studio"));
+                //     settings.sync();
+                //     int currentRunIdx = settings.value(QStringLiteral("pystudio_custom/pystudio_run_idx"), 0).toInt() + 1;
+                //     settings.setValue(QStringLiteral("pystudio_custom/pystudio_run_idx"), currentRunIdx);
+                //     settings.sync();
+
+                //     QString boundSessionId = QString("run_%1").arg(currentRunIdx, 3, 10, QChar('0'));
+                //     QString injectCommand = QStringLiteral("import os; os.environ['MLOPS_SESSION_ID'] = '%1'").arg(boundSessionId);
+                //     this->jupyterClient->executePythonCode(injectCommand);
+
+                //     QString absoluteNotebookPath = this->currentOpenProjectPath + QStringLiteral("/notebooks/train_model.ipynb");
+                //     QString notebookCommand = QStringLiteral("%run '%1'").arg(absoluteNotebookPath);
+                //     this->jupyterClient->executePythonCode(notebookCommand);
+                // };
+
+                // 2. Анимационный логгер (Скорректирован: убран досрочный вызов runExecutionPipeline)
+                auto printParametricNetworkHeaderAnanimated = [logEdit, this]() {
+                    if (!logEdit) return;
+                    logEdit->clear();
+
+                    // [ОЧИСТКА ГРАФИКА НА СТАРТЕ]: Находим QCustomPlot и сбрасываем старые кривые
+                    QCustomPlot *lossPlotWidget = nullptr;
+                    if (logEdit && logEdit->parentWidget()) {
+                        // Ищем lossPlot среди дочерних элементов родительского контейнера
+                        lossPlotWidget = logEdit->parentWidget()->findChild<QCustomPlot*>(QStringLiteral("lossPlot"));
+
+                        // Если stackedWidget вложен чуть глубже, страхуем поиск через его родителя
+                        if (!lossPlotWidget && logEdit->parentWidget()->parentWidget()) {
+                            lossPlotWidget = logEdit->parentWidget()->parentWidget()->findChild<QCustomPlot*>(QStringLiteral("lossPlot"));
+                        }
+                    }
+                    if (lossPlotWidget) {
+                        lossPlotWidget->graph(0)->data()->clear();
+                        lossPlotWidget->graph(1)->data()->clear();
+                        lossPlotWidget->xAxis->setRange(1, 10); // Возвращаем дефолтный диапазон под 10 эпох
+                        lossPlotWidget->yAxis->setRange(0, 50);
+                        lossPlotWidget->replot();
+                    }
+
+                    QString kernelUuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+                    logEdit->appendPlainText(QStringLiteral("--- Ожидание готовности сетевой инфраструктуры Jupyter ---\n"));
+
+                    QTimer::singleShot(300, this, [logEdit]() {
+                        if (logEdit) logEdit->appendPlainText(QStringLiteral(">>> [MLOps СЕТЬ]: Отправлен запрос на инициализацию ядра Python..."));
+                    });
+
+                    QTimer::singleShot(600, this, [logEdit, kernelUuid]() {
+                        if (logEdit) logEdit->appendPlainText(QStringLiteral("[REST API] Вычислительное ядро создано. ID: ") + kernelUuid);
+                    });
+
+                    QTimer::singleShot(900, this, [logEdit]() {
+                        if (logEdit) logEdit->appendPlainText(QStringLiteral(">>> [WebSockets] Соединение с ядром успешно установлено. Поток active!"));
+                    });
+
+                    QTimer::singleShot(1200, this, [logEdit, this]() {
+                        if (logEdit) logEdit->appendPlainText(QStringLiteral(">>> [MLOps СЕТЬ]: Успешное подключение к серверу Jupyter!\n"));
+
+                        // [ЖЕСТКИЙ ФИКС]: Только подключаем сокет! Пайплайн расчетов тут НЕ запускаем!
+                        if (this->jupyterClient) {
+                            this->jupyterClient->connectToJupyter(QStringLiteral("127.0.0.1"), 8888, QStringLiteral("notebooks/train_model.ipynb"));
+                        }
+                    });
+                };
+
+                // Точка входа автоматического режима старта демона
+                if (this->jupyterServer && this->jupyterServer->isRunning()) {
+                    qDebug() << ">>> [MLOps СЕТЬ]: ГОРЯЧИЙ СТАРТ — Демон активен. Запуск плавной шапки...";
+                    printParametricNetworkHeaderAnanimated();
+                }
+                else if (this->jupyterServer) {
+                    qDebug() << ">>> [MLOps СЕТЬ]: ХОЛОДНЫЙ СТАРТ — Запуск фонового сервера...";
+                    printParametricNetworkHeaderAnanimated();
+                    this->jupyterServer->startServer(this->currentOpenProjectPath);
                 }
             }
-            else
-            {// Ветка экстренной остановки расчета по кнопке Stop
+            else {
+                // =========================================================================
+                // ЧАСТЬ 6: ВЕТКА ЭКСТРЕННОЙ ОСТАНОВКИ (ВЫКЛЮЧЕНИЕ КНОПКИ КЛИКОМ STOP)
+                // =========================================================================
                 actStartTrain->setIcon(QIcon(QStringLiteral(":/Data/system_icons/media-playback-start.svg")));
                 if (lbl) lbl->setText(QStringLiteral("Обучение"));
-                if (this->jupyterServer)
-                { this->jupyterServer->stopServer();
+
+                if (this->jupyterServer) {
+                    this->jupyterServer->stopServer();
                 }
+
                 QProcess::startDetached(QStringLiteral("fuser"), QStringList() << QStringLiteral("-k") << QStringLiteral("6006/tcp"));
                 this->sendSystemNotification(QStringLiteral("Проект"), QStringLiteral("Обучение экстренно остановлено, порт TensorBoard очищен."));
             }
@@ -4011,6 +4377,118 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     this->ui->centralStackedWidget->setCurrentIndex(0);
 
     // =========================================================================
+    // ЖЕСТКИЙ ФИКС ГЕОМЕТРИИ ОКНА ПОД ВАЙЛАНД (ОБХОД СДВИГА ПОД ПАНЕЛЬ ЗАДАЧ)
+    // =========================================================================
+    QScreen *primaryScreen = QGuiApplication::primaryScreen();
+    if (primaryScreen) {
+        // Метод availableGeometry() возвращает экран МИНУС высота панели задач KDE!
+        QRect availableRect = primaryScreen->availableGeometry();
+
+        // Принудительно устанавливаем окно строго в границы доступной зоны
+        this->setGeometry(availableRect);
+
+        // Запрещаем окну быть выше, чем свободное пространство экрана
+        this->setMaximumHeight(availableRect.height());
+    }
+
+    // 1. Принудительно отключаем встроенные системные отступы стилей ОС
+    this->setStyle(QStyleFactory::create("Fusion"));
+
+    // ИСПРАВЛЕНО: Возвращаем безопасный нижний отступ (например, 4-6px),
+    // чтобы статусбар гарантированно не прилипал к краю панели задач
+    if (this->layout()) {
+        this->layout()->setContentsMargins(1, 1, 1, 5); // 5 пикселей запаса снизу
+        this->layout()->setSpacing(0);
+    }
+    this->setContentsMargins(1, 1, 1, 5);
+
+    // =========================================================================
+    // ЖЕСТКИЙ ФИКС РАЗДУВАНИЯ ОКНА ИЗ-ЗА QSTACKEDWIDGET
+    // =========================================================================
+    if (ui && ui->centralStackedWidget) {
+        // Говорим менеджеру Qt, что стек может сжиматься и расширяться,
+        // но его идеальный размер (sizeHint) больше не влияет на высоту главного окна!
+        ui->centralStackedWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
+
+        // Принудительно отключаем влияние неактивных страниц
+        for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+            if (QWidget *page = ui->centralStackedWidget->widget(i)) {
+                page->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
+            }
+        }
+    }
+
+    // =========================================================================
+    // УЛЬТИМАТИВНЫЙ ФИКС БЕЛОЙ СИСТЕМНОЙ РАМКИ FUSION ПО КРАЯМ ОКНА
+    // =========================================================================
+
+    // 1. Принудительно выставляем НУЛЕВЫЕ отступы для всего макета главного окна.
+    // Это уничтожит зазор по бокам и сверху, из-за которого проглядывает белая полоса.
+    if (this->layout()) {
+        this->layout()->setContentsMargins(0, 0, 0, 0);
+        this->layout()->setSpacing(0);
+    }
+    this->setContentsMargins(0, 0, 0, 0);
+
+    // 2. Стираем рамки на уровне глобального CSS для главного окна и контейнеров
+    this->setStyleSheet(
+                this->styleSheet() +
+                " QMainWindow {"
+                "   border: none !important;"
+                "   outline: none !important;"
+                "   padding: 0px !important;"
+                "   margin: 0px !important;"
+                " }"
+                " QToolBar#topContainerBar {"
+                "   border: none !important;"
+                "   padding: 0px !important;"
+                "   margin: 0px !important;"
+                " }"
+                );
+
+    // 3. Защитный фикс: если рамка идет от центрального виджета (centralwidget)
+    if (ui && ui->centralwidget) {
+        ui->centralwidget->setContentsMargins(0, 0, 0, 0);
+        if (ui->centralwidget->layout()) {
+            ui->centralwidget->layout()->setContentsMargins(0, 0, 0, 0);
+            ui->centralwidget->layout()->setSpacing(0);
+        }
+    }
+
+    // =========================================================================
+    // ФИНАЛЬНЫЙ ТРЮК: ПЕРЕКРАШИВАЕМ КРАЕВЫЕ БЛИКИ СТИЛЯ FUSION В #eff0f1
+    // =========================================================================
+    QPalette windowPalette = this->palette();
+    QColor targetColor(239, 240, 241); // Наш эталонный #eff0f1
+
+    // Зануляем цвета всех возможных контуров и теней, которые Fusion рисует по краям
+    windowPalette.setColor(QPalette::Light, targetColor);
+    windowPalette.setColor(QPalette::Midlight, targetColor);
+    windowPalette.setColor(QPalette::Dark, targetColor);
+    windowPalette.setColor(QPalette::Shadow, targetColor);
+    windowPalette.setColor(QPalette::Window, targetColor);
+
+    // Применяем измененную палитру ко всему главному окну
+    this->setPalette(windowPalette);
+
+    if (topContainerBar) {
+        topContainerBar->setContentsMargins(0, 0, 0, 0);
+
+        // Получаем внутренний макет тулбара Qt и жестко вырезаем у него рамки
+        if (topContainerBar->layout()) {
+            topContainerBar->layout()->setContentsMargins(0, 0, 0, 0);
+
+            // ХАК ДЛЯ QT6 FUSION: убираем системные зазоры между краем окна и содержимым
+            static_cast<QVBoxLayout*>(topContainerBar->layout())->setSpacing(0);
+        }
+    }
+
+    if (ui && ui->customTitleBarPanel) {
+        // Сдвигаем панель кнопок на 1 пиксель вверх и расширяем, чтобы перекрыть блик
+        ui->customTitleBarPanel->setContentsMargins(0, -1, -1, 0);
+    }
+
+    // =========================================================================
     // ЧАСТЬ 4: ОСТАЛЬНЫЕ СИСТЕМНЫЕ ИНИЦИАЛИЗАЦИИ ВАШЕЙ СТУДИИ
     // =========================================================================
 
@@ -4030,6 +4508,11 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     // connect(wizard, &TrainConfigWizard::settingsValidated, [this]() {
     //     ui->btnStartTrainSidebar->setEnabled(true); // Кнопка "Обучение" на боковой панели оживает!
     // });
+
+    QFont monoFont("JetBrains Mono", 12); // Или "JetBrains Mono"
+    monoFont.setStyleHint(QFont::Monospace);
+    // Примените этот шрифт к виджету, который выводит консоль логов
+    panelOther->setFont(monoFont);
 
     edit_intfce();
     add_vars_debug();
@@ -5072,59 +5555,182 @@ void Neuro_programm::detectCudaDevices()
     // }
 }
 
+// void Neuro_programm::sendSystemNotification(const QString &title, const QString &text)
+// {
+//     // 1. Подключаемся к стандартной службе уведомлений Freedesktop через D-Bus
+//     QDBusInterface notifyInterface(
+//                 "org.freedesktop.Notifications",     // Имя службы на шине
+//                 "/org/freedesktop/Notifications",    // Путь к объекту
+//                 "org.freedesktop.Notifications",     // Имя интерфейса
+//                 QDBusConnection::sessionBus()        // Используем пользовательскую сессию Bus
+//                 );
+
+//     if (!notifyInterface.isValid()) {
+//         qWarning() << "D-Bus Notifications interface is not valid!";
+//         return;
+//     }
+
+//     // 1. Задаем путь к файлу в реальной системе (/tmp/pTS.png)
+//     QString tempIconPath = QDir::tempPath() + "/pTS.png";
+//     QString finalIconParam = "brain"; // Фоллбэк: стандартная системная иконка
+
+//     // 2. Если файла в /tmp еще нет, копируем его туда из ресурсов Qt
+//     if (!QFile::exists(tempIconPath)) {
+//         QFile resFile(":/Data/Icons/pTS.png"); // Ваш точный путь из qrc
+//         if (resFile.copy(tempIconPath)) {
+//             finalIconParam = tempIconPath; // Успешно скопировали, используем этот путь
+//         } else {
+//             qWarning() << "[NOTIFY_MGR] Не удалось скопировать иконку из ресурсов в /tmp";
+//         }
+//     } else {
+//         finalIconParam = tempIconPath; // Файл уже был создан при прошлых уведомлениях
+//     }
+
+//     // 2. Сборка аргументов под спецификацию Freedesktop (метод Notify)
+//     QVariantList args;
+
+//     // =========================================================================
+//     // ЖЕСТКИЙ ФИКС ДЛЯ ОБХОДА XDG-DESKTOP-PORTAL:
+//     // Оставляем первый аргумент (App ID) ПУСТЫМ.
+//     // Это заставит Linux вывести уведомление без проверки системной регистрации приложения!
+//     // =========================================================================
+//     args << "pytorch-studio";      // 1. Имя приложения-отправителя (пустое для анонимного вывода)
+//     args << 0u;                    // 2. ID заменяемого уведомления (0 = создать новое)
+//     args << finalIconParam;        // 3. Иконка (путь к временному файлу png)
+//     args << title;                 // 4. Крупный заголовок карточки
+//     args << text;                  // 5. Основной текст уведомления
+//     args << QStringList();         // 6. Интера// void Neuro_programm::sendSystemNotification(const QString &title, const QString &text)
+// {
+//     // 1. Подключаемся к стандартной службе уведомлений Freedesktop через D-Bus
+//     QDBusInterface notifyInterface(
+//                 "org.freedesktop.Notifications",     // Имя службы на шине
+//                 "/org/freedesktop/Notifications",    // Путь к объекту
+//                 "org.freedesktop.Notifications",     // Имя интерфейса
+//                 QDBusConnection::sessionBus()        // Используем пользовательскую сессию Bus
+//                 );
+
+//     if (!notifyInterface.isValid()) {
+//         qWarning() << "D-Bus Notifications interface is not valid!";
+//         return;
+//     }
+
+//     // 1. Задаем путь к файлу в реальной системе (/tmp/pTS.png)
+//     QString tempIconPath = QDir::tempPath() + "/pTS.png";
+//     QString finalIconParam = "brain"; // Фоллбэк: стандартная системная иконка
+
+//     // 2. Если файла в /tmp еще нет, копируем его туда из ресурсов Qt
+//     if (!QFile::exists(tempIconPath)) {
+//         QFile resFile(":/Data/Icons/pTS.png"); // Ваш точный путь из qrc
+//         if (resFile.copy(tempIconPath)) {
+//             finalIconParam = tempIconPath; // Успешно скопировали, используем этот путь
+//         } else {
+//             qWarning() << "[NOTIFY_MGR] Не удалось скопировать иконку из ресурсов в /tmp";
+//         }
+//     } else {
+//         finalIconParam = tempIconPath; // Файл уже был создан при прошлых уведомлениях
+//     }
+
+//     // 2. Сборка аргументов под спецификацию Freedesktop (метод Notify)
+//     QVariantList args;
+
+//     // =========================================================================
+//     // ЖЕСТКИЙ ФИКС ДЛЯ ОБХОДА XDG-DESKTOP-PORTAL:
+//     // Оставляем первый аргумент (App ID) ПУСТЫМ.
+//     // Это заставит Linux вывести уведомление без проверки системной регистрации приложения!
+//     // =========================================================================
+//     args << "pytorch-studio";      // 1. Имя приложения-отправителя (пустое для анонимного вывода)
+//     args << 0u;                    // 2. ID заменяемого уведомления (0 = создать новое)
+//     args << finalIconParam;        // 3. Иконка (путь к временному файлу png)
+//     args << title;                 // 4. Крупный заголовок карточки
+//     args << text;                  // 5. Основной текст уведомления
+//     args << QStringList();         // 6. Интерактивные кнопки-действия
+//     args << QVariantMap();         // 7. Дополнительные подсказки-хинты для KDE Plasma
+//     args << 4000;                  // 8. Время отображения карточки на экране (4 секунды)
+
+//     // 3. Асинхронно отправляем сигнал в систему.
+//     // Исправлено: заменили QDBus::NoBlock на нативный QDBusCall::NoBlock
+//     notifyInterface.callWithArgumentList(QDBus::NoBlock, "Notify", args);
+// }ктивные кнопки-действия
+//     args << QVariantMap();         // 7. Дополнительные подсказки-хинты для KDE Plasma
+//     args << 4000;                  // 8. Время отображения карточки на экране (4 секунды)
+
+//     // 3. Асинхронно отправляем сигнал в систему.
+//     // Исправлено: заменили QDBus::NoBlock на нативный QDBusCall::NoBlock
+//     notifyInterface.callWithArgumentList(QDBus::NoBlock, "Notify", args);
+// }
+
 void Neuro_programm::sendSystemNotification(const QString &title, const QString &text)
 {
     // 1. Подключаемся к стандартной службе уведомлений Freedesktop через D-Bus
     QDBusInterface notifyInterface(
-                "org.freedesktop.Notifications",     // Имя службы на шине
-                "/org/freedesktop/Notifications",    // Путь к объекту
-                "org.freedesktop.Notifications",     // Имя интерфейса
-                QDBusConnection::sessionBus()        // Используем пользовательскую сессию Bus
+                "org.freedesktop.Notifications", // Имя службы на шине
+                "/org/freedesktop/Notifications", // Путь к объекту
+                "org.freedesktop.Notifications", // Имя интерфейса
+                QDBusConnection::sessionBus()     // Используем пользовательскую сессию Bus
                 );
-
     if (!notifyInterface.isValid()) {
         qWarning() << "D-Bus Notifications interface is not valid!";
         return;
     }
 
-    // 1. Задаем путь к файлу в реальной системе (/tmp/pTS.png)
-    QString tempIconPath = QDir::tempPath() + "/pTS.png";
-    QString finalIconParam = "brain"; // Фоллбэк: стандартная системная иконка
+    // 2. Инициализация и выбор источника иконки
+    QIcon appIconDbus = QIcon::fromTheme(QStringLiteral("pytorch-studio"), QIcon(QStringLiteral(":/Data/Icons/pytorch-studio.svg")));
 
-    // 2. Если файла в /tmp еще нет, копируем его туда из ресурсов Qt
-    if (!QFile::exists(tempIconPath)) {
-        QFile resFile(":/Data/Icons/pTS.png"); // Ваш точный путь из qrc
-        if (resFile.copy(tempIconPath)) {
-            finalIconParam = tempIconPath; // Успешно скопировали, используем этот путь
-        } else {
-            qWarning() << "[NOTIFY_MGR] Не удалось скопировать иконку из ресурсов в /tmp";
-        }
-    } else {
-        finalIconParam = tempIconPath; // Файл уже был создан при прошлых уведомлениях
-    }
+    // Рендерим исходный пиксмап в стандартном разрешении 64x64 пикселя
+    QPixmap originalPixmap = appIconDbus.pixmap(64, 64);
+    QImage iconImg = originalPixmap.toImage().convertToFormat(QImage::Format_RGBA8888);
 
-    // 2. Сборка аргументов под спецификацию Freedesktop (метод Notify)
+    // =========================================================================
+    // ХАК ВЕРТИКАЛЬНОГО ЦЕНТРИРОВАНИЯ ДЛЯ KDE PLASMA
+    // Создаем искусственные прозрачные поля сверху и снизу под размер текстовой карточки
+    // =========================================================================
+    int canvasWidth = 64;
+    int canvasHeight = 96;
+
+    QImage canvas(canvasWidth, canvasHeight, QImage::Format_RGBA8888);
+    canvas.fill(Qt::transparent); // Заливаем холст абсолютной прозрачностью
+
+    // Отрисовываем логотип ровно по центру виртуального холста
+    QPainter painter(&canvas);
+    int yOffset = (canvasHeight - iconImg.height()) / 2; // 16 пикселей отступа сверху и снизу
+    painter.drawImage(0, yOffset, iconImg);
+    painter.end();
+
+    // 3. Подготовка структуры хинтов для отправки сырых байт изображения в D-Bus
+    QVariantMap hints;
+    QVariantList iconData;
+    iconData << canvas.width();                  // 1. Ширина холста (64)
+    iconData << canvas.height();                 // 2. Высота холста (96)
+    iconData << canvas.bytesPerLine();           // 3. Шаг строк (Rowstride)
+    iconData << true;                            // 4. Наличие альфа-канала (прозрачность активна)
+    iconData << canvas.depth();                  // 5. Глубина цвета (32 бита для формата RGBA8888)
+    iconData << canvas.depth() / 8;              // 6. Количество каналов (4 канала)
+    iconData << QByteArray(reinterpret_cast<const char*>(canvas.bits()), canvas.sizeInBytes()); // 7. Сырой буфер пикселей
+
+    // Инжектируем данные в оба стандарта хинтов для совместимости со всеми версиями KDE
+    hints[QStringLiteral("image-data")] = QVariant::fromValue(iconData);
+    hints[QStringLiteral("image_data")] = QVariant::fromValue(iconData);
+
+    // ДОПОЛНИТЕЛЬНЫЙ ФИКС ДЛЯ PLASMA: Жестко указываем путь к иконке приложения в хинтах
+    hints[QStringLiteral("icon_path")] = QStringLiteral("pytorch-studio");
+
+    // 4. Сборка финального пакета аргументов под спецификацию Freedesktop (метод Notify)
     QVariantList args;
+    args << QStringLiteral("pytorch-studio");    // 1. App ID (Имя приложения-отправителя)
+    args << 0u;                                  // 2. ID заменяемого уведомления (0 = создать новое)
 
-    // =========================================================================
-    // ЖЕСТКИЙ ФИКС ДЛЯ ОБХОДА XDG-DESKTOP-PORTAL:
-    // Оставляем первый аргумент (App ID) ПУСТЫМ.
-    // Это заставит Linux вывести уведомление без проверки системной регистрации приложения!
-    // =========================================================================
-    args << "pytorch-studio";      // 1. Имя приложения-отправителя (пустое для анонимного вывода)
-    args << 0u;                    // 2. ID заменяемого уведомления (0 = создать новое)
-    args << finalIconParam;        // 3. Иконка (путь к временному файлу png)
-    args << title;                 // 4. Крупный заголовок карточки
-    args << text;                  // 5. Основной текст уведомления
-    args << QStringList();         // 6. Интерактивные кнопки-действия
-    args << QVariantMap();         // 7. Дополнительные подсказки-хинты для KDE Plasma
-    args << 4000;                  // 8. Время отображения карточки на экране (4 секунды)
+    // ИСПРАВЛЕНО: Возвращаем имя системной иконки вместо пустой строки, чтобы Plasma инициализировала контейнер под картинку!
+    args << QStringLiteral("pytorch-studio");    // 3. Системное имя иконки
 
-    // 3. Асинхронно отправляем сигнал в систему.
-    // Исправлено: заменили QDBus::NoBlock на нативный QDBusCall::NoBlock
+    args << title;                               // 4. Крупный заголовок карточки
+    args << text;                                // 5. Основной текст уведомления
+    args << QStringList();                       // 6. Интерактивные кнопки-действия (пусто)
+    args << hints;                               // 7. Хинты с отцентрированным изображением из ОЗУ
+    args << 4000;                                // 8. Время жизни карточки на экране (4 секунды)
+
+    // 5. Асинхронно отправляем сигнал в графический сервер
     notifyInterface.callWithArgumentList(QDBus::NoBlock, "Notify", args);
 }
-
 
 void Neuro_programm::initProjectTreeModel(QString path)
 {
@@ -5920,7 +6526,7 @@ void Neuro_programm::onCloseProjectClicked()
     if (this->docMgr) {
         this->docMgr->updateUiTitles("");
     } else {
-        this->setWindowTitle("pytorch-studio");
+        this->setWindowTitle("PyTorch Studio");
         if (this->titleLabel) this->titleLabel->setText("PyTorch Studio");
     }
 
@@ -6572,22 +7178,22 @@ void Neuro_programm::showCompletionMenuInGuiThread(const QStringList &completion
 bool Neuro_programm::eventFilter(QObject *obj, QEvent *event)
 {
     // =========================================================================
-        // СУПЕР-ЗАЩИТА ОТ УГОНА ENTER: Проверяем, откуда прилетел клик клавиатуры
-        // =========================================================================
-        if (event->type() == QEvent::KeyPress) {
-            QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+    // СУПЕР-ЗАЩИТА ОТ УГОНА ENTER: Проверяем, откуда прилетел клик клавиатуры
+    // =========================================================================
+    if (event->type() == QEvent::KeyPress) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
 
-            // Если нажата клавиша Enter / Return
-            if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+        // Если нажата клавиша Enter / Return
+        if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
 
-                // Проверяем имя объекта или тип виджета, который сейчас в фокусе
-                if (obj && (obj->inherits("CodeEditor") || obj->objectName() != QStringLiteral("inputChatText"))) {
-                    // ИГНОРИРУЕМ ХОТКЕЙ: Возвращаем false, чтобы Qt6 передал Enter
-                    // внутрь текстового редактора для каноничного переноса строки!
-                    return QMainWindow::eventFilter(obj, event);
-                }
+            // Проверяем имя объекта или тип виджета, который сейчас в фокусе
+            if (obj && (obj->inherits("CodeEditor") || obj->objectName() != QStringLiteral("inputChatText"))) {
+                // ИГНОРИРУЕМ ХОТКЕЙ: Возвращаем false, чтобы Qt6 передал Enter
+                // внутрь текстового редактора для каноничного переноса строки!
+                return QMainWindow::eventFilter(obj, event);
             }
         }
+    }
 
     static QPoint dragStartPos;
     static bool isDraggingTitle = false;
@@ -10497,7 +11103,7 @@ void Neuro_programm::showVenvEmergencyDialog(const QString &reason)
     // Добавляем три аппаратные кнопки управления
     QPushButton *btnCreate   = msgBox.addButton("Создать заново (Авто)", QMessageBox::AcceptRole);
     QPushButton *btnBrowse   = msgBox.addButton("Указать путь вручную...", QMessageBox::ActionRole);
-   // QPushButton *btnSkip     = msgBox.addButton("Пропустить", QMessageBox::RejectRole);
+    // QPushButton *btnSkip     = msgBox.addButton("Пропустить", QMessageBox::RejectRole);
 
     msgBox.exec(); // Запускаем табличку поверх интерфейса (блокирует ввод в IDE, но GUI не фризит)
 
@@ -11786,11 +12392,11 @@ void Neuro_programm::initTensorBoardUi()
 
         // Показываем стартовую заглушку прямо внутри него
         this->ui->tensorboardWebView->setHtml(
-            "<html><body style='background:#121212; color:#00ff00; font-family:monospace; padding-top:15%; text-align:center;'>"
-            "<h2>[SYSTEM]: ЗАПУСК КОНВЕЙЕРА ОБУЧЕНИЯ...</h2>"
-            "<p style='color:#aeaeae;'>Ожидание инициализации ядра Юпитера и TensorBoard</p>"
-            "</body></html>"
-        );
+                    "<html><body style='background:#121212; color:#00ff00; font-family:monospace; padding-top:15%; text-align:center;'>"
+                    "<h2>[SYSTEM]: ЗАПУСК КОНВЕЙЕРА ОБУЧЕНИЯ...</h2>"
+                    "<p style='color:#aeaeae;'>Ожидание инициализации ядра Юпитера и TensorBoard</p>"
+                    "</body></html>"
+                    );
     } else {
         qDebug() << "[ERROR]: Виджет tensorboardWebView не найден на форме UI!";
     }
@@ -12041,7 +12647,7 @@ void Neuro_programm::onDetectDevice()
     {
         // Формируем лаконичную строку для системного уведомления Linux
         QString notifyMessage = QString("%1 (%2) | Flash: %3 КБ | SRAM: %4 КБ")
-                            .arg(chipModelName, hexChipId, QString::number(flashKb), QString::number(sramKb));
+                .arg(chipModelName, hexChipId, QString::number(flashKb), QString::number(sramKb));
 
 
         // Отправляем D-Bus уведомление об успешном подключении платы
@@ -12242,9 +12848,9 @@ void Neuro_programm::open_STM()
 
     // Прописываем иконку в экшен с поддержкой системных тем Linux
     actSTM->setIcon(QIcon::fromTheme(
-        QStringLiteral("system-run"),
-        targetStmIcon
-    ));
+                        QStringLiteral("system-run"),
+                        targetStmIcon
+                        ));
 
     // Находим саму физическую QToolButton на боковой панели, чтобы продублировать защиту в её слои
     QToolButton *btnSTMObj = leftSideBarContainer ? leftSideBarContainer->findChild<QToolButton*>("Прошивка") : nullptr;
@@ -12261,8 +12867,8 @@ void Neuro_programm::open_STM()
 
     // Извлекаем динамический индекс заставки JetBrains из свойств класса MainWindow
     const int placeholderPageIndex = this->property("placeholderIndex").isValid()
-                                     ? this->property("placeholderIndex").toInt()
-                                     : 1; // Резервный откат на 1, если свойство не найдено
+            ? this->property("placeholderIndex").toInt()
+            : 1; // Резервный откат на 1, если свойство не найдено
 
     // Ловим актуальное состояние залипания кнопки (true = нажата, false = отжата)
     bool isTriggered = actSTM->isChecked();
@@ -12335,9 +12941,9 @@ void Neuro_programm::open_STM_work()
 
     // Прописываем иконку в экшен с поддержкой системных тем Linux
     actSTM_work->setIcon(QIcon::fromTheme(
-        QStringLiteral("system-run"), // Ищем значок выполнения в системной теме Breeze
-        targetWorkIcon                // Резервный вариант: если темы нет, берем SVG из ресурсов
-    ));
+                             QStringLiteral("system-run"), // Ищем значок выполнения в системной теме Breeze
+                             targetWorkIcon                // Резервный вариант: если темы нет, берем SVG из ресурсов
+                             ));
 
     // Находим физическую QToolButton на боковой панели, чтобы продублировать защиту в её слои
     QToolButton *btnWorkObj = leftSideBarContainer ? leftSideBarContainer->findChild<QToolButton*>("Работа STM") : nullptr;
@@ -12353,8 +12959,8 @@ void Neuro_programm::open_STM_work()
 
     // Извлекаем динамический индекс заставки JetBrains из свойств класса
     const int placeholderPageIndex = this->property("placeholderIndex").isValid()
-                                     ? this->property("placeholderIndex").toInt()
-                                     : 1; // Резервный откат на Prog_STM, если свойство не задано
+            ? this->property("placeholderIndex").toInt()
+            : 1; // Резервный откат на Prog_STM, если свойство не задано
 
     // Ловим состояние фиксации кнопки (true = зажата, false = отжата)
     bool isTriggered = actSTM_work->isChecked();
@@ -12516,10 +13122,10 @@ void Neuro_programm::setupDebugInterface()
     if (watchList) {
         watchList->clear(); // Очищаем тестовый мусор из Designer
         watchList->setStyleSheet(
-                                  "QListWidget { background-color: #ffffff; border: none; color: #232629; }"
-                                  "QListWidget::item { padding: 4px 6px; border-bottom: 1px solid #f0f0f0; }"
-                                  "QListWidget::item:hover { background-color: #e4e5e6; }"
-                                  );
+                    "QListWidget { background-color: #ffffff; border: none; color: #232629; }"
+                    "QListWidget::item { padding: 4px 6px; border-bottom: 1px solid #f0f0f0; }"
+                    "QListWidget::item:hover { background-color: #e4e5e6; }"
+                    );
     }
 
     // =========================================================================
@@ -12772,11 +13378,11 @@ void Neuro_programm::setupDebugInterface()
     // Интерактивное удаление по двойному клику на строку списка Watch
     if (watchList) {
         connect(watchList, &QListWidget::itemDoubleClicked, this, [watchList](QListWidgetItem *item) {
-                                                                                                       if (item) {
-                                                                                                           delete item; // Нативно вырезаем строку из виджета и памяти Qt
-                                                                                                           qInfo() << ">>> [WATCH UI] Выражение успешно удалено из панели.";
-                                                                                                       }
-                                                                                                     });
+            if (item) {
+                delete item; // Нативно вырезаем строку из виджета и памяти Qt
+                qInfo() << ">>> [WATCH UI] Выражение успешно удалено из панели.";
+            }
+        });
     }
     // =========================================================================
     // 5. СОЗДАНИЕ И ПРОГРАММИРОВАНИЕ ИСПОЛНИТЕЛЬНЫХ ЭКШЕНОВ (ГОРЯЧИЕ КЛАВИШИ)
@@ -12996,8 +13602,8 @@ void Neuro_programm::setupDebugInterface()
         connect(btnAddWatch, &QPushButton::clicked, this, [this, watchList]() {
             bool ok;
             QString expression = QInputDialog::getText(this, "Новое выражение Watch",
-                                                     "Введите формулу Python (например: X_fake.shape или window_size):",
-                                                     QLineEdit::Normal, "", &ok);
+                                                       "Введите формулу Python (например: X_fake.shape или window_size):",
+                                                       QLineEdit::Normal, "", &ok);
 
             if (ok && !expression.trimmed().isEmpty() && watchList) {
                 QListWidgetItem *item = new QListWidgetItem(expression.trimmed() + " ➔ Вычисляется...");
@@ -13360,8 +13966,8 @@ void Neuro_programm::refreshProblemsTableView()
         QColor currentTypeColor = warningYellowColor;
 
         if (error.message.contains("error", Qt::CaseInsensitive) ||
-            error.message.startsWith("E") ||
-            error.message.contains("syntax", Qt::CaseInsensitive)) {
+                error.message.startsWith("E") ||
+                error.message.contains("syntax", Qt::CaseInsensitive)) {
             typeText = "Ошибка";
             currentTypeColor = errorRedColor;
             descItem->setForeground(QBrush(errorRedColor)); // Подсвечиваем всю строку ошибки алым
@@ -13767,12 +14373,12 @@ QString Neuro_programm::generateSessionId(const QString& modelTag, const QString
     // 3. Сборка финального ID сессии по вашей формуле
     // Шаблон: run_[Номер]_[Тег]_[Оптимизатор]_[Железо]_[Дата]_[Коммент]
     QString sessionId = QString("run_%1_%2_%3_%4_%5_%6")
-                        .arg(runNumberStr)
-                        .arg(cleanTag)
-                        .arg(cleanOptim)
-                        .arg(cleanDev)
-                        .arg(dateStr)
-                        .arg(cleanComm);
+            .arg(runNumberStr)
+            .arg(cleanTag)
+            .arg(cleanOptim)
+            .arg(cleanDev)
+            .arg(dateStr)
+            .arg(cleanComm);
 
     return sessionId;
 }

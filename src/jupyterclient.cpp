@@ -32,17 +32,26 @@ void JupyterClient::connectToJupyter(const QString &host, int port, const QStrin
     m_port = port;
     m_isReady = false;
 
-    // Эндпоинт остается прежним
+    // [ИСПРАВЛЕНИЕ 1]: Тотальное уничтожение старого сокета и его системных буферов!
+    if (m_webSocket) {
+        m_webSocket->abort();
+        QObject::disconnect(m_webSocket, nullptr, nullptr, nullptr);
+        m_webSocket->deleteLater();
+    }
+
+    // Создаем абсолютно чистый сокет для новой сессии обучения
+    m_webSocket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
+
+    connect(m_webSocket, &QWebSocket::connected, this, &JupyterClient::onWebSocketConnected);
+    connect(m_webSocket, &QWebSocket::textMessageReceived, this, &JupyterClient::onWebSocketMessageReceived);
+    connect(m_webSocket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::errorOccurred), this, &JupyterClient::onWebSocketError);
+
     QUrl url(QStringLiteral("http://%1:%2/api/sessions").arg(m_host, QString::number(m_port)));
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
-    // =========================================================================
-    // СОВРЕМЕННЫЙ ФИКС: Передаем заголовок Origin, без которого Jupyter Server 2.x вернет 403 Forbidden
-    // =========================================================================
     QString originUrl = QStringLiteral("http://%1:%2").arg(m_host, QString::number(m_port));
     request.setRawHeader("Origin", originUrl.toUtf8());
-    // =========================================================================
 
     QJsonObject json;
     json[QStringLiteral("kernel")] = QJsonObject{{QStringLiteral("name"), QStringLiteral("python3")}};
@@ -51,7 +60,7 @@ void JupyterClient::connectToJupyter(const QString &host, int port, const QStrin
     json[QStringLiteral("path")] = notebookPath;
 
     m_networkManager->post(request, QJsonDocument(json).toJson(QJsonDocument::Compact));
-    emit codeOutputReceived(QStringLiteral(" [REST API] Отправлен запрос на инициализацию ядра Python...<br>"));
+    emit codeOutputReceived(QStringLiteral(">>> [MLOps СЕТЬ]: Отправлен запрос на инициализацию ядра Python...\n"));
 }
 
 void JupyterClient::onSessionCreated(QNetworkReply *reply)
@@ -93,7 +102,7 @@ void JupyterClient::onSessionCreated(QNetworkReply *reply)
 void JupyterClient::onWebSocketConnected()
 {
     m_isReady = true;
-    emit codeOutputReceived(" <font color='#00FF00'><b>[WebSockets] Соединение с ядром успешно установлено. Поток активен!</b></font><br>");
+    emit codeOutputReceived(">>> [WebSockets] Соединение с ядром успешно установлено. Поток активен!\n");
     //  НОВАЯ СТРОКА: Сообщаем главному окну, что сокет на 100% готов отправлять код!
     emit jupyterClientReady();
 }
@@ -136,49 +145,53 @@ void JupyterClient::executePythonCode(const QString &code)
 
 void JupyterClient::onWebSocketMessageReceived(const QString &message)
 {
-    // Парсим поток ответов от ядра (IOPub channel)
     QJsonObject msgObj = QJsonDocument::fromJson(message.toUtf8()).object();
     QString msgType = msgObj[QStringLiteral("header")].toObject()[QStringLiteral("msg_type")].toString();
     QJsonObject content = msgObj[QStringLiteral("content")].toObject();
 
-    // =========================================================================
-    // СИСТЕМНЫЙ РЕГУЛЯРНЫЙ ФИКС: Очищаем логи PyTorch от ANSI-мусора расцветки ([31m и т.д.)
-    // =========================================================================
     static const QRegularExpression ansiRegex(QStringLiteral("\x1B\\[[0-9;]*[a-zA-Z]"));
 
-    // Случай 1: Ядро выводит стандартный поток (print() или логи PyTorch)
+    // Случай 1: Стандартный поток вывода (Вывод эпох, логов и этапов MLOps)
     if (msgType == QStringLiteral("stream")) {
         QString text = content[QStringLiteral("text")].toString();
-
-        // Накатываем очистку от ANSI-кодов, чтобы текст стал кристально чистым
         text.remove(ansiRegex);
-
         emit codeOutputReceived(text);
+
+        // [ИСПРАВЛЕНИЕ 2]: Ловим финальный маркер успешного завершения прямо из текстового потока Python.
+        // Как только скрипт вывел финальную строку — заявляем об успешном финише конвейера!
+        if (text.contains(QStringLiteral("MLOPS FINAL SUCCESS"))) {
+            emit executionFinished(true);
+        }
     }
-    // Случай 2: Ядро вывело результат вычисления выражения
+    // Случай 2: Результат вычисления выражений
     else if (msgType == QStringLiteral("execute_result")) {
         QString res = content[QStringLiteral("data")].toObject()[QStringLiteral("text/plain")].toString();
         res.remove(ansiRegex);
-
         emit codeOutputReceived(QStringLiteral("<font color='#00FF00'>") + res.toHtmlEscaped() + QStringLiteral("</font>\n"));
     }
-    // Случай 3: Критическая ошибка выполнения Python-кода (Трейсбэк ошибки обучения)
+    // Случай 3: Критическая ошибка (Сбой обучения, синтаксис, OOM на видеокарте)
     else if (msgType == QStringLiteral("error")) {
         QJsonArray traceback = content[QStringLiteral("traceback")].toArray();
         QString errorStr;
         for (int i = 0; i < traceback.size(); ++i) {
             QString line = traceback[i].toString();
-            line.remove(ansiRegex); // Очищаем каждую строчку Traceback от кракозябр
+            line.remove(ansiRegex);
             errorStr += line + QStringLiteral("\n");
         }
-
         emit codeOutputReceived(QStringLiteral("<br><font color='#FF5350'><b>[PYTHON CRASH]:</b><br>") + errorStr.toHtmlEscaped() + QStringLiteral("</font><br>"));
+
+        // Сигнализируем о падении конвейера
         emit executionFinished(false);
     }
-    // Случай 4: Статус ответа на нашу команду execute_reply
+    // Случай 4: Технический статус ответа ядра на команду execute_reply
     else if (msgType == QStringLiteral("execute_reply")) {
         QString status = content[QStringLiteral("status")].toString();
-        emit executionFinished(status == QStringLiteral("ok"));
+        if (status != QStringLiteral("ok")) {
+            // Если статус не OK (например, abort), генерируем ошибку
+            emit executionFinished(false);
+        }
+        // [ИСПРАВЛЕНИЕ 3]: Если статус "ok", мы его ИГНОРИРУЕМ.
+        // Больше он не будет дублировать успешный финиш и ломать рамочки в интерфейсе!
     }
 }
 
