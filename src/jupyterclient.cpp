@@ -82,7 +82,7 @@ void JupyterClient::onSessionCreated(QNetworkReply *reply)
         return;
     }
 
-    emit codeOutputReceived(QString(" [REST API] Вычислительное ядро создано. ID: %1<br>").arg(m_kernelId));
+    emit codeOutputReceived(QString(">>> [REST API]: Вычислительное ядро создано. ID: %1<br>").arg(m_kernelId));
 
     // Шаг 2: Подключаем бинарный WebSocket-канал к каналам управления этого ядра
     QString wsUrl = QString("ws://%1:%2/api/kernels/%3/channels").arg(m_host).arg(m_port).arg(m_kernelId);
@@ -102,7 +102,7 @@ void JupyterClient::onSessionCreated(QNetworkReply *reply)
 void JupyterClient::onWebSocketConnected()
 {
     m_isReady = true;
-    emit codeOutputReceived(">>> [WebSockets] Соединение с ядром успешно установлено. Поток активен!\n");
+    emit codeOutputReceived(">>> [WebSockets]: Соединение с ядром успешно установлено. Поток активен!\n");
     //  НОВАЯ СТРОКА: Сообщаем главному окну, что сокет на 100% готов отправлять код!
     emit jupyterClientReady();
 }

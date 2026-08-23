@@ -588,6 +588,8 @@ panel_other::panel_other(QWidget *parent) :
         qDebug() << ">>> [UI] Виджет QCustomPlot успешно инициализирован на Index 3.";
     }
 
+    connect(ui->closeActTrain, &QPushButton::clicked, this, &panel_other::close);
+
 }
 
 panel_other::~panel_other()

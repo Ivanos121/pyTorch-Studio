@@ -164,6 +164,7 @@ protected slots:
     bool unarchiveProject(const QString &archivePath, const QString &targetExtractDir);
 
 private:
+    PipManagerPage *pipManagerPage;
     bool hasPythonCrashOccurred;
     bool bootstrapProjectStructure(const QString &rootPath);
     void detectCudaDevices();
@@ -247,6 +248,15 @@ private slots:
     void onPromptSubmitted(const QString &promptText);
 
 private:
+    QComboBox *m_clonedFileComboBox;
+    QComboBox *m_clonedFuncComboBox;
+    bool m_isPipelineExecutionActive = false;
+    QMetaObject::Connection m_jupyterReadyConnection;
+    QMetaObject::Connection m_jupyterOutputConnection;
+    QLabel *lblHardwareStatus;
+    QLabel *lblDataCounter;
+    QLabel *lblSessionIndicator;
+    QToolButton *btnSplitScreen;
     QMetaObject::Connection jupyterLogConnection;
     QMetaObject::Connection jupyterFinishConnection;
     QMetaObject::Connection jupyterReadyConnection;

@@ -61,5 +61,6 @@
         <file>../Data/Icons/pytorch-studio_64.png</file>
         <file>../Data/Icons/pytorch-studio_128.png</file>
         <file>../Data/Icons/pytorch-studio_256.png</file>
+        <file>../Data/system_icons/office-chart-bar.svg</file>
     </qresource>
 </RCC>

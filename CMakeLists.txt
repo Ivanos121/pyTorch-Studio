@@ -67,6 +67,8 @@ set(PROJECT_SOURCES
     src/advancedclosedialog.h
     src/qcustomplot.cpp
     src/qcustomplot.h
+    src/mlopsartifactloader.cpp
+    src/mlopsartifactloader.h
 
     # Менеджеры данных, процессов и ИИ
     src/projectmanager.cpp
@@ -151,6 +153,7 @@ add_executable(pytorch-studio ${PROJECT_SOURCES}
     src/sessiondetailswidget.h src/sessiondetailswidget.cpp src/sessiondetailswidget.ui
     src/trainconfigwizard.h src/trainconfigwizard.cpp
     src/qcustomplot.cpp src/qcustomplot.h
+    src/mlopsartifactloader.h src/mlopsartifactloader.cpp
 )
 
 # Указываем пути поиска заголовочных файлов
@@ -181,6 +184,7 @@ target_link_libraries(pytorch-studio PRIVATE
     Qt6::SerialPort
     Qt6::Test
     Qt6::PrintSupport
+    ${TORCH_LIBRARIES}
 )
 
 # Настройки свойств исполняемого файла
@@ -198,4 +202,36 @@ target_compile_definitions(pytorch-studio PRIVATE
     APP_VERSION_MAJOR=1
     APP_VERSION_MINOR=0
     APP_VERSION_PATCH=0
+)
+
+# =========================================================================
+# ЖЕСТКИЙ ХАРДКОД ПУТЕЙ К TORCH (ДЛЯ VENV PYTHON)
+# =========================================================================
+
+# 1. Явно указываем CMake, где искать файл TorchConfig.cmake
+# Внимание: проверьте точную версию папки python (3.11, 3.12 или 3.13) в вашем venv!
+set(Torch_DIR "/home/elf/venv/lib/python3.14/site-packages/torch/share/cmake/Torch")
+
+# Подключаем сам пакет
+find_package(Torch REQUIRED)
+
+# 2. Жестко прописываем путь к заголовочным файлам (где лежит torch/script.h)
+set(HARDCODED_TORCH_INCLUDES "/home/elf/venv/lib/python3.11/site-packages/torch/include")
+
+# 3. Передаем эти пути компилятору (добавьте к вашему существующему target_include_directories)
+target_include_directories(pytorch-studio PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${LIBUSB_INCLUDE_DIRS}
+    ${HARDCODED_TORCH_INCLUDES}
+    ${HARDCODED_TORCH_INCLUDES}/torch/csrc/api/include
+)
+
+# 4. Флаг совместимости ABI (критически важен для Arch Linux, чтобы не было ошибок линковки)
+target_compile_definitions(pytorch-studio PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+
+# 5. Принудительно связываем бинарные библиотеки
+target_link_libraries(pytorch-studio PRIVATE
+    ${LIBUSB_LIBRARIES}
+    Qt6::Widgets
+    ${TORCH_LIBRARIES}
 )

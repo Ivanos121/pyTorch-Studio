@@ -311,7 +311,7 @@ QPushButton:disabled {
       </property>
       <widget class="QStackedWidget" name="centralStackedWidget">
        <property name="currentIndex">
-        <number>6</number>
+        <number>7</number>
        </property>
        <widget class="QWidget" name="page_teacher">
         <layout class="QGridLayout" name="gridLayout_9">
@@ -464,6 +464,7 @@ QTextEdit#inputChatText:focus {
          </item>
         </layout>
        </widget>
+       <widget class="QWidget" name="page_8"/>
       </widget>
       <widget class="QWidget" name="widgetRightCharts" native="true">
        <property name="minimumSize">
