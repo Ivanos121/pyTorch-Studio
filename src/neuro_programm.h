@@ -18,13 +18,13 @@
 #include "projectmanager.h"
 #include "documentmanager.h"
 #include "prog_stm.h"
-//#include "stacktablehandler.h"
 #include "variablestablehandler.h"
 #include "savedata.h"
 #include "localaimanager.h"
 #include "aipromptwidget.h"
 #include "sessiontablewidget.h"
 #include "sessiondetailswidget.h"
+#include "rtspvideoinferenceworker.h"
 
 #include <QMainWindow>
 #include <QCompleter>
@@ -45,6 +45,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QElapsedTimer>
+
 
 class JupyterClient;
 class JupyterManager;
@@ -135,6 +136,7 @@ signals:
     void completionDataReceived(const QStringList &completions);
     void firmwareFlashSuccess();
     void aiCodeGenerationRequested(int cursorPosition, const QString &promptText, const QString &fullCodeContext);
+    void requestToggleRecording(bool start, const QString &savePath);
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -164,6 +166,7 @@ protected slots:
     bool unarchiveProject(const QString &archivePath, const QString &targetExtractDir);
 
 private:
+    CodeEditor *rightEditor;
     PipManagerPage *pipManagerPage;
     bool hasPythonCrashOccurred;
     bool bootstrapProjectStructure(const QString &rootPath);
@@ -382,5 +385,8 @@ private:
     void showPreferences();
     void insertGeneratedCodeIntoEditor(const QString &generatedCode);
     QString generateSessionId(const QString &modelTag, const QString &optimizer, const QString &device, const QString &shortComment);
+    void runJediAnalysisForWidget(const QString &filePath, QPlainTextEdit *targetEditor);
+    void applyHighlighterErrors(const QString &filePath, const QList<int> &errorLines);
+    void clearHighlighterErrors(const QString &filePath);
 };
 #endif // NEURO_PROGRAMM_H

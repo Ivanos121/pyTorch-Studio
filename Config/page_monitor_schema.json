@@ -1,0 +1,65 @@
+{
+    "page_id": 8,
+    "object_name": "pageThermalMonitor",
+    "layout_type": "QVBoxLayout",
+    "margins": [10, 10, 10, 10],
+    "spacing": 10,
+    "elements": [
+        {
+            "component": "QSplitter",
+            "object_name": "splitterUpperHorizontal",
+            "orientation": "Horizontal",
+            "splitter_sizes": [600, 400],
+            "style_sheet": "QSplitter::handle { background-color: #cbd5e1; width: 1px; }",
+            "children": [
+                {
+                    "container_id": "left_video_block",
+                    "layout_type": "QVBoxLayout",
+                    "spacing": 15,
+                    "widgets": [
+                        {
+                            "type": "QLabel",
+                            "object_name": "lblVideoCanvas",
+                            "fixed_size": [400, 300],
+                            "alignment": "AlignCenter",
+                            "text": "🔄 Ожидание MPEG-кадров от HM-TP51...",
+                            "style_sheet": "QLabel { background-color: #0f172a; color: #38bdf8; border: 1px solid #334155; border-radius: 6px; font-family: 'JetBrains Mono'; font-size: 12px; }"
+                        },
+                        {
+                            "type": "QPushButton",
+                            "object_name": "btnRecordVideo",
+                            "fixed_size": [240, 35],
+                            "checkable": true,
+                            "text": "🔴 Записать тренировочное видео",
+                            "style_sheet": "QPushButton { font-weight: bold; background: #fff1f2; color: #991b1b; border: 1px solid #fecdd3; border-radius: 4px; padding: 6px; }"
+                        }
+                    ]
+                },
+                {
+                    "container_id": "right_analytics_block",
+                    "layout_type": "QVBoxLayout",
+                    "spacing": 12,
+                    "widgets": [
+                        {
+                            "type": "QLabel",
+                            "object_name": "lblIiVerdict",
+                            "text": "🔥 ТЕМПЕРАТУРА ИИ: --.- °C",
+                            "style_sheet": "QLabel { font-size: 15px; font-weight: bold; color: #0f172a; padding: 12px; background: #f8fafc; border-radius: 4px; border-left: 4px solid #0284c7; }"
+                        },
+                        {
+                            "type": "QChartView",
+                            "object_name": "chartPlaceholder",
+                            "style_sheet": "background-color: #ffffff; border: 1px dashed #cbd5e1; border-radius: 4px;",
+                            "chart_properties": {
+                                "title": "Тренд температуры ИИ (Реал-тайм)",
+                                "theme": "Light",
+                                "axis_x": { "type": "Value", "label": "Время (сек)", "range": [0, 60] },
+                                "axis_y": { "type": "Value", "label": "Градусы (°C)", "range": [20, 100] }
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -154,6 +154,8 @@ add_executable(pytorch-studio ${PROJECT_SOURCES}
     src/trainconfigwizard.h src/trainconfigwizard.cpp
     src/qcustomplot.cpp src/qcustomplot.h
     src/mlopsartifactloader.h src/mlopsartifactloader.cpp
+    src/rtspvideoinferenceworker.h src/rtspvideoinferenceworker.cpp
+    src/thermalmonitorbuilder.h src/thermalmonitorbuilder.cpp
 )
 
 # Указываем пути поиска заголовочных файлов
@@ -234,4 +236,58 @@ target_link_libraries(pytorch-studio PRIVATE
     ${LIBUSB_LIBRARIES}
     Qt6::Widgets
     ${TORCH_LIBRARIES}
+)
+
+# =========================================================================
+# ЖЕСТКИЙ ХАРДКОД ПУТЕЙ К TORCH (ДЛЯ VENV PYTHON)
+# =========================================================================
+set(Torch_DIR "/home/elf/venv/lib/python3.14/site-packages/torch/share/cmake/Torch")
+find_package(Torch REQUIRED)
+set(HARDCODED_TORCH_INCLUDES "/home/elf/venv/lib/python3.11/site-packages/torch/include")
+
+# =========================================================================
+# ЖЕСТКИЙ ХАРДКОД ПУТЕЙ К TORCH (ДЛЯ VENV PYTHON)
+# =========================================================================
+# 1. Явно указываем CMake, где искать файл TorchConfig.cmake
+set(Torch_DIR "/home/elf/venv/lib/python3.14/site-packages/torch/share/cmake/Torch")
+# Подключаем сам пакет
+find_package(Torch REQUIRED)
+# 2. Жестко прописываем путь к заголовочным файлам (где лежит torch/script.h)
+set(HARDCODED_TORCH_INCLUDES "/home/elf/venv/lib/python3.11/site-packages/torch/include")
+
+# =========================================================================
+# ЖЕСТКИЙ ХАРДКОД ПУТЕЙ К OPENCV (АНАЛОГИЧНО TORCH)
+# =========================================================================
+# 1. Явно указываем CMake, где искать файл OpenCVConfig.cmake для Arch Linux
+set(OpenCV_DIR "/usr/lib/cmake/opencv4")
+# Подключаем пакет OpenCV
+find_package(OpenCV REQUIRED)
+# 2. Жестко прописываем путь к системным заголовочным файлам (где лежит opencv2/opencv.hpp)
+set(HARDCODED_OPENCV_INCLUDES "/usr/include/opencv4")
+
+# =========================================================================
+# СЛИЯНИЕ ДИРЕКТОРИЙ И СБОРКА ТАРГЕТА
+# =========================================================================
+# 3. Передаем эти пути компилятору
+target_include_directories(pytorch-studio PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${LIBUSB_INCLUDE_DIRS}
+    ${HARDCODED_TORCH_INCLUDES}
+    ${HARDCODED_TORCH_INCLUDES}/torch/csrc/api/include
+
+    # ПРИВЯЗКА ЗАГОЛОВКОВ OPENCV:
+    ${HARDCODED_OPENCV_INCLUDES}
+)
+
+# 4. Флаг совместимости ABI (критически важен для Arch Linux, чтобы не было ошибок линковки)
+target_compile_definitions(pytorch-studio PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+
+# 5. Принудительно связываем бинарные библиотеки
+target_link_libraries(pytorch-studio PRIVATE
+    ${LIBUSB_LIBRARIES}
+    Qt6::Widgets
+    ${TORCH_LIBRARIES}
+
+    # ПРИВЯЗКА БИНАРНЫХ БИБЛИОТЕК OPENCV:
+    ${OpenCV_LIBS}
 )

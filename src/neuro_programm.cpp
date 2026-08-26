@@ -1,4 +1,5 @@
 #include "neuro_programm.h"
+#include "minimaparea.h"
 #include "qmenubar.h"
 #include "src/ui_panel_other.h"
 #include "ui_neuro_programm.h"
@@ -29,6 +30,7 @@
 #include "ui_panel_other.h"
 #include "sessiondetailswidget.h"
 #include "trainconfigwizard.h"
+#include "thermalmonitorbuilder.h"
 
 #include <QFileSystemModel>
 #include <QInputDialog>
@@ -1337,194 +1339,305 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
             // СВЕЖИЙ, СТАБИЛИЗИРОВАННЫЙ КОННЕКТ КНОПКИ СПЛИТТЕРА ПАК
             // ---------------------------------------------------------------------
             // ---------------------------------------------------------------------
-            // СВЕЖИЙ, СТАБИЛИЗИРОВАННЫЙ КОННЕКТ КНОПКИ СПЛИТТЕРА ПАК (ОБА КОМБОБОКСА КЛАССА)
+            // ЧАСТЬ 1: БЕЗОПАСНЫЙ СЛОТ КНОПКИ И ПОИСК КОМБОБОКСОВ В UI
             // ---------------------------------------------------------------------
+            // =========================================================================
+            // ЧАСТЬ 1: ИНИЦИАЛИЗАЦИЯ И ДИНАМИЧЕСКОЕ ДООСНАЩЕНИЕ ПРАВОЙ ПАНЕЛИ
+            // =========================================================================
+            // =========================================================================
+            // ЧАСТЬ 1: СЛОТ КНОПКИ СПЛИТТЕРА И ИНИЦИАЛИЗАЦИЯ ЧИСТОГО МАКЕТА ПАК
+            // =========================================================================
             connect(this->btnSplitScreen, &QToolButton::clicked, this, [this](bool checked) {
                 if (!ui->mainHorizontalSplitter || !ui->widgetRightCharts) return;
-
                 QComboBox *origFileCombo = ui->fileComboBox;
-                QComboBox *origFuncCombo = this->findChild<QComboBox*>(QStringLiteral("comboDevice"));
-                QToolButton *origCloseBtn = this->findChild<QToolButton*>(QStringLiteral("btnCloseFile"));
 
+                QToolButton *origCloseBtn = this->findChild<QToolButton*>(QStringLiteral("btnCloseFile"));
                 if (!origFileCombo) {
-                    qWarning() << "❌ [UI СБОЙ]: Оригинальный fileComboBox не найден!";
+                    qWarning() << " [UI СБОЙ]: Оригинальный fileComboBox не найден!";
                     return;
                 }
 
-                QPlainTextEdit *rightEditor = ui->widgetRightCharts->findChild<QPlainTextEdit*>(QStringLiteral("m_rightCodeEditor"));
+                // Ищем правый редактор в памяти Студии
+                CodeEditor *rightEditor = ui->widgetRightCharts->findChild<CodeEditor*>(QStringLiteral("m_rightCodeEditor"));
 
-                // ДИНАМИЧЕСКОЕ ДООСНАЩЕНИЕ ПРАВОЙ ПАНЕЛИ (Строго 1 раз при первом клике)
-                if (!rightEditor) {
-                    qDebug() << "🧱 [UI ИНИЦИАЛИЗАЦИЯ]: Модернизация widgetRightCharts под текстовый редактор...";
+                // ---------------------------------------------------------------------
+                // РЕЖИМ ВКЛЮЧЕНИЯ: ЧИСТАЯ СБОРКА С НУЛЯ (ЗАЩИТА ОТ НАЛОЖЕНИЯ ОКН)
+                // ---------------------------------------------------------------------
+                if (checked) {
+                    ui->widgetRightCharts->setVisible(true);
+                    ui->widgetRightCharts->setMinimumSize(QSize(0, 0));
+                    ui->widgetRightCharts->setMaximumSize(QSize(16777215, 16777215));
 
-                    QVBoxLayout *rightBoxLayout = qobject_cast<QVBoxLayout*>(ui->widgetRightCharts->layout());
-                    if (!rightBoxLayout) {
-                        if (ui->widgetRightCharts->layout()) delete ui->widgetRightCharts->layout();
-                        rightBoxLayout = new QVBoxLayout(ui->widgetRightCharts);
+                    // Если старый редактор чудом выжил в куче RAM — принудительно стираем его перед сборкой
+                    if (rightEditor) {
+                        rightEditor->deleteLater();
+                        rightEditor = nullptr;
                     }
+
+                    qDebug() << " [UI ИНИЦИАЛИЗАЦИЯ]: Абсолютно чистая сборка widgetRightCharts под CodeEditor...";
+
+                    // Полностью пересоздаем макет, полностью вычищая застрявшие скрытые слои
+                    if (ui->widgetRightCharts->layout()) {
+                        delete ui->widgetRightCharts->layout();
+                    }
+                    QVBoxLayout *rightBoxLayout = new QVBoxLayout(ui->widgetRightCharts);
                     rightBoxLayout->setContentsMargins(0, 0, 0, 0);
                     rightBoxLayout->setSpacing(4);
 
-                    // 1. Строим верхнюю мини-панель TopBar
+                    // Строим верхнюю мини-панель инструментов TopBar
                     QWidget *clonedTopBar = new QWidget(ui->widgetRightCharts);
                     QHBoxLayout *topBarLayout = new QHBoxLayout(clonedTopBar);
                     topBarLayout->setContentsMargins(10, 4, 10, 4);
                     topBarLayout->setSpacing(10);
 
-                    // Инициализируем комбобоксы НАПРЯМУЮ в поля класса
                     this->m_clonedFileComboBox = new QComboBox(clonedTopBar);
                     this->m_clonedFileComboBox->setObjectName(QStringLiteral("m_clonedFileComboBox"));
                     this->m_clonedFileComboBox->setFixedWidth(220);
                     topBarLayout->addWidget(this->m_clonedFileComboBox);
 
-                    // КЛОНИРОВАНИЕ КНОПКИ ЗАКРЫТИЯ (Размещение строго МЕЖДУ комбобоксами)
                     QToolButton *clonedCloseBtn = new QToolButton(clonedTopBar);
                     clonedCloseBtn->setObjectName(QStringLiteral("m_clonedCloseButton"));
                     clonedCloseBtn->setCursor(Qt::PointingHandCursor);
                     clonedCloseBtn->setFixedSize(24, 24);
 
-                    if (origCloseBtn) {
+                    if (origCloseBtn != nullptr) {
                         clonedCloseBtn->setIcon(origCloseBtn->icon());
                         clonedCloseBtn->setStyleSheet(origCloseBtn->styleSheet());
                         clonedCloseBtn->setToolTip(origCloseBtn->toolTip());
                     } else {
                         clonedCloseBtn->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
-                        clonedCloseBtn->setStyleSheet(QStringLiteral("QToolButton { border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; } QToolButton:hover { background: #fee2e2; }"));
-                        clonedCloseBtn->setToolTip(QStringLiteral("Закрыть правый экран редактора"));
+                        clonedCloseBtn->setStyleSheet(QStringLiteral(
+                            "QToolButton { border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; } "
+                            "QToolButton:hover { background: #fee2e2; }"
+                        ));
+                        clonedCloseBtn->setToolTip(QStringLiteral("Закрыть правый экран"));
                     }
                     topBarLayout->addWidget(clonedCloseBtn);
 
-                    // Инициализируем второй комбобокс НАПРЯМУЮ в поле класса
                     this->m_clonedFuncComboBox = new QComboBox(clonedTopBar);
                     this->m_clonedFuncComboBox->setObjectName(QStringLiteral("m_clonedFuncComboBox"));
                     this->m_clonedFuncComboBox->setFixedWidth(220);
                     topBarLayout->addWidget(this->m_clonedFuncComboBox);
-
                     topBarLayout->addStretch(1);
                     rightBoxLayout->addWidget(clonedTopBar);
+                    // =========================================================================
+                    // ЧАСТЬ 2: СОЗДАЕМ CODEEDITOR С НА ТИВНОЙ МИНИКАРТОЙ ИЗ CODEEDITOR.CPP
+                    // =========================================================================
+                    MinimapArea *rightMinimap = nullptr;
+                    CodeEditor::createEditorWithMinimap(ui->widgetRightCharts, rightEditor, rightMinimap);
 
-                    // 2. Создаем независимый правый текстовый редактор
-                    rightEditor = new QPlainTextEdit(ui->widgetRightCharts);
                     rightEditor->setObjectName(QStringLiteral("m_rightCodeEditor"));
                     rightEditor->setReadOnly(true);
-                    rightEditor->setStyleSheet(
-                        "QPlainTextEdit { background-color: #fafafa; color: #1e293b; "
-                        "font-family: 'Source Code Pro', 'Monospace', 'Courier New'; font-size: 13px; "
-                        "border: 1px solid #e2e8f0; border-radius: 4px; }"
-                    );
+                    rightEditor->setStyleSheet(QStringLiteral(
+                        "QPlainTextEdit#m_rightCodeEditor { background-color: #ffffff; color: #1e293b; "
+                        "font-family: 'Source Code Pro', 'Monospace'; font-size: 13px; "
+                        "border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px; }"
+                    ));
                     rightBoxLayout->addWidget(rightEditor);
 
-                    // НАЗНАЧЕНИЕ ДЕЙСТВИЯ КРЕСТИКУ ЗАКРЫТИЯ ПРАВОЙ ПАНЕЛИ
+                    rightEditor->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+                    rightEditor->setCursorWidth(2);
+
+                    // Включаем кастомную контекстную политику и привязываем ваше родное меню из codeeditor.cpp
+                    rightEditor->setContextMenuPolicy(Qt::CustomContextMenu);
+                    connect(rightEditor, &CodeEditor::customContextMenuRequested, rightEditor, &CodeEditor::showEditorContextMenu);
+
+                    if (rightMinimap) {
+                        rightMinimap->show();
+                    }
+
+                    // Монолитный графический цикл экстра-выделений (Подсветка строки + красные линии ошибок)
+                    connect(rightEditor, &QPlainTextEdit::cursorPositionChanged, this, [this, rightEditor]() {
+                        if (!rightEditor) return;
+
+                        QList<QTextEdit::ExtraSelection> extraSelections;
+
+                        // А. Маркируем мягким фоном текущую строку рабочей каретки
+                        QTextEdit::ExtraSelection selection;
+                        selection.format.setBackground(QColor(QStringLiteral("#f1f5f9")));
+                        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+                        selection.cursor = rightEditor->textCursor();
+                        selection.cursor.clearSelection();
+                        extraSelections.append(selection);
+
+                        // Б. Восстанавливаем красные волнистые линии pylsp, сохраненные в памяти виджета
+                        QList<int> cachedErrors = rightEditor->property("cached_pylsp_rows").value<QList<int>>();
+                        QTextCharFormat errorFormat;
+                        errorFormat.setUnderlineColor(QColor(Qt::red));
+                        errorFormat.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+
+                        for (int lineNum : cachedErrors) {
+                            QTextBlock block = rightEditor->document()->findBlockByLineNumber(lineNum);
+                            if (block.isValid()) {
+                                QTextEdit::ExtraSelection errorSel;
+                                errorSel.format = errorFormat;
+                                errorSel.cursor = QTextCursor(block);
+                                errorSel.cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+                                extraSelections.append(errorSel);
+                            }
+                        }
+                        rightEditor->setExtraSelections(extraSelections);
+                    });
+
+                    PythonHighlighter *rightHighlighter = new PythonHighlighter(rightEditor->document());
+                    rightEditor->setProperty("jedi_highlighter", QVariant::fromValue(rightHighlighter));
+
                     connect(clonedCloseBtn, &QToolButton::clicked, this, [this]() {
                         if (this->btnSplitScreen && this->btnSplitScreen->isChecked()) {
                             this->btnSplitScreen->setChecked(false);
-                            this->btnSplitScreen->animateClick(); // Безопасное и плавное сворачивание панели
+                            this->btnSplitScreen->animateClick();
                         }
                     });
-                }
-
-                ui->mainHorizontalSplitter->setCollapsible(0, checked ? true : false);
-                ui->mainHorizontalSplitter->setCollapsible(1, true);
-
-                // РЕЖИМ ВКЛЮЧЕНИЯ РАЗДЕЛЕНИЯ ЭКРАНА
-                if (checked) {
-                    ui->widgetRightCharts->setVisible(true);
-                    ui->widgetRightCharts->setMinimumSize(QSize(0, 0));
-                    ui->widgetRightCharts->setMaximumSize(QSize(16777215, 16777215));
-                    rightEditor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
-                    // Клонируем элементы дерева файлов напрямую в поля класса
+                    // ---------------------------------------------------------------------
+                    // ЧАСТЬ 3: АСИНХРОННОЕ ЗАПОЛНЕНИЕ ДАННЫХ И СВЯЗЫВАНИЕ НАВИГАЦИИ PYLSP
+                    // ---------------------------------------------------------------------
                     if (this->m_clonedFileComboBox) {
-                        this->m_clonedFileComboBox->clear();
-                        for (int i = 0; i < origFileCombo->count(); ++i) {
-                            this->m_clonedFileComboBox->addItem(origFileCombo->itemText(i), origFileCombo->itemData(i));
-                        }
-                        // СИНХРОНИЗАЦИЯ: Автоматически выставляем тот же файл, что открыт слева
-                        this->m_clonedFileComboBox->setCurrentIndex(origFileCombo->currentIndex());
-                    }
-
-                    if (origFuncCombo && this->m_clonedFuncComboBox) {
-                        this->m_clonedFuncComboBox->clear();
-                        for (int i = 0; i < origFuncCombo->count(); ++i) {
-                            this->m_clonedFuncComboBox->addItem(origFuncCombo->itemText(i), origFuncCombo->itemData(i));
-                        }
-                        this->m_clonedFuncComboBox->setCurrentIndex(origFuncCombo->currentIndex());
-                    }
-
-                    // ПОДКЛЮЧЕНИЕ СИГНАЛА ЧТЕНИЯ ФАЙЛОВ К ПРАВОМУ КОМБОБОКСУ КЛАССА
-                    if (this->m_clonedFileComboBox) {
-                        QObject::disconnect(this->m_clonedFileComboBox, &QComboBox::currentIndexChanged, nullptr, nullptr);
-
                         connect(this->m_clonedFileComboBox, &QComboBox::currentIndexChanged, this, [this, rightEditor](int index) {
-                            if (!this->m_clonedFileComboBox || !rightEditor) return;
+                            if (!this->m_clonedFileComboBox || !rightEditor || index < 0) return;
 
                             QString originalFilename = this->m_clonedFileComboBox->itemText(index).trimmed();
                             QString lowerFilename = originalFilename.toLower();
 
-                            // ОПРЕДЕЛЕНИЕ КОРНЯ СЕССИИ /z1/ БЕЗ СМЕЩЕНИЯ В NOTEBOOKS
                             QDir baseDir(this->currentOpenProjectPath);
                             QString baseRootPath = baseDir.absolutePath();
 
                             if (baseRootPath.endsWith(QStringLiteral("/notebooks")) || baseRootPath.endsWith(QStringLiteral("/notebooks/"))) {
-                                baseDir.cdUp(); // Поднимаемся из папки блокнотов на уровень выше в z1!
+                                baseDir.cdUp();
                                 baseRootPath = baseDir.absolutePath();
                             }
 
-                            // Собираем точные пути к папке скриптов
                             QString targetFilePathLower = QDir::cleanPath(baseRootPath + QStringLiteral("/scripts/") + lowerFilename);
                             QString targetFilePathOrig  = QDir::cleanPath(baseRootPath + QStringLiteral("/scripts/") + originalFilename);
 
                             QString finalPath;
-
-                            // Интеллектуальный выбор пути с проверкой регистра Linux (Train.py -> train.py)
                             if (QFile::exists(targetFilePathLower)) {
                                 finalPath = targetFilePathLower;
                             } else if (QFile::exists(targetFilePathOrig)) {
                                 finalPath = targetFilePathOrig;
                             } else {
-                                rightEditor->setPlainText(QString(
-                                    "❌ Ошибка MLOps: Скрипт отсутствует в каталоге /z1/scripts/.\n"
-                                    "Проверенные пути на диске Arch Linux:\n"
-                                    "  1. %1\n"
-                                    "  2. %2"
-                                ).arg(targetFilePathLower, targetFilePathOrig));
+                                rightEditor->setPlainText(QString("--- Скрипт отсутствует в каталоге /z1/scripts/ ---"));
                                 return;
                             }
 
-                            qDebug() << "🟢 [РЕДАКТОР УСПЕХ]: Путь рассчитан идеально:" << finalPath;
-
+                            rightEditor->blockSignals(true);
                             QFile file(finalPath);
                             if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
                                 QTextStream in(&file);
-                                in.setEncoding(QStringConverter::Utf8); // Защита кириллицы в комментариях
+                                in.setEncoding(QStringConverter::Utf8);
                                 rightEditor->setPlainText(in.readAll());
                                 file.close();
-                            } else {
-                                rightEditor->setPlainText(QStringLiteral("❌ Ошибка ядра ОС: Не удалось прочитать дескриптор файла."));
                             }
-                        });
+                            rightEditor->blockSignals(false);
 
-                        // Выталкиваем первичное чтение текста при открытии панели
-                        emit this->m_clonedFileComboBox->currentIndexChanged(this->m_clonedFileComboBox->currentIndex());
+                            rightEditor->setObjectName(finalPath);
+                            rightEditor->document()->setProperty("is_right_panel", true);
+
+                            this->setProperty("isRightPanelFocused", true);
+                            this->validatePythonSyntax(finalPath);
+                            this->setProperty("isRightPanelFocused", false);
+
+                            QTextCursor startCursor = rightEditor->textCursor();
+                            startCursor.movePosition(QTextCursor::Start);
+                            rightEditor->setTextCursor(startCursor);
+                        });
                     }
 
-                    // Пропорции 50/50 от текущей ширины сплиттера
+                    // Асинхронный барьер наполнения комбобоксов
+                    QTimer::singleShot(0, this, [this, origFileCombo, rightEditor]() {
+                        if (this->m_clonedFileComboBox) this->m_clonedFileComboBox->blockSignals(true);
+                        if (this->m_clonedFuncComboBox) this->m_clonedFuncComboBox->blockSignals(true);
+
+                        if (this->m_clonedFileComboBox && origFileCombo) {
+                            this->m_clonedFileComboBox->clear();
+                            for (int i = 0; i < origFileCombo->count(); ++i) {
+                                this->m_clonedFileComboBox->addItem(origFileCombo->itemText(i), origFileCombo->itemData(i));
+                            }
+                            this->m_clonedFileComboBox->setCurrentIndex(origFileCombo->currentIndex());
+                        }
+
+                        QComboBox *origFuncCombo = this->findChild<QComboBox*>(QStringLiteral("comboMethods"));
+                        if (!origFuncCombo) origFuncCombo = this->findChild<QComboBox*>(QStringLiteral("functionComboBox"));
+
+                        if (this->m_clonedFuncComboBox && origFuncCombo) {
+                            this->m_clonedFuncComboBox->clear();
+                            for (int i = 0; i < origFuncCombo->count(); ++i) {
+                                this->m_clonedFuncComboBox->addItem(origFuncCombo->itemText(i), origFuncCombo->itemData(i));
+                            }
+                            this->m_clonedFuncComboBox->setCurrentIndex(origFuncCombo->currentIndex());
+
+                            QObject::disconnect(this->m_clonedFuncComboBox, &QComboBox::currentIndexChanged, nullptr, nullptr);
+                            connect(this->m_clonedFuncComboBox, &QComboBox::currentIndexChanged, this, [this, rightEditor](int idx) {
+                                if (!this->m_clonedFuncComboBox || !rightEditor || idx < 0) return;
+
+                                QVariant lineData = this->m_clonedFuncComboBox->itemData(idx);
+                                if (lineData.isValid()) {
+                                    int targetLine = lineData.toInt();
+                                    QTextDocument *doc = rightEditor->document();
+                                    QTextBlock block = doc->findBlockByLineNumber(targetLine - 1);
+                                    if (block.isValid()) {
+                                        QTextCursor cursor(block);
+                                        rightEditor->setTextCursor(cursor);
+                                        rightEditor->ensureCursorVisible();
+                                    }
+                                }
+                            });
+                        }
+
+                        if (this->m_clonedFileComboBox) {
+                            this->m_clonedFileComboBox->blockSignals(false);
+                            emit this->m_clonedFileComboBox->currentIndexChanged(this->m_clonedFileComboBox->currentIndex());
+                        }
+                        if (this->m_clonedFuncComboBox) this->m_clonedFuncComboBox->blockSignals(false);
+                    });
+
+                    // Сведение геометрии горизонтального сплиттера 50/50
                     int availableWidth = ui->mainHorizontalSplitter->width();
                     if (availableWidth <= 0) availableWidth = this->width() - 68;
                     int halfWidth = availableWidth / 2;
-
                     ui->mainHorizontalSplitter->setSizes(QList<int>({halfWidth, halfWidth}));
 
                     if (mainVerticalSplitter) {
                         int currentHeight = this->height();
-                        mainVerticalSplitter->setSizes(QList({currentHeight, 0}));
+                        mainVerticalSplitter->setSizes(QList<int>({currentHeight, 0}));
                     }
-                }// РЕЖИМ ВЫКЛЮЧЕНИЯ (Сворачиваем правую панель в 0)
-                else {if (this->m_clonedFileComboBox) QObject::disconnect(this->m_clonedFileComboBox, nullptr, nullptr, nullptr);
-                    ui->widgetRightCharts->setVisible(false);
-                    ui->mainHorizontalSplitter->setSizes(QList({this->width(), 0}));
-                    ui->mainHorizontalSplitter->setCollapsible(0, false);
                 }
+                // =========================================================================
+                // РЕЖИМ ВЫКЛЮЧЕНИЯ: ХИРУРГИЧЕСКОЕ УНИЧТОЖЕНИЕ ОБЪЕКТОВ ДЛЯ ИСКЛЮЧЕНИЯ НАЛОЖЕНИЯ
+                // =========================================================================
+                else {
+                    if (this->m_clonedFileComboBox != nullptr) {
+                        QObject::disconnect(this->m_clonedFileComboBox, nullptr, nullptr, nullptr);
+                        this->m_clonedFileComboBox = nullptr;
+                    }
+                    if (this->m_clonedFuncComboBox != nullptr) {
+                        this->m_clonedFuncComboBox = nullptr;
+                    }
+
+                    // Насильно деинсталлируем правый CodeEditor и его миникарту из кучи RAM Linux
+                    if (rightEditor) {
+                        rightEditor->setVisible(false);
+                        rightEditor->deleteLater();
+                    }
+
+                    // Безопасно очищаем внутренний Layout контейнера widgetRightCharts
+                    if (ui->widgetRightCharts->layout()) {
+                        QLayoutItem *child;
+                        while ((child = ui->widgetRightCharts->layout()->takeAt(0)) != nullptr) {
+                            if (child->widget()) {
+                                child->widget()->deleteLater();
+                            }
+                            delete child;
+                        }
+                        delete ui->widgetRightCharts->layout();
+                    }
+
+                    ui->widgetRightCharts->setVisible(false);
+                    if (ui->mainHorizontalSplitter) {
+                        ui->mainHorizontalSplitter->setSizes(QList<int>({this->width(), 0}));
+                        ui->mainHorizontalSplitter->setCollapsible(0, false);
+                    }
+                }
+
                 ui->mainHorizontalSplitter->update();
                 if (mainVerticalSplitter) mainVerticalSplitter->update();
                 if (this->layout()) this->layout()->activate();
@@ -2456,7 +2569,15 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     // СИНХРОНИЗИРОВАННЫЙ СМАРТ-КОННЕКТ КОМБОБОКСА (ФИНАЛЬНАЯ ИНТЕГРАЦИЯ С DOC_MGR)
     // =========================================================================
     connect(ui->fileComboBox, &QComboBox::currentIndexChanged, this, [this](int index) {
-        if (index < 0 || index >= ui->centralStackedWidget->count()) return;
+        // 1. ЖЕСТКАЯ ПРОВЕРКА НА ИНДЕКС И НАЛИЧИЕ ЭЛЕМЕНТОВ (ЗАЩИТА ОТ КРАША ПРИ CLEAR)
+        if (!ui->fileComboBox || index < 0 || index >= ui->fileComboBox->count()) {
+            return;
+        }
+
+        // 2. ПРОВЕРКА АКТИВНОГО ФОКУСА СПЛИТТЕРА
+        if (this->property("isRightPanelFocused").toBool()) {
+            return;
+        }
 
         // Извлекаем сохраненное значение из метаданных строки
         QVariant dataVal = ui->fileComboBox->itemData(index);
@@ -3371,69 +3492,365 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
         }
     }
 
+    // // =========================================================================
+    // // УМНАЯ ЛОГИКА ДЛЯ КНОПКИ: ГРАФИКИ (actTensor) - ИНТЕГРАЦИЯ С WEBVIEW
+    // // =========================================================================
+    // if (leftSideBarContainer && ui->mainHorizontalSplitter && ui->widgetRightCharts)
+    // {
+    //     QToolButton *btnTensor = leftSideBarContainer->findChild<QToolButton*>("Графики");
+
+    //     // =========================================================================
+    //     // КОННЕКТ КНОПКИ: ГРАФИКИ / TENSORBOARD (С ПОДДЕРЖКОЙ СТОПОР-ОТЖАТИЯ)
+    //     // =========================================================================
+    //     if (btnTensor) {
+    //         connect(btnTensor, &QToolButton::clicked, this, [this, btnTensor](bool checked) {
+    //             qDebug() << ">>> [GRAPH BUTTON CLICK]: checked =" << checked;
+
+    //             int totalWindowWidth = this->width();
+    //             const int placeholderPageIndex = this->property("placeholderIndex").isValid()
+    //                     ? this->property("placeholderIndex").toInt()
+    //                     : 1;
+
+    //             // ПРОВЕРКА ПОВТОРНОГО КЛИКА: Если сплиттер графиков развернут и виден на экране
+    //             bool isAlreadyActive = ui->widgetRightCharts && ui->widgetRightCharts->isVisible();
+
+    //             if (checked && !isAlreadyActive)
+    //             {
+    //                 // СОСТОЯНИЕ А: РАЗВЕРТЫВАНИЕ ГРАФИКОВ TENSORBOARD
+    //                 ui->widgetRightCharts->setMaximumSize(QSize(16777215, 16777215));
+    //                 ui->widgetRightCharts->setMinimumWidth(0);
+    //                 ui->widgetRightCharts->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    //                 if (ui->tensorboardWebView) {
+    //                     ui->tensorboardWebView->setUrl(QUrl(QStringLiteral("http://127.0.0.1:6006")));
+    //                     ui->tensorboardWebView->reload();
+    //                 }
+    //                 ui->widgetRightCharts->setVisible(true);
+
+    //                 if (ui->leftDockWidget) {
+    //                     ui->leftDockWidget->setVisible(false);
+    //                     ui->leftDockWidget->hide();
+    //                 }
+
+    //                 ui->mainHorizontalSplitter->setCollapsible(0, true);
+    //                 ui->mainHorizontalSplitter->setSizes(QList<int>({0, totalWindowWidth}));
+    //                 btnTensor->setChecked(true);
+    //             }
+    //             else
+    //             {
+    //                 // =============================================================
+    //                 // СОСТОЯНИЕ Б: ПОВТОРНЫЙ КЛИК -> СВОРУЧИВАНИЕ ГРАФИКОВ И КАРТОЧКИ
+    //                 // =============================================================
+    //                 qDebug() << ">>> [ФИКСАТОР TENSOR]: Повторный клик! Схлопывание сплиттера.";
+    //                 btnTensor->setChecked(false);
+    //                 if (btnTensor->defaultAction()) btnTensor->defaultAction()->setChecked(false);
+
+    //                 ui->mainHorizontalSplitter->setSizes(QList<int>({1000, 0}));
+    //                 ui->widgetRightCharts->setVisible(false);
+    //                 ui->mainHorizontalSplitter->setCollapsible(0, false);
+
+    //                 if (ui->centralStackedWidget) ui->centralStackedWidget->setCurrentIndex(placeholderPageIndex);
+    //                 if (ui->fileComboBox) ui->fileComboBox->setCurrentIndex(-1);
+    //             }
+
+    //             if (this->layout()) this->layout()->activate();
+    //             ui->mainHorizontalSplitter->refresh();
+    //             this->update();
+    //         });
+    //     }
+    // }
+
+    // // =========================================================================
+    // // ИСПРАВЛЕННАЯ ЛОГИКА ЭКШЕНА actTensor (УБРАНА ЗАВИСИМОСТЬ ОТ ПЕРЕМЕННЫХ ХЕДЕРА)
+    // // =========================================================================
+    // if (leftSideBarContainer && ui->centralStackedWidget)
+    // {
+    //     QToolButton *btnTensor = leftSideBarContainer->findChild<QToolButton*>(QStringLiteral("Графики"));
+
+    //     if (btnTensor) {
+    //         btnTensor->setCheckable(true);
+
+    //         connect(btnTensor, &QToolButton::clicked, this, [this, btnTensor](bool checked) {
+    //             qDebug() << ">>> [ИИ ВИДЕО КОНВЕЙЕР]: Клик по экшену. Состояние checked =" << checked;
+
+    //             const int placeholderPageIndex = this->property("placeholderIndex").isValid()
+    //                 ? this->property("placeholderIndex").toInt()
+    //                 : 0;
+
+    //             // -------------------------------------------------------------
+    //             // СОСТОЯНИЕ А: КНОПКА ЗАЖАТА -> ОТКРЫВАЕМ СТРАНИЦУ 8 (widget_9)
+    //             // -------------------------------------------------------------
+    //             if (checked) {
+    //                 ui->centralStackedWidget->setCurrentIndex(8);
+    //                 btnTensor->setChecked(true);
+    //                 qDebug() << "  [УСПЕХ]: Выполнен переход на страницу 8 stackedWidget.";
+    //             }
+    //             // -------------------------------------------------------------
+    //             // СОСТОЯНИЕ Б: КНОПКУ ОТЖАЛИ -> ВОЗВРАТ В ОСНОВНОЙ РЕДАКТОР КОДА
+    //             // -------------------------------------------------------------
+    //             else {
+    //                 qDebug() << "  [ВЫКЛЮЧЕНИЕ]: Повторный клик! Закрытие видеоэкрана.";
+
+    //                 btnTensor->setChecked(false);
+    //                 if (btnTensor->defaultAction()) {
+    //                     btnTensor->defaultAction()->setChecked(false);
+    //                 }
+
+    //                 // [ФИКС ОШИБКИ SCOPE]: Ищем воркер динамически по имени во всей системе ПАК
+    //                 // Это полностью исключает ошибки компилятора, если указатель не прописан в хэдере
+    //                 QObject *workerObj = this->findChild<QObject*>(QStringLiteral("m_rtspWorker"));
+    //                 if (!workerObj && ui->widget_9) {
+    //                     workerObj = ui->widget_9->findChild<QObject*>(QStringLiteral("m_rtspWorker"));
+    //                 }
+
+    //                 // Если воркер нарезки кадров в ОЗУ запущен — глушим его потокобезопасно
+    //                 if (workerObj) {
+    //                     QMetaObject::invokeMethod(workerObj, "stopVideoProcessing", Qt::QueuedConnection);
+    //                     qDebug() << "  [MLOps]: Поток захвата кадров тепловизора успешно остановлен.";
+    //                 }
+
+    //                 ui->centralStackedWidget->setCurrentIndex(placeholderPageIndex);
+    //             }
+
+    //             if (this->layout()) {
+    //                 this->layout()->activate();
+    //             }
+    //             this->update();
+    //         });
+    //     }
+    // }
+
     // =========================================================================
-    // УМНАЯ ЛОГИКА ДЛЯ КНОПКИ: ГРАФИКИ (actTensor) - ИНТЕГРАЦИЯ С WEBVIEW
+    // ИСПРАВЛЕННАЯ ЛОГИКА ЭКШЕНА actTensor (ПОЛНАЯ АВТОНОМНОСТЬ ОТ ХЕДЕРА)
     // =========================================================================
-    if (leftSideBarContainer && ui->mainHorizontalSplitter && ui->widgetRightCharts)
+    // =========================================================================
+    // ИСПРАВЛЕННАЯ ЛОГИКА ЭКШЕНА actTensor С БЕЗОПАСНЫМ ЗАВЕРШЕНИЕМ ПОТОКОВ V4L2
+    // =========================================================================
+    // =========================================================================
+    // ОБНОВЛЕННЫЙ ЭКШЕН actTensor: БЕЗОПАСНЫЙ СТАРТ/СТОП СЕССИЙ БЕЗ СЕГФОЛТОВ
+    // =========================================================================
+    // =========================================================================
+    // ИСПРАВЛЕННАЯ ЛОГИКА actTensor С АБСОЛЮТНОЙ ЗАЩИТОЙ ОТ СЕГФОЛТОВ ПОТОКА V4L2
+    // =========================================================================
+    if (leftSideBarContainer && ui->centralStackedWidget)
     {
-        QToolButton *btnTensor = leftSideBarContainer->findChild<QToolButton*>("Графики");
+        QToolButton *btnTensor = leftSideBarContainer->findChild<QToolButton*>(QStringLiteral("Графики"));
 
-        // =========================================================================
-        // КОННЕКТ КНОПКИ: ГРАФИКИ / TENSORBOARD (С ПОДДЕРЖКОЙ СТОПОР-ОТЖАТИЯ)
-        // =========================================================================
         if (btnTensor) {
+            btnTensor->setCheckable(true);
+            QObject::disconnect(btnTensor, &QToolButton::clicked, nullptr, nullptr);
+
             connect(btnTensor, &QToolButton::clicked, this, [this, btnTensor](bool checked) {
-                qDebug() << ">>> [GRAPH BUTTON CLICK]: checked =" << checked;
+                qDebug() << ">>> [ИИ ВИДЕО КОНВЕЙЕР]: Состояние checked =" << checked;
 
-                int totalWindowWidth = this->width();
                 const int placeholderPageIndex = this->property("placeholderIndex").isValid()
-                        ? this->property("placeholderIndex").toInt()
-                        : 1;
+                    ? this->property("placeholderIndex").toInt()
+                    : 0;
 
-                // ПРОВЕРКА ПОВТОРНОГО КЛИКА: Если сплиттер графиков развернут и виден на экране
-                bool isAlreadyActive = ui->widgetRightCharts && ui->widgetRightCharts->isVisible();
+                // Извлекаем поток и воркер из гарантированного динамического контейнера свойств
+                QThread *activeThread = this->property("dynamicInferenceThread").value<QThread*>();
+                RtspVideoInferenceWorker *activeWorker = this->property("dynamicInferenceWorker").value<RtspVideoInferenceWorker*>();
 
-                if (checked && !isAlreadyActive)
-                {
-                    // СОСТОЯНИЕ А: РАЗВЕРТЫВАНИЕ ГРАФИКОВ TENSORBOARD
-                    ui->widgetRightCharts->setMaximumSize(QSize(16777215, 16777215));
-                    ui->widgetRightCharts->setMinimumWidth(0);
-                    ui->widgetRightCharts->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
-                    if (ui->tensorboardWebView) {
-                        ui->tensorboardWebView->setUrl(QUrl(QStringLiteral("http://127.0.0.1:6006")));
-                        ui->tensorboardWebView->reload();
-                    }
-                    ui->widgetRightCharts->setVisible(true);
-
-                    if (ui->leftDockWidget) {
-                        ui->leftDockWidget->setVisible(false);
-                        ui->leftDockWidget->hide();
-                    }
-
-                    ui->mainHorizontalSplitter->setCollapsible(0, true);
-                    ui->mainHorizontalSplitter->setSizes(QList<int>({0, totalWindowWidth}));
+                // -------------------------------------------------------------
+                // СОСТОЯНИЕ А: КНОПКА ЗАЖАТА -> ОТКРЫВАЕМ СТРАНИЦУ 8 И ВКЛЮЧАЕМ КАМЕРУ
+                // -------------------------------------------------------------
+                // -------------------------------------------------------------
+                // СОСТОЯНИЕ А: КНОПКА ЗАЖАТА -> ОТКРЫВАЕМ СТРАНИЦУ 8 И ВКЛЮЧАЕМ КАМЕРУ
+                // -------------------------------------------------------------
+                if (checked) {
+                    ui->centralStackedWidget->setCurrentIndex(8);
                     btnTensor->setChecked(true);
+
+                    QLabel *lblVideoCanvas = nullptr;
+                    QLabel *lblIiVerdict   = nullptr;
+                    QPushButton *btnRecord = nullptr;
+
+                    if (ui->widget_9) {
+                        lblVideoCanvas = qobject_cast<QLabel*>(ui->widget_9->getWidgetByName(QStringLiteral("lblVideoCanvas")));
+                        lblIiVerdict   = qobject_cast<QLabel*>(ui->widget_9->getWidgetByName(QStringLiteral("lblIiVerdict")));
+                        btnRecord      = qobject_cast<QPushButton*>(ui->widget_9->getWidgetByName(QStringLiteral("btnRecordVideo")));
+
+                        if (!lblVideoCanvas) lblVideoCanvas = ui->widget_9->findChild<QLabel*>(QStringLiteral("lblVideoCanvas"));
+                        if (!lblIiVerdict)   lblIiVerdict   = ui->widget_9->findChild<QLabel*>(QStringLiteral("lblIiVerdict"));
+                        if (!btnRecord)      btnRecord      = ui->widget_9->findChild<QPushButton*>(QStringLiteral("btnRecordVideo"));
+                    }
+
+                    if (!lblVideoCanvas) {
+                        qWarning() << "⚠️ [UI СБОЙ]: Холст lblVideoCanvas не найден на странице 8!";
+                    }
+
+                    QThread *activeThread = this->property("dynamicInferenceThread").value<QThread*>();
+                    RtspVideoInferenceWorker *activeWorker = this->property("dynamicInferenceWorker").value<RtspVideoInferenceWorker*>();
+
+                    if (!activeThread || !activeWorker) {
+                        activeThread = nullptr;
+                        activeWorker = nullptr;
+                    }
+
+                    // ИНИЦИАЛИЗАЦИЯ И СТАРТ АСИНХРОННОГО КОНВЕЙЕРА ВЕБ-КАМЕРЫ
+                    if (!activeThread) {
+                        activeThread = new QThread(this);
+
+                        QString webcamUrl = QStringLiteral("local_webcam_dev0");
+                        //QString modelPath = currentOpenProjectPath + QStringLiteral("/hf_hub/thermal_engine_model.pt");
+                        QString modelPath = QStringLiteral("/home/elf/zcc/z1/hf_hub/run_328_thermograms_resnet18_regressor_adam_cpu_2026-08-26_03-18-59_basic_run/thermal_engine_model.pt");
+
+                        activeWorker = new RtspVideoInferenceWorker(webcamUrl, modelPath);
+                        activeWorker->setObjectName(QStringLiteral("m_rtspWorker"));
+                        activeWorker->moveToThread(activeThread);
+
+                        this->setProperty("dynamicInferenceThread", QVariant::fromValue(activeThread));
+                        this->setProperty("dynamicInferenceWorker", QVariant::fromValue(activeWorker));
+
+                        // =========================================================================
+                        // СИГНАЛЬНЫЙ МОСТ: СВЯЗЫВАЕМ СИГНАЛ ОКНА НАПРЯМУЮ СО СЛОТОМ ВОРКЕРА
+                        // =========================================================================
+                        // Пакетная безопасная доставка QString между vCPU потоками Linux
+                        connect(this, &Neuro_programm::requestToggleRecording,
+                                activeWorker, &RtspVideoInferenceWorker::toggleRecording,
+                                Qt::QueuedConnection);
+                        // =========================================================================
+
+                        connect(activeThread, &QThread::started, activeWorker, &RtspVideoInferenceWorker::startVideoProcessing);
+                        connect(activeWorker, &RtspVideoInferenceWorker::finished, activeThread, &QThread::quit);
+
+                        connect(activeWorker, &RtspVideoInferenceWorker::finished, activeWorker, &QObject::deleteLater);
+                        connect(activeThread, &QThread::finished, activeThread, &QObject::deleteLater);
+
+                        // =========================================================================
+                        // ОБНОВЛЕННЫЙ СЛОТ ТРАНСЛЯЦИИ: СВЯЗЫВАНИЕ ВИДЕО, ТАБЛО И БЕГУЩИХ ГРАФИКОВ
+                        // =========================================================================
+                        connect(activeWorker, &RtspVideoInferenceWorker::frameAnalyzed, this, [this, lblVideoCanvas, lblIiVerdict](const QImage &img, float temp) {
+
+                            // 1. Обновляем видео-холст Expanding
+                            if (lblVideoCanvas) {
+                                lblVideoCanvas->setPixmap(QPixmap::fromImage(img));
+                            }
+
+                            // 2. Обновляем цифровое табло вердикта (выводим 2 знака после запятой)
+                            if (lblIiVerdict) {
+                                lblIiVerdict->setText(QString("🔥 ТЕМПЕРАТУРА ИИ: %1 °C").arg(temp, 0, 'f', 2));
+                            }
+
+                            // 3. ДИНАМИЧЕСКАЯ ОТРИСОВКА БЕГУЩЕЙ ЛИНИИ ТРЕНДА (Scroll-алгоритм)
+                            if (ui->widget_9) {
+                                QChartView *chartView = qobject_cast<QChartView*>(ui->widget_9->getWidgetByName(QStringLiteral("chartPlaceholder")));
+
+                                if (chartView) {
+                                    // Извлекаем зарегистрированные свойства объектов графиков из ОЗУ сборщика
+                                    QLineSeries *series = chartView->property("data_series").value<QLineSeries*>();
+                                    QValueAxis *axisX   = chartView->property("axis_x").value<QValueAxis*>();
+
+                                    if (series && axisX) {
+                                        // Инициализируем стартовую метку времени при самом первом проходе
+                                        static qint64 startTimeMs = QDateTime::currentMSecsSinceEpoch();
+
+                                        // Если пользователь перезапустил экран и очистил серию - сбрасываем шкалу времени
+                                        if (series->count() == 0) {
+                                            startTimeMs = QDateTime::currentMSecsSinceEpoch();
+                                        }
+
+                                        // Вычисляем сколько секунд (дробное число double) прошло со старта замера
+                                        qint64 currentTimeMs = QDateTime::currentMSecsSinceEpoch();
+                                        double elapsedSeconds = static_cast<double>(currentTimeMs - startTimeMs) / 1000.0;
+
+                                        // Добавляем новую точку замера ИИ на график (X = секунды, Y = градусы Цельсия)
+                                        series->append(elapsedSeconds, static_cast<double>(temp));
+
+                                        // ОГРАНИЧЕНИЕ ПАМЯТИ: Держим в ОЗУ последние 1500 точек, чтобы ПАК не зависал со временем
+                                        if (series->count() > 1500) {
+                                            series->remove(0);
+                                        }
+
+                                        // АВТОМАТИЧЕСКОЕ СКОЛЬЖЕНИЕ ОСИ ВРЕМЕНИ (Scroll Window)
+                                        // Если время вышло за рамки стартовых 60 секунд, плавно сдвигаем сетку вслед за точкой
+                                        if (elapsedSeconds > 60.0) {
+                                            axisX->setRange(elapsedSeconds - 60.0, elapsedSeconds);
+                                        } else {
+                                            // Пока первые 60 секунд не прошли - ось X жестко стоит от 0 до 60
+                                            axisX->setRange(0.0, 60.0);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        // =========================================================================
+
+                    }
+
+                    // СВЯЗЫВАНИЕ РОЗОВОЙ КНОПКИ С БЕЗОПАСНЫМ ЭМИТОМ СИГНАЛА (БЕЗ INVOKEМETHOD)
+                    if (btnRecord && activeWorker) {
+                        btnRecord->setEnabled(true);
+                        btnRecord->setVisible(true);
+                        btnRecord->setCheckable(true);
+                        btnRecord->setChecked(false);
+                        btnRecord->setText(QStringLiteral("🔴 Записать тренировочное видео"));
+                        btnRecord->setStyleSheet(QStringLiteral("QPushButton { font-weight: bold; background: #fff1f2; color: #991b1b; border: 1px solid #fecdd3; border-radius: 4px; padding: 6px; }"));
+
+                        QObject::disconnect(btnRecord, &QPushButton::clicked, nullptr, nullptr);
+
+                        connect(btnRecord, &QPushButton::clicked, this, [this, btnRecord](bool recChecked) {
+                            if (!btnRecord) return;
+
+                            if (recChecked) {
+                                btnRecord->setText(QStringLiteral("🛑 ОСТАНОВИТЬ ЗАПИСЬ СЕССИИ"));
+                                btnRecord->setStyleSheet(QStringLiteral("QPushButton { font-weight: bold; background: #e11d48; color: white; border: 1px solid #be123c; border-radius: 4px; padding: 6px; }"));
+
+                                QString baseDir = !currentOpenProjectPath.isEmpty() ? (currentOpenProjectPath + QStringLiteral("/scripts")) : QStringLiteral("/home/elf/pyTorch-Studio/Config");
+                                QDir().mkpath(baseDir);
+
+                                QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_hh-mm-ss"));
+                                QString savePath = baseDir + QStringLiteral("/train_session_") + timestamp + QStringLiteral(".mp4");
+
+                                // ГЕНЕРИРУЕМ СИГНАЛ ВМЕСТО КРИВОГО INVOKEMETHOD (Абсолютная защита от падений)
+                                emit requestToggleRecording(true, savePath);
+                                qDebug() << "🎬 [MLOps ПАК]: Сигнал старта записи отправлен в шину Qt6.";
+                            } else {
+                                btnRecord->setText(QStringLiteral("🔴 Записать тренировочное видео"));
+                                btnRecord->setStyleSheet(QStringLiteral("QPushButton { font-weight: bold; background: #fff1f2; color: #991b1b; border: 1px solid #fecdd3; border-radius: 4px; padding: 6px; }"));
+
+                                // ГЕНЕРИРУЕМ СИГНАЛ ОСТАНОВКИ
+                                emit requestToggleRecording(false, QString());
+                                qDebug() << "💾 [MLOps ПАК]: Сигнал остановки записи отправлен в шину Qt6.";
+                            }
+                        });
+                    }
+
+                    if (activeThread && !activeThread->isRunning()) {
+                        activeThread->start();
+                    }
+                    qDebug() << "📹 [УСПЕХ]: Выполнен чистый вход на страницу 8. Поток веб-камеры запущен.";
                 }
-                else
-                {
-                    // =============================================================
-                    // СОСТОЯНИЕ Б: ПОВТОРНЫЙ КЛИК -> СВОРУЧИВАНИЕ ГРАФИКОВ И КАРТОЧКИ
-                    // =============================================================
-                    qDebug() << ">>> [ФИКСАТОР TENSOR]: Повторный клик! Схлопывание сплиттера.";
+
+                // -------------------------------------------------------------
+                // СОСТОЯНИЕ Б: КНОПКУ ОТЖАЛИ -> АТОМАРНОЕ И БЕЗОПАСНОЕ ВЫКЛЮЧЕНИЕ ПОТОКА
+                // -------------------------------------------------------------
+                else {
+                    qDebug() << "🛑 [ВЫКЛЮЧЕНИЕ ВИДЕОЭКРАНА]: Старт безопасной выгрузки устройств...";
+
                     btnTensor->setChecked(false);
                     if (btnTensor->defaultAction()) btnTensor->defaultAction()->setChecked(false);
 
-                    ui->mainHorizontalSplitter->setSizes(QList<int>({1000, 0}));
-                    ui->widgetRightCharts->setVisible(false);
-                    ui->mainHorizontalSplitter->setCollapsible(0, false);
+                    // Останавливаем бесконечный цикл OpenCV
+                    if (activeWorker) {
+                        activeWorker->stopVideoProcessing();
+                    }
 
-                    if (ui->centralStackedWidget) ui->centralStackedWidget->setCurrentIndex(placeholderPageIndex);
-                    if (ui->fileComboBox) ui->fileComboBox->setCurrentIndex(-1);
+                    // Атомарно гасим Event Loop и ждем освобождения /dev/video0 Linux ядром
+                    if (activeThread && activeThread->isRunning()) {
+                        activeThread->quit();
+                        activeThread->wait();
+                    }
+
+                    // Стираем указатели из метасистемы Qt (полное исключение Dangling Pointer)
+                    this->setProperty("dynamicInferenceThread", QVariant());
+                    this->setProperty("dynamicInferenceWorker", QVariant());
+
+                    ui->centralStackedWidget->setCurrentIndex(placeholderPageIndex);
+                    qDebug() << "✨ [ВЫКЛЮЧЕНИЕ ВИДЕОЭКРАНА]: Потоки очищены. Возврат в редактор кода выполнен.";
                 }
 
                 if (this->layout()) this->layout()->activate();
-                ui->mainHorizontalSplitter->refresh();
                 this->update();
             });
         }
@@ -4971,6 +5388,25 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
         mlopsLayout->addItem(new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum));
     }
 
+    // =========================================================================
+    // ГЕНЕРАТИВНОЕ НАПОЛНЕНИЕ СТРАНИЦЫ 8 (widget_9 ПРЕОБРАЗОВАН В AI_panel)
+    // =========================================================================
+    // Внутри конструктора Neuro_programm:
+    if (ui->widget_9) {
+        // Вычисляем абсолютный путь к вашему древовидному JSON-файлу
+        QString monitorSchemaPath = QStringLiteral("/home/elf/pyTorch-Studio/Config/page_monitor_schema.json");
+
+        qDebug() << "🔬 [MonitorBuilder]: Запуск специализированной сборки ИИ-пульта...";
+
+        // Вызываем метод сборщика — теперь он отработает идеально!
+        bool isUiBuilt = ui->widget_9->buildMonitorUi(monitorSchemaPath);
+
+        if (isUiBuilt) {
+            qDebug() << "🎯 [УСПЕХ]: Интерфейс widget_9 чисто собран по древовидной схеме!";
+        } else {
+            qWarning() << "⚠️ [СБОЙ]: Не удалось динамически собрать страницу мониторинга.";
+        }
+    }
 
     // =========================================================================
     // ЧАСТЬ 4: ОСТАЛЬНЫЕ СИСТЕМНЫЕ ИНИЦИАЛИЗАЦИИ ВАШЕЙ СТУДИИ
@@ -14714,29 +15150,154 @@ void Neuro_programm::onPromptSubmitted(const QString &promptText)
     m_aiManager->requestChatGeneration(promptText, optimizedContextText);
 }
 
+// void Neuro_programm::validatePythonSyntax(const QString &filePath)
+// {
+//     // Базовая проверка указателей перед стартом фонового процесса Linux
+//     if (filePath.isEmpty() || !filePath.endsWith(".py", Qt::CaseInsensitive) || !panelOther) return;
+
+//     // =========================================================================
+//     // 1. ТЕНЕВОЕ АВТОСОХРАНЕНИЕ: ЗАПИСЬ СВЕЖЕГО ТЕКСТА ИЗ ОЗУ НА ХАРД
+//     // =========================================================================
+//     // Линтер flake8 умеет читать только файлы с диска. Чтобы он видел изменения
+//     // прямо во время набора текста, мы бесшумно перезаписываем файл.
+//     QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+//     CodeEditor *currentEditor = currentPage ? currentPage->findChild<CodeEditor*>() : nullptr;
+
+//     if (currentEditor && currentEditor->objectName() == filePath) {
+//         QFile file(filePath);
+//         if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+//             QTextStream out(&file);
+// #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+//             out.setEncoding(QStringConverter::Utf8);
+// #else
+//             out.setCodec("UTF-8");
+// #endif
+//             out << currentEditor->toPlainText();
+//             file.close();
+//         }
+//     }
+
+//     // =========================================================================
+//     // 2. ИНИЦИАЛИЗАЦИЯ И НАСТРОЙКА ПРОЦЕССА QPROCESS ДЛЯ LINUX
+//     // =========================================================================
+//     QProcess *syntaxProcess = new QProcess(this);
+//     syntaxProcess->setProperty("validatedFilePath", filePath);
+
+//     // Путь к исполняемому файлу flake8 внутри виртуального окружения проекта
+//     QString pythonPath = "/home/elf/venv/bin/flake8";
+//     QStringList arguments;
+//     arguments << filePath; // Запуск в стандартном POSIX режиме вывода
+
+//     // Подключаем лямбду на завершение работы утилиты
+//     connect(syntaxProcess, &QProcess::finished, this, [this, syntaxProcess]() {
+//         QString filePath = syntaxProcess->property("validatedFilePath").toString();
+
+//         // Очищаем таблицу problemsTable на дочерней панели перед заливкой свежих данных
+//         panelOther->clearErrorsForFile(filePath);
+
+//         // Считываем текстовые слепки из обоих системных каналов вывода Linux
+//         QByteArray rawOutput = syntaxProcess->readAllStandardOutput();
+//         QByteArray rawError  = syntaxProcess->readAllStandardError();
+
+//         QString outputText = QString::fromUtf8(rawOutput).trimmed();
+//         if (outputText.isEmpty()) {
+//             outputText = QString::fromUtf8(rawError).trimmed();
+//         }
+
+//         // Если выводы пусты — значит, код идеален (ошибок нет), завершаем работу
+//         if (outputText.isEmpty()) {
+//             syntaxProcess->deleteLater();
+//             return;
+//         }
+
+//         // =========================================================================
+//         // 3. ЖЕЛЕЗНЫЙ АЛГОРИТМ ПОСТРОЧНОГО РАЗБОРА С КОНЦА (ОБХОД СДВИГА КОЛОНОК)
+//         // =========================================================================
+//         QStringList errorLines = outputText.split('\n', Qt::SkipEmptyParts);
+//         for (const QString &errorLine : std::as_const(errorLines)) {
+
+//             // Ищем разделители ':' с конца строки, так как формат хвоста flake8 всегда фиксирован:
+//             // "/путь/к/файлу.py:строка:колонка: КОД текст_ошибки"
+//             QStringList parts = errorLine.split(':');
+//             if (parts.size() < 4) continue;
+
+//             // Номер строки — это всегда строго третий элемент с конца массива split
+//             QString errorRow = parts.at(parts.size() - 3).trimmed(); // Извлекает "26"
+
+//             // Всё, что идет после последнего двоеточия — это полезная ML-нагрузка (Код + Описание)
+//             // Пример: "E501 line too long (89 > 79 characters)"
+//             QString errorPayload = parts.last().trimmed();
+
+//             QString errorCode = "PEP8";
+//             QString errorDescription = errorPayload;
+
+//             // Распиливаем Payload на изолированный Код (E501) и Описание по самому первому пробелу
+//             int firstSpace = errorPayload.indexOf(' ');
+//             if (firstSpace != -1) {
+//                 errorCode = errorPayload.left(firstSpace).trimmed();           // Чистый "E501"
+//                 errorDescription = errorPayload.mid(firstSpace + 1).trimmed(); // Чистый текст "line too long..."
+//             }
+
+//             // Передаем порции данных в метод таблицы дочернего класса панели
+//             panelOther->addErrorRow(filePath, errorCode, errorRow, errorDescription);
+//         }
+
+//         // =========================================================================
+//         // 4. УПРАВЛЕНИЕ АДАПТИВНОЙ ГЕОМЕТРИЕЙ СПЛИТТЕРА ОКОН
+//         // =========================================================================
+//         // Если утилита нашла ошибки PEP8 прямо во время ввода кода пользователем,
+//         // мы автоматически выкатываем нижнюю панель на удобные 320 пикселей [0:1.635].
+//         if (errorLines.size() > 0 && mainVerticalSplitter)
+//         {
+//             panelOther->setVisible(true);
+//             panelOther->show();
+
+//             int totalHeight = this->height();
+//             mainVerticalSplitter->setSizes(QList<int>({totalHeight - 320, 320})); // Отдаем панели 320px
+//         }
+
+//         syntaxProcess->deleteLater(); // Безопасно очищаем память процесса из ОЗУ
+//     });
+
+//     // Запускаем асинхронный процесс. Время выполнения в Linux составляет ~30-40 мс.
+//     syntaxProcess->start(pythonPath, arguments);
+// }
+
 void Neuro_programm::validatePythonSyntax(const QString &filePath)
 {
     // Базовая проверка указателей перед стартом фонового процесса Linux
-    if (filePath.isEmpty() || !filePath.endsWith(".py", Qt::CaseInsensitive) || !panelOther) return;
+    if (filePath.isEmpty() || !filePath.endsWith(QStringLiteral(".py"), Qt::CaseInsensitive) || !panelOther)
+        return;
 
     // =========================================================================
-    // 1. ТЕНЕВОЕ АВТОСОХРАНЕНИЕ: ЗАПИСЬ СВЕЖЕГО ТЕКСТА ИЗ ОЗУ НА ХАРД
+    // 1. УМНОЕ ТЕНЕВОЕ АВТОСОХРАНЕНИЕ С УЧЕТОМ ДВУХ ПАНЕЛЕЙ
     // =========================================================================
-    // Линтер flake8 умеет читать только файлы с диска. Чтобы он видел изменения
-    // прямо во время набора текста, мы бесшумно перезаписываем файл.
-    QWidget *currentPage = ui->centralStackedWidget->currentWidget();
-    CodeEditor *currentEditor = currentPage ? currentPage->findChild<CodeEditor*>() : nullptr;
+    QPlainTextEdit *targetEditor = nullptr;
 
-    if (currentEditor && currentEditor->objectName() == filePath) {
+    // Сначала проверяем, не открыт ли запрашиваемый файл прямо сейчас на правой панели
+    if (ui->widgetRightCharts && ui->widgetRightCharts->isVisible()) {
+        QPlainTextEdit *rightEditor = ui->widgetRightCharts->findChild<QPlainTextEdit*>(QStringLiteral("m_rightCodeEditor"));
+        if (rightEditor && rightEditor->objectName() == filePath) {
+            targetEditor = rightEditor;
+        }
+    }
+
+    // Если на правой панели файла нет, ищем его по классической левой схеме centralStackedWidget
+    if (!targetEditor) {
+        QWidget *currentPage = ui->centralStackedWidget->currentWidget();
+        if (currentPage) {
+            targetEditor = currentPage->findChild<QPlainTextEdit*>();
+            // Если у вас используется кастомный CodeEditor, findChild<QPlainTextEdit*> все равно его найдет, так как он наследуется от него
+        }
+    }
+
+    // Перезаписываем файл на диск, чтобы flake8 увидел свежие изменения кода
+    if (targetEditor && targetEditor->objectName() == filePath) {
         QFile file(filePath);
         if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
             QTextStream out(&file);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
             out.setEncoding(QStringConverter::Utf8);
-#else
-            out.setCodec("UTF-8");
-#endif
-            out << currentEditor->toPlainText();
+            out << targetEditor->toPlainText();
             file.close();
         }
     }
@@ -14747,29 +15308,27 @@ void Neuro_programm::validatePythonSyntax(const QString &filePath)
     QProcess *syntaxProcess = new QProcess(this);
     syntaxProcess->setProperty("validatedFilePath", filePath);
 
-    // Путь к исполняемому файлу flake8 внутри виртуального окружения проекта
-    QString pythonPath = "/home/elf/venv/bin/flake8";
+    QString pythonPath = QStringLiteral("/home/elf/venv/bin/flake8");
     QStringList arguments;
-    arguments << filePath; // Запуск в стандартном POSIX режиме вывода
+    arguments << filePath;
 
     // Подключаем лямбду на завершение работы утилиты
     connect(syntaxProcess, &QProcess::finished, this, [this, syntaxProcess]() {
         QString filePath = syntaxProcess->property("validatedFilePath").toString();
 
-        // Очищаем таблицу problemsTable на дочерней панели перед заливкой свежих данных
+        // Очищаем таблицу проблем на нижней дочерней панели
         panelOther->clearErrorsForFile(filePath);
 
-        // Считываем текстовые слепки из обоих системных каналов вывода Linux
         QByteArray rawOutput = syntaxProcess->readAllStandardOutput();
-        QByteArray rawError  = syntaxProcess->readAllStandardError();
-
+        QByteArray rawError = syntaxProcess->readAllStandardError();
         QString outputText = QString::fromUtf8(rawOutput).trimmed();
         if (outputText.isEmpty()) {
             outputText = QString::fromUtf8(rawError).trimmed();
         }
 
-        // Если выводы пусты — значит, код идеален (ошибок нет), завершаем работу
         if (outputText.isEmpty()) {
+            // Если ошибок нет — принудительно очищаем красные подчеркивания с документов обеих панелей
+            this->clearHighlighterErrors(filePath);
             syntaxProcess->deleteLater();
             return;
         }
@@ -14778,52 +15337,70 @@ void Neuro_programm::validatePythonSyntax(const QString &filePath)
         // 3. ЖЕЛЕЗНЫЙ АЛГОРИТМ ПОСТРОЧНОГО РАЗБОРА С КОНЦА (ОБХОД СДВИГА КОЛОНОК)
         // =========================================================================
         QStringList errorLines = outputText.split('\n', Qt::SkipEmptyParts);
-        for (const QString &errorLine : std::as_const(errorLines)) {
+        QList<int> errorRowsList; // Собираем массив строк с ошибками для хайлайтера
 
-            // Ищем разделители ':' с конца строки, так как формат хвоста flake8 всегда фиксирован:
-            // "/путь/к/файлу.py:строка:колонка: КОД текст_ошибки"
+        for (const QString &errorLine : std::as_const(errorLines)) {
             QStringList parts = errorLine.split(':');
             if (parts.size() < 4) continue;
 
-            // Номер строки — это всегда строго третий элемент с конца массива split
-            QString errorRow = parts.at(parts.size() - 3).trimmed(); // Извлекает "26"
-
-            // Всё, что идет после последнего двоеточия — это полезная ML-нагрузка (Код + Описание)
-            // Пример: "E501 line too long (89 > 79 characters)"
+            QString errorRow = parts.at(parts.size() - 3).trimmed();
             QString errorPayload = parts.last().trimmed();
-
-            QString errorCode = "PEP8";
+            QString errorCode = QStringLiteral("PEP8");
             QString errorDescription = errorPayload;
 
-            // Распиливаем Payload на изолированный Код (E501) и Описание по самому первому пробелу
             int firstSpace = errorPayload.indexOf(' ');
             if (firstSpace != -1) {
-                errorCode = errorPayload.left(firstSpace).trimmed();           // Чистый "E501"
-                errorDescription = errorPayload.mid(firstSpace + 1).trimmed(); // Чистый текст "line too long..."
+                errorCode = errorPayload.left(firstSpace).trimmed();
+                errorDescription = errorPayload.mid(firstSpace + 1).trimmed();
             }
 
-            // Передаем порции данных в метод таблицы дочернего класса панели
+            // Заливаем ошибку в нижнюю таблицу ПАК Студии
             panelOther->addErrorRow(filePath, errorCode, errorRow, errorDescription);
+
+            // Запоминаем номер строки (переводим в 0-индексируемый формат для Qt)
+            errorRowsList.append(errorRow.toInt() - 1);
         }
+
+        // =========================================================================
+        // ЭТ АЖ АВТОМАТИЧЕСКОЙОТРИСОВКИ КРАСНЫХ ПОДЧЕРКИВАНИЙ НА ХОЛСТЕ
+        // =========================================================================
+        this->applyHighlighterErrors(filePath, errorRowsList);
 
         // =========================================================================
         // 4. УПРАВЛЕНИЕ АДАПТИВНОЙ ГЕОМЕТРИЕЙ СПЛИТТЕРА ОКОН
         // =========================================================================
-        // Если утилита нашла ошибки PEP8 прямо во время ввода кода пользователем,
-        // мы автоматически выкатываем нижнюю панель на удобные 320 пикселей [0:1.635].
-        if (errorLines.size() > 0 && mainVerticalSplitter)
-        {
+        if (errorLines.size() > 0 && mainVerticalSplitter) {
             panelOther->setVisible(true);
             panelOther->show();
-
             int totalHeight = this->height();
-            mainVerticalSplitter->setSizes(QList<int>({totalHeight - 320, 320})); // Отдаем панели 320px
+            mainVerticalSplitter->setSizes(QList<int>({totalHeight - 320, 320}));
         }
 
-        syntaxProcess->deleteLater(); // Безопасно очищаем память процесса из ОЗУ
+        // =========================================================================
+        // МОДИФИЦИРОВАННОЕ УПРАВЛЕНИЕ АДАПТИВНОЙ ГЕОМЕТРИЕЙ СНИЗУ
+        // =========================================================================
+        // Проверяем: если линт запущен из правого окна — ЗАПРЕЩАЕМ открывать panelOther!
+        bool isRightActive = this->property("isRightPanelFocused").toBool();
+
+        if (errorLines.size() > 0 && mainVerticalSplitter && !isRightActive)
+        {
+            // Этот блок сработает СТРОГО для левого оригинального окна!
+            panelOther->setVisible(true);
+            panelOther->show();
+            int totalHeight = this->height();
+            mainVerticalSplitter->setSizes(QList<int>({totalHeight - 320, 320}));
+        }
+        else if (isRightActive)
+        {
+            // Если проверка шла для правой панели — принудительно гарантируем,
+            // что нижняя панель логов останется закрытой и не вылезет на экран
+            panelOther->setVisible(false);
+            panelOther->hide();
+        }
+
+        syntaxProcess->deleteLater();
     });
 
-    // Запускаем асинхронный процесс. Время выполнения в Linux составляет ~30-40 мс.
     syntaxProcess->start(pythonPath, arguments);
 }
 
@@ -14940,6 +15517,89 @@ void Neuro_programm::setupSessionTableConnections() {
     });
 }
 
+void Neuro_programm::runJediAnalysisForWidget(const QString &filePath, QPlainTextEdit *targetEditor) {
+    if (filePath.isEmpty() || !targetEditor) return;
 
+    // Извлекаем чистый текст из правого независимого редактора
+    QString codeContent = targetEditor->toPlainText();
+    if (codeContent.isEmpty()) return;
+
+    // Считываем хайлайтер, который мы сохранили в свойствах виджета в предыдущем шаге
+    QVariant highlighterVar = targetEditor->property("jedi_highlighter");
+    PythonHighlighter *highlighter = highlighterVar.isValid()
+        ? highlighterVar.value<PythonHighlighter*>()
+        : nullptr;
+
+    // =========================================================================
+    // ПЕРЕПРАВКА ДАННЫХ В ВАШ ШТАТНЫЙ СЕРВЕР JEDI (jedi_server.py / QProcess)
+    // =========================================================================
+    // Если ваше ядро общается с Python-сервером через QProcess (например, jediProcess):
+    if (this->lspProcess && this->lspProcess->state() == QProcess::Running) {
+        // Формируем JSON-пакет или текстовый поток, который ждет ваш jedi_server.py
+        // Важно передать правильный filePath, чтобы сервер понял контекст импортов!
+        QJsonObject json;
+        json["action"] = "validate";
+        json["file_path"] = filePath;
+        json["source"] = codeContent;
+
+        QJsonDocument doc(json);
+        this->lspProcess->write(doc.toJson(QJsonDocument::Compact) + "\n");
+    }
+    // Альтернативный вариант: если ваш хайлайтер умеет запускать проверку локально
+    else if (highlighter) {
+        // Принудительно заставляем хайлайтер правой панели перепарсить код
+        highlighter->rehighlight();
+    }
+}
+
+void Neuro_programm::applyHighlighterErrors(const QString &filePath, const QList<int> &errorLines)
+{
+    // Находим правый редактор в оперативной памяти Студии
+    QPlainTextEdit *rightEditor = ui->widgetRightCharts->findChild<QPlainTextEdit*>(QStringLiteral("m_rightCodeEditor"));
+
+    // 1. ОТРИСОВКА НА ЛЕВОЙ ПАНЕЛИ: Вызываем вашу штатную системную подсветку
+    // (Она работает по вашему старому проверенному алгоритму)
+
+    // 2. ОТРИСОВКА НА ПРАВОЙ ПАНЕЛИ: Если файл открыт справа — наносим линии аппаратно!
+    if (rightEditor && rightEditor->objectName() == filePath && rightEditor->isVisible()) {
+
+        QList<QTextEdit::ExtraSelection> selections;
+
+        // Настраиваем формат красного волнистого подчеркивания ГОСТ ПАК
+        QTextCharFormat errorFormat;
+        errorFormat.setUnderlineColor(QColor(Qt::red)); // Красный цвет линии
+        errorFormat.setUnderlineStyle(QTextCharFormat::WaveUnderline); // Волнистый стиль IDE
+
+        // Перебираем все строки, в которых линтер flake8/Jedi обнаружил проблемы
+        for (int lineNum : errorLines) {
+            QTextDocument *doc = rightEditor->document();
+            QTextBlock block = doc->findBlockByLineNumber(lineNum);
+
+            if (block.isValid()) {
+                QTextEdit::ExtraSelection selection;
+                selection.format = errorFormat;
+
+                // Выделяем весь текстовый блок текущей строки
+                selection.cursor = QTextCursor(block);
+                selection.cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+
+                selections.append(selection);
+            }
+        }
+
+        // Аппаратно накатываем extra-выделения ошибок на правое текстовое поле!
+        rightEditor->setExtraSelections(selections);
+        rightEditor->viewport()->update(); // Принудительно заставляем Qt6 перерисовать пиксели
+
+        qDebug() << "🎯 [MLOps JEDI ПРАВЫЙ ШЛЮЗ]: Нанесено" << errorLines.size() << "подчеркиваний справа.";
+    }
+}
+
+
+// Метод полной очистки маркеров, если flake8 вернул пустой лог (ошибок нет)
+void Neuro_programm::clearHighlighterErrors(const QString &filePath)
+{
+    this->applyHighlighterErrors(filePath, QList<int>());
+}
 
 

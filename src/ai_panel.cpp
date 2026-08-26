@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QCoreApplication>
 #include <QFrame>
+#include <qtoolbutton.h>
 
 AI_panel::AI_panel(QWidget *parent)
     : QWidget(parent)
@@ -54,6 +55,7 @@ void AI_panel::clearLayout(QLayout* layout) {
         delete item;
     }
 }
+
 bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
     if (!m_mainLayout) return false;
 
@@ -78,7 +80,6 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
     scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
     m_scrollContentWidget = new QWidget(scrollArea);
-
     QVBoxLayout *containerLayout = new QVBoxLayout(m_scrollContentWidget);
     containerLayout->setContentsMargins(10, 10, 10, 10);
     containerLayout->setSpacing(15);
@@ -124,9 +125,7 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
     mlopsLayout->setContentsMargins(12, 14, 12, 12);
     mlopsLayout->setSpacing(12);
     containerLayout->addWidget(mlopsBox);
-
     containerLayout->addStretch(1);
-
     // ПАРСИНГ И ДИНАМИЧЕСКАЯ СБОРКА ИЗ СХЕМЫ JSON
     for (int i = 0; i < array.size(); ++i) {
         QJsonObject param = array[i].toObject();
@@ -189,10 +188,8 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
         else if (groupID == QStringLiteral("mlops")) {
             if (type == "radio_group") {
                 mlopsLayout->addWidget(new QLabel(QString("<b>%1</b>").arg(labelText), m_scrollContentWidget));
-
                 m_modeGroup = new QButtonGroup(m_scrollContentWidget);
                 QJsonArray options = param["options"].toArray();
-
                 QFrame *analysisFrame = new QFrame(m_scrollContentWidget);
                 analysisFrame->setStyleSheet(QStringLiteral("background-color: #1e1e1e; border-radius: 4px; border: 1px solid #333;"));
                 QVBoxLayout *analysisLayout = new QVBoxLayout(analysisFrame);
@@ -200,8 +197,8 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
                 int sensorsFiles = getRealFileCount(QStringLiteral("sensors"));
                 int thermalFiles = getRealFileCount(QStringLiteral("thermograms"));
 
-                QLabel *lblSens = new QLabel(QString(" 📊 Временные ряды статора (sensors_csv): Найдено %1 логов").arg(sensorsFiles), m_scrollContentWidget);
-                QLabel *lblTher = new QLabel(QString(" 📷 Теплограммы ИК-камеры (data/raw): Найдено %1 снимков").arg(thermalFiles), m_scrollContentWidget);
+                QLabel *lblSens = new QLabel(QString(" Временные ряды статора (sensors_csv): Найдено %1 логов").arg(sensorsFiles), m_scrollContentWidget);
+                QLabel *lblTher = new QLabel(QString(" Теплограммы ИК-камеры (data/raw): Найдено %1 снимков").arg(thermalFiles), m_scrollContentWidget);
 
                 lblSens->setStyleSheet(sensorsFiles > 0 ? QStringLiteral("color: #2ecc71; font-weight: bold;") : QStringLiteral("color: #e74c3c;"));
                 lblTher->setStyleSheet(thermalFiles >= 10 ? QStringLiteral("color: #2ecc71; font-weight: bold;") : QStringLiteral("color: #f1c40f;"));
@@ -215,7 +212,6 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
                     QString optId = optObj["id"].toString();
                     QString optLabel = optObj["label"].toString();
                     int minFiles = optObj["min_files"].toInt();
-
                     QRadioButton *radio = new QRadioButton(optLabel, m_scrollContentWidget);
                     m_modeGroup->addButton(radio, j);
                     mlopsLayout->addWidget(radio);
@@ -226,49 +222,51 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
                         radio->setText(optLabel + QStringLiteral(" [ДАННЫХ НЕДОСТАТОЧНО]"));
                     }
                 }
+
                 m_modeGroup->button(0)->setChecked(true);
 
                 connect(m_modeGroup, &QButtonGroup::idClicked, this, [this](int id) {
-                    // 1. Синхронизируем строковый ID режима контроля ПАК
-                    QString modeId = (id == 0) ? QStringLiteral("sensors") : ((id == 1) ?
-                                                                                  QStringLiteral("thermograms") : QStringLiteral("hybrid"));
-
-                    // Обновляем комбобокс №2 под конкретную задачу
+                    QString modeId = (id == 0) ? QStringLiteral("sensors") : ((id == 1) ? QStringLiteral("thermograms") : QStringLiteral("hybrid"));
                     updateArchitectureMapping(modeId, m_modelArchFieldObj);
 
-                    // 2. УПРАВЛЕНИЕ АКТИВНОСТЬЮ ТРЕТЬЕГО КОМБОБОКСА
-                    QComboBox* cbVis = qobject_cast<QComboBox*>(m_widgetsMap.value(QStringLiteral("thermal_visualization_mode"), nullptr));
+                    QWidget* mainWindow = this->window();
+                    QToolButton* btnTensor = mainWindow ? mainWindow->findChild<QToolButton*>(QStringLiteral("Графики")) : nullptr;
 
-                    if (cbVis) {
-                        // Если выбраны чистые временные ряды датчиков (id == 0)
+                    if (btnTensor) {
                         if (id == 0) {
-                            cbVis->clear();
-                            cbVis->addItem(QStringLiteral("[НЕ ПРИМЕНЯЕТСЯ ДЛЯ ДАТЧИКОВ]"));
-                            cbVis->setEnabled(false); // Делаем неактивным (серым)
-                        }
-                        // Если выбраны Теплограммы (id == 1) или Комплексный гибрид (id == 2)
-                        else {
-                            cbVis->clear();
-                            cbVis->addItem(QStringLiteral("Стандартный (Полупрозрачные маски узлов ИИ)"));
-                            cbVis->addItem(QStringLiteral("Изолированные узлы (Двигатель на черном фоне)"));
-                            cbVis->addItem(QStringLiteral("Бизнес-отчет (Сноски, стрелки и расчет градусов)"));
-                            cbVis->setEnabled(true);
-                                cbVis->setCurrentIndex(0);
+                            // Если выбраны только датчики — блокируем кнопку
+                            btnTensor->setEnabled(false);
+                            btnTensor->setChecked(false);
+                        } else {
+                            // Если выбраны Теплограммы (1) или Гибрид (2) — кнопка оживает!
+                            btnTensor->setEnabled(true);
                         }
                     }
 
+                    QComboBox* cbVis = qobject_cast<QComboBox*>(m_widgetsMap.value(QStringLiteral("thermal_visualization_mode"), nullptr));
+                    if (cbVis) {
+                        if (id == 0) {
+                            cbVis->clear();
+                            cbVis->addItem(QStringLiteral("[НЕ ПРИМЕНЯЕТСЯ ДЛЯ ДАТЧИКОВ]"));
+                            cbVis->setEnabled(false);
+                        } else {
+                            cbVis->clear();
+                            cbVis->addItem(QStringLiteral("Standard (Semi-transparent masks)"));
+                            cbVis->addItem(QStringLiteral("Isolated Nodes (Engine on black background)"));
+                            cbVis->addItem(QStringLiteral("Business Report (Callouts and degree calculation)"));
+                            cbVis->setEnabled(true);
+                            cbVis->setCurrentIndex(0);
+                        }
+                    }
                     triggerAutoSave();
                 });
-
             }
             else if (type == "dynamic_enum") {
                 m_modelArchFieldObj = param;
                 mlopsLayout->addWidget(new QLabel(QString("<b>%1</b>").arg(labelText), m_scrollContentWidget));
-
                 m_comboArchitecture = new QComboBox(m_scrollContentWidget);
                 m_lblArchDesc = new QLabel(m_scrollContentWidget);
                 m_lblArchDesc->setStyleSheet(QStringLiteral("color: #7f8c8d; font-style: italic;"));
-
                 mlopsLayout->addWidget(m_comboArchitecture);
                 mlopsLayout->addWidget(m_lblArchDesc);
 
@@ -276,32 +274,41 @@ bool AI_panel::buildUiFromConfig(const QString& schemaPath) {
                 connect(m_comboArchitecture, &QComboBox::currentIndexChanged, this, &AI_panel::triggerAutoSave);
             }
             else if (type == "enum") {
-                // Отрисовываем заголовок для комбобокса визуализации YOLO
                 mlopsLayout->addWidget(new QLabel(QString("<b>%1</b>").arg(labelText), m_scrollContentWidget));
-
                 QComboBox* cbVis = new QComboBox(m_scrollContentWidget);
                 QJsonArray options = param["options"].toArray();
                 for (int j = 0; j < options.size(); ++j) {
                     cbVis->addItem(options[j].toString());
                 }
                 cbVis->setCurrentText(param["default"].toString());
-
                 mlopsLayout->addWidget(cbVis);
-
-                // Сохраняем указатель в общую карту виджетов по имени "thermal_visualization_mode"
                 m_widgetsMap[name] = cbVis;
-
-                // Подключаем автоматический триггер сохранения при смене варианта визуализации
                 connect(cbVis, &QComboBox::currentIndexChanged, this, &AI_panel::triggerAutoSave);
             }
+            // =========================================================================
+            // ДОБАВЛЕНО: ОБРАБОТКА И ГЕНЕРАЦИЯ КОМПОНЕНТА СНЯТИЯ ВИДЕОПОТОКА
+            // =========================================================================
+            else if (type == "video" || type == "video_view") {
+                QLabel* videoCanvas = new QLabel(m_scrollContentWidget);
+                videoCanvas->setObjectName(name);
+                videoCanvas->setAlignment(Qt::AlignCenter);
+                videoCanvas->setText(labelText);
+
+                videoCanvas->setStyleSheet(QStringLiteral(
+                    "QLabel { background-color: #0f172a; color: #38bdf8; border: 1px solid #334155; "
+                    "border-radius: 6px; font-family: 'JetBrains Mono', 'Monospace'; font-size: 11px; min-height: 220px; }"
+                    ));
+
+                mlopsLayout->addWidget(videoCanvas);
+                m_widgetsMap[name] = videoCanvas; // Фиксируем дескриптор в карте для апдейтов кадров
+            }
+            // =========================================================================
             else if (type == "action_button") {
                 mlopsLayout->addSpacing(10);
-                m_lblPipelineStatus = new QLabel(QStringLiteral("💡 Статус ПАК: Конфигурация готова. Требуется верификация."), m_scrollContentWidget);
+                m_lblPipelineStatus = new QLabel(QStringLiteral(" Статус ПАК: Конфигурация готова. Требуется верификация."), m_scrollContentWidget);
                 mlopsLayout->addWidget(m_lblPipelineStatus);
-
                 m_btnActivate = new QPushButton(labelText, m_scrollContentWidget);
                 m_btnActivate->setStyleSheet(QStringLiteral("background-color: #2980b9; color: white; font-weight: bold; height: 35px; border-radius: 4px;"));
-
                 connect(m_btnActivate, &QPushButton::clicked, this, &AI_panel::verifyAndUnlockPipeline);
                 mlopsLayout->addWidget(m_btnActivate);
             }
@@ -388,6 +395,7 @@ void AI_panel::updateArchitectureMapping(const QString &modeId, const QJsonObjec
 
 #include <QSettings>
 #include <QDebug>
+#include <QToolButton>
 
 void AI_panel::verifyAndUnlockPipeline() {
     int checkedId = m_modeGroup->checkedId();

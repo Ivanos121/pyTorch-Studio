@@ -19,6 +19,7 @@
 #include <QSettings>
 #include <QWheelEvent>
 #include "minimaparea.h"
+#include "ui_neuro_programm.h"
 #include <QScrollBar>
 #include <QStatusBar>
 #include <QDateTime>
@@ -3280,3 +3281,5 @@ void CodeEditor::processSubmittedPrompt(const QString &promptText)
                                   );
     }
 }
+
+

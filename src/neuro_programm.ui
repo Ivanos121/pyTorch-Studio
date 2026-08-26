@@ -311,7 +311,7 @@ QPushButton:disabled {
       </property>
       <widget class="QStackedWidget" name="centralStackedWidget">
        <property name="currentIndex">
-        <number>7</number>
+        <number>8</number>
        </property>
        <widget class="QWidget" name="page_teacher">
         <layout class="QGridLayout" name="gridLayout_9">
@@ -465,6 +465,13 @@ QTextEdit#inputChatText:focus {
         </layout>
        </widget>
        <widget class="QWidget" name="page_8"/>
+       <widget class="QWidget" name="page_9">
+        <layout class="QGridLayout" name="gridLayout_16">
+         <item row="0" column="0">
+          <widget class="ThermalMonitorBuilder" name="widget_9" native="true"/>
+         </item>
+        </layout>
+       </widget>
       </widget>
       <widget class="QWidget" name="widgetRightCharts" native="true">
        <property name="minimumSize">
@@ -918,6 +925,12 @@ QListWidget#quickActionsList::item:selected {
    <class>TrainConfigWizard</class>
    <extends>QWidget</extends>
    <header>trainconfigwizard.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ThermalMonitorBuilder</class>
+   <extends>QWidget</extends>
+   <header>thermalmonitorbuilder.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

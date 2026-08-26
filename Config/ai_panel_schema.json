@@ -237,5 +237,11 @@
     "label": " АКТИВИРОВАТЬ КОНВЕЙЕР ОБУЧЕНИЯ (ПОЛНАЯ ПРОВЕРКА)",
     "type": "action_button",
     "action_target": "verify_and_unlock_sidebar"
+  },
+  {
+    "group": "mlops",
+    "name": "lblPanelVideoCanvas",
+    "label": "📺 Живой поток кадрирования HIKMICRO MPEG/RGB активен",
+    "type": "video"
   }
 ]
