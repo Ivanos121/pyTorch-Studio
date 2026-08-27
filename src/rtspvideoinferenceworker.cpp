@@ -183,38 +183,38 @@ void RtspVideoInferenceWorker::startVideoProcessing()
             QMutexLocker locker(&m_writerMutex);
 
             // А. Старт записи: Кнопка нажата, но файл еще не открыт
+            // А. Старт записи: Кнопка нажата, но файл еще не открыт
             if (m_isRecording && !m_videoWriter.isOpened()) {
 
-                // ЖЕСТКИЙ ПУТЬ К ФАЙЛУ (Полностью исключает баги GUI)
-                std::string hardcodedPath = "/home/elf/zcc/z1/data/raw/video/test_hardcoded_record.avi";
-
-                // Создаем папку на диске Linux Arch на всякий случай
-                QDir().mkpath(QStringLiteral("/home/elf/zcc/z1/data/raw/video"));
+                // Генерируем уникальное имя файла по времени прямо внутри текущего потока
+                QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_hh-mm-ss"));
+                QString dynamicPath = QStringLiteral("/home/elf/zcc/z1/data/raw/video/train_session_%1.avi").arg(timestamp);
 
                 int codec = cv::VideoWriter::fourcc('X', 'V', 'I', 'D');
                 int actualWidth = recordFrame.cols;
                 int actualHeight = recordFrame.rows;
 
-                qDebug() << " [ЖЕСТКИЙ ТЕСТ]: Фоновый поток ИНИЦИАЛИЗИРУЕТ FFmpeg по пути:" << QString::fromStdString(hardcodedPath);
+                qDebug() << " [ДИНАМИЧЕСКИЙ СТАРТ]: Открытие файла в существующей папке:" << dynamicPath;
 
-                bool ok = m_videoWriter.open(hardcodedPath,
+                // Открываем файл напрямую в ОЗУ текущего потока
+                bool ok = m_videoWriter.open(dynamicPath.toStdString(),
                                              cv::CAP_FFMPEG,
                                              codec,
-                                             25.0, // Рабочий FPS
+                                             25.0,
                                              cv::Size(actualWidth, actualHeight),
                                              true);
                 if (ok) {
                     localFrameCounter = 0;
-                    qDebug() << " !!! [ЖЕСТКИЙ ТЕСТ - УСПЕХ]: Файл успешно создан! Геометрия кадра:" << actualWidth << "x" << actualHeight;
+                    qDebug() << " !!! [ДИНАМИЧЕСКИЙ УСПЕХ]: Видеофайл успешно создан!";
                 } else {
-                    // Пробуем MJPEG кодек, если XVID не установлен в системе
+                    // Резервный откат на MJPEG
                     codec = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-                    ok = m_videoWriter.open(hardcodedPath, cv::CAP_FFMPEG, codec, 25.0, cv::Size(actualWidth, actualHeight), true);
+                    ok = m_videoWriter.open(dynamicPath.toStdString(), cv::CAP_FFMPEG, codec, 25.0, cv::Size(actualWidth, actualHeight), true);
                     if (ok) {
                         localFrameCounter = 0;
-                        qDebug() << " !!! [ЖЕСТКИЙ ТЕСТ - ЗАПАСНОЙ УСПЕХ]: Файл открыт с кодеком MJPEG.";
+                        qDebug() << " !!! [ЗАПАСНОЙ УСПЕХ]: Видеофайл создан с кодеком MJPEG.";
                     } else {
-                        qWarning() << " !!! [ЖЕСТКИЙ ТЕСТ - КРИТИЧЕСКИЙ СБОЙ]: OpenCV и FFmpeg отказали в создании файла!";
+                        qWarning() << " !!! [КРИТИЧЕСКИЙ СБОЙ]: Не удалось инициализировать запись в готовую папку!";
                     }
                 }
             }
