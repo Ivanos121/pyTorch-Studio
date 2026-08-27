@@ -4,6 +4,7 @@
 #include <QString>
 #include <QImage>
 #include <QThread>
+#include <qmutex.h>
 #include <torch/cuda.h>
 #include <opencv2/videoio.hpp>
 
@@ -39,7 +40,12 @@ private:
     QString m_streamUrl;
     QString m_modelPath;
     bool m_running;
-    bool m_isRecording = false;       // Флаг: идет ли запись прямо сейчас
+
+    // Меняем на атомарный флаг и защищенную строку
+    QAtomicInt m_isRecording;
+    QString m_pendingSavePath;
+
+    QMutex m_writerMutex; // мьютекс, который мы добавили ранее
     cv::VideoWriter m_videoWriter;
 };
 

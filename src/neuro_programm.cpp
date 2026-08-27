@@ -121,6 +121,9 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
 
     ui->setupUi(this);
 
+    qRegisterMetaType<QString>("QString");
+    qRegisterMetaType<bool>("bool");
+
     const QString systemIconPath = QDir::home().absoluteFilePath(QStringLiteral(".local/share/icons/hicolor/scalable/apps/pytorch-studio.svg"));
     const QString fallbackResourcePath = QStringLiteral(":/Data/Icons/pytorch-studio.svg");
 
@@ -3775,43 +3778,184 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                             }
                         });
                         // =========================================================================
+                        // -------------------------------------------------------------
+                        // СОСТОЯНИЕ А: КНОПКА ЗАЖАТА -> ОТКРЫВАЕМ СТРАНИЦУ 8 И ЗАПУСКАЕМ СЕТЬ
+                        // -------------------------------------------------------------
+                        if (checked) {
+                            ui->centralStackedWidget->setCurrentIndex(8);
+                            btnTensor->setChecked(true);
 
-                    }
+                            // Извлекаем виджеты из карты сборщика страницы 8
+                            QLabel *lblVideoCanvas = nullptr;
+                            QLabel *lblIiVerdict   = nullptr;
+                            QPushButton *btnRecord = nullptr;
 
-                    // СВЯЗЫВАНИЕ РОЗОВОЙ КНОПКИ С БЕЗОПАСНЫМ ЭМИТОМ СИГНАЛА (БЕЗ INVOKEМETHOD)
+                            if (ui->widget_9) {
+                                lblVideoCanvas = qobject_cast<QLabel*>(ui->widget_9->getWidgetByName(QStringLiteral("lblVideoCanvas")));
+                                lblIiVerdict   = qobject_cast<QLabel*>(ui->widget_9->getWidgetByName(QStringLiteral("lblIiVerdict")));
+                                btnRecord      = qobject_cast<QPushButton*>(ui->widget_9->getWidgetByName(QStringLiteral("btnRecordVideo")));
+
+                                if (!lblVideoCanvas) lblVideoCanvas = ui->widget_9->findChild<QLabel*>(QStringLiteral("lblVideoCanvas"));
+                                if (!lblIiVerdict)   lblIiVerdict   = ui->widget_9->findChild<QLabel*>(QStringLiteral("lblIiVerdict"));
+                                if (!btnRecord)      btnRecord      = ui->widget_9->findChild<QPushButton*>(QStringLiteral("btnRecordVideo"));
+                            }
+
+                            if (!lblVideoCanvas) {
+                                qWarning() << "⚠️ [UI СБОЙ]: Холст lblVideoCanvas не найден на странице 8!";
+                            }
+
+                            QThread *activeThread = this->property("dynamicInferenceThread").value<QThread*>();
+                            RtspVideoInferenceWorker *activeWorker = this->property("dynamicInferenceWorker").value<RtspVideoInferenceWorker*>();
+
+                            // ИНИЦИАЛИЗАЦИЯ И СТАРТ АСИНХРОННОГО КОНВЕЙЕРА ВЕБ-КАМЕРЫ
+                            if (!activeThread || !activeWorker) {
+                                activeThread = new QThread(this);
+
+                                QString webcamUrl = QStringLiteral("local_webcam_dev0");
+                                QString modelPath = currentOpenProjectPath + QStringLiteral("/hf_hub/thermal_engine_model.pt");
+
+                                activeWorker = new RtspVideoInferenceWorker(webcamUrl, modelPath);
+                                activeWorker->setObjectName(QStringLiteral("m_rtspWorker"));
+                                activeWorker->moveToThread(activeThread);
+
+                                this->setProperty("dynamicInferenceThread", QVariant::fromValue(activeThread));
+                                this->setProperty("dynamicInferenceWorker", QVariant::fromValue(activeWorker));
+
+                                connect(activeThread, &QThread::started, activeWorker, &RtspVideoInferenceWorker::startVideoProcessing);
+                                connect(activeWorker, &RtspVideoInferenceWorker::finished, activeThread, &QThread::quit);
+
+                                connect(activeWorker, &RtspVideoInferenceWorker::finished, activeWorker, &QObject::deleteLater);
+                                connect(activeThread, &QThread::finished, activeThread, &QObject::deleteLater);
+
+                                connect(activeWorker, &RtspVideoInferenceWorker::frameAnalyzed, this, [lblVideoCanvas, lblIiVerdict](const QImage &img, float temp) {
+                                    if (lblVideoCanvas) lblVideoCanvas->setPixmap(QPixmap::fromImage(img));
+                                    if (lblIiVerdict) lblIiVerdict->setText(QString("🔥 ТЕМПЕРАТУРА ИИ: %1 °C").arg(temp, 0, 'f', 2));
+                                });
+                            }
+
+                            // =========================================================================
+                            // СУПЕР-ФИКС: ЖЕСТКОЕ ПЕРЕПОДКЛЮЧЕНИЕ СИГНАЛЬНОГО МОСТА ОКНО -> ВОРКЕР
+                            // =========================================================================
+                            // Очищаем старые связи главного окна с прошлыми (удаленными) воркерами
+                            QObject::disconnect(this, &Neuro_programm::requestToggleRecording, nullptr, nullptr);
+
+                            // Связываем заново с текущим, гарантированно живым в ОЗУ воркером
+                            connect(this, &Neuro_programm::requestToggleRecording,
+                                    activeWorker, &RtspVideoInferenceWorker::toggleRecording,
+                                    Qt::QueuedConnection);
+                            qDebug() << "🎯 [ШИНА СИНХРОНИЗАЦИИ]: Межпоточный мост к воркеру принудительно ОБНОВЛЕН.";
+                            // =========================================================================
+
+                            // НАСТРОЙКА И КОННЕКТ РОЗОВОЙ КНОПКИ ЗАПИСИ
+                            if (btnRecord) {
+                                btnRecord->setEnabled(true);
+                                btnRecord->setVisible(true);
+                                btnRecord->setCheckable(true);
+                                btnRecord->setCursor(Qt::PointingHandCursor);
+
+                                // Сбрасываем старые клики самой кнопки во избежание дублирования
+                                QObject::disconnect(btnRecord, &QPushButton::clicked, nullptr, nullptr);
+
+                                connect(btnRecord, &QPushButton::clicked, this, [this, btnRecord](bool recChecked) {
+                                    qDebug() << ">>> [КНОПКА ЗАПИСИ КЛИКНУТА МЫШЬЮ!]: Новое состояние =" << recChecked;
+
+                                    if (recChecked) {
+                                        btnRecord->setText(QStringLiteral("🛑 ОСТАНОВИТЬ ЗАПИСЬ СЕССИИ"));
+                                        btnRecord->setStyleSheet(QStringLiteral(
+                                            "QPushButton { font-weight: bold; background: #e11d48; color: white; border: 1px solid #be123c; border-radius: 4px; padding: 6px; }"
+                                        ));
+
+                                        QString baseDir = !currentOpenProjectPath.isEmpty() ? (currentOpenProjectPath + QStringLiteral("/data/raw/video")) : QStringLiteral("/home/elf/pyTorch-Studio/Config");
+                                        QDir().mkpath(baseDir);
+
+                                        QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_hh-mm-ss"));
+                                        QString savePath = baseDir + QStringLiteral("/train_session_") + timestamp + QStringLiteral(".mp4");
+
+                                        qDebug() << "🎬 [GUI ШИНА]: Отправка сигнала requestToggleRecording -> TRUE. Путь:" << savePath;
+                                        emit requestToggleRecording(true, savePath);
+                                    } else {
+                                        btnRecord->setText(QStringLiteral("🔴 Записать тренировочное видео"));
+                                        btnRecord->setStyleSheet(QStringLiteral(
+                                            "QPushButton { font-weight: bold; background: #fff1f2; color: #991b1b; border: 1px solid #fecdd3; border-radius: 4px; padding: 6px; }"
+                                        ));
+
+                                        qDebug() << "💾 [GUI ШИНА]: Отправка сигнала requestToggleRecording -> FALSE";
+                                        emit requestToggleRecording(false, QString());
+                                    }
+                                });
+                            }
+
+                            if (activeThread && !activeThread->isRunning()) {
+                                activeThread->start();
+                            }
+                            qDebug() << "📹 [УСПЕХ]: Выполнен чистый вход на страницу 8. Поток веб-камеры запущен.";
+                        }
+                     }
+
+
+                    // =========================================================================
+                    // АТОМАРНАЯ НАСТРОЙКА И КОННЕКТ КНОПКИ ЗАПИСИ (БЕЗ ДЕСТРУКТИВНОГО DISCONNECT)
+                    // =========================================================================
+                    // НАСТРОЙКА И КОННЕКТ РОЗОВОЙ КНОПКИ ЗАПИСИ
                     if (btnRecord && activeWorker) {
                         btnRecord->setEnabled(true);
                         btnRecord->setVisible(true);
                         btnRecord->setCheckable(true);
-                        btnRecord->setChecked(false);
-                        btnRecord->setText(QStringLiteral("🔴 Записать тренировочное видео"));
-                        btnRecord->setStyleSheet(QStringLiteral("QPushButton { font-weight: bold; background: #fff1f2; color: #991b1b; border: 1px solid #fecdd3; border-radius: 4px; padding: 6px; }"));
+                        btnRecord->setCursor(Qt::PointingHandCursor);
 
+                        // Сбрасываем старые клики самой кнопки во избежание дублирования
                         QObject::disconnect(btnRecord, &QPushButton::clicked, nullptr, nullptr);
 
-                        connect(btnRecord, &QPushButton::clicked, this, [this, btnRecord](bool recChecked) {
-                            if (!btnRecord) return;
+                        connect(btnRecord, &QPushButton::clicked, this, [this, btnRecord, activeWorker](bool recChecked) {
+                            qDebug() << ">>> [КНОПКА ЗАПИСИ КЛИКНУТА МЫШЬЮ!]: Новое состояние =" << recChecked;
 
                             if (recChecked) {
-                                btnRecord->setText(QStringLiteral("🛑 ОСТАНОВИТЬ ЗАПИСЬ СЕССИИ"));
-                                btnRecord->setStyleSheet(QStringLiteral("QPushButton { font-weight: bold; background: #e11d48; color: white; border: 1px solid #be123c; border-radius: 4px; padding: 6px; }"));
+                                btnRecord->setText(QStringLiteral(" ОСТАНОВИТЬ ЗАПИСЬ СЕССИИ"));
+                                btnRecord->setStyleSheet(QStringLiteral(
+                                    "QPushButton { font-weight: bold; background: #e11d48; color: white; border: 1px solid #be123c; border-radius: 4px; padding: 6px; }"
+                                ));
 
-                                QString baseDir = !currentOpenProjectPath.isEmpty() ? (currentOpenProjectPath + QStringLiteral("/scripts")) : QStringLiteral("/home/elf/pyTorch-Studio/Config");
+                                QString baseDir = !currentOpenProjectPath.isEmpty() ?
+                                    (currentOpenProjectPath + QStringLiteral("/data/raw/video")) :
+                                    QStringLiteral("/home/elf/pyTorch-Studio/config");
                                 QDir().mkpath(baseDir);
 
+                                // Формируем чистый, валидный путь к файлу AVI
                                 QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_hh-mm-ss"));
-                                QString savePath = baseDir + QStringLiteral("/train_session_") + timestamp + QStringLiteral(".mp4");
+                                QString savePath = QStringLiteral("/home/elf/zcc/z1/data/raw/video/train_session_%1.avi").arg(timestamp);
 
-                                // ГЕНЕРИРУЕМ СИГНАЛ ВМЕСТО КРИВОГО INVOKEMETHOD (Абсолютная защита от падений)
-                                emit requestToggleRecording(true, savePath);
-                                qDebug() << "🎬 [MLOps ПАК]: Сигнал старта записи отправлен в шину Qt6.";
+                                qDebug() << " [GUI ШИНА]: Прямой invokeMethod -> TRUE воркеру. Путь:" << savePath;
+
+                                // =========================================================================
+                                // ЖЕСТКИЙ ФИКС: ИСПОЛЬЗУЕМ DIRECT_CONNECTION И КЛАССИЧЕСКУЮ СИГНАТУРУ СТРОКИ
+                                // =========================================================================
+                                // Это заставит метод toggleRecording выполниться МГНОВЕННО, пробивая цикл while!
+                                bool ok = QMetaObject::invokeMethod(activeWorker, "toggleRecording",
+                                                                    Qt::DirectConnection,
+                                                                    Q_ARG(bool, true),
+                                                                    Q_ARG(QString, savePath));
+
+                                if (!ok) {
+                                    qWarning() << " !!! [СБОЙ МЕТАСИСТЕМЫ]: Qt6 не смог вызвать toggleRecording. Проверьте сигнатуру в воркере!";
+                                }
+
                             } else {
-                                btnRecord->setText(QStringLiteral("🔴 Записать тренировочное видео"));
-                                btnRecord->setStyleSheet(QStringLiteral("QPushButton { font-weight: bold; background: #fff1f2; color: #991b1b; border: 1px solid #fecdd3; border-radius: 4px; padding: 6px; }"));
+                                btnRecord->setText(QStringLiteral(" Записать тренировочное видео"));
+                                btnRecord->setStyleSheet(QStringLiteral(
+                                    "QPushButton { font-weight: bold; background: #fff1f2; color: #991b1b; border: 1px solid #fecdd3; border-radius: 4px; padding: 6px; }"
+                                ));
 
-                                // ГЕНЕРИРУЕМ СИГНАЛ ОСТАНОВКИ
-                                emit requestToggleRecording(false, QString());
-                                qDebug() << "💾 [MLOps ПАК]: Сигнал остановки записи отправлен в шину Qt6.";
+                                qDebug() << " [GUI ШИНА]: Прямой invokeMethod -> FALSE воркеру.";
+
+                                // Мгновенный вызов остановки записи через DirectConnection
+                                bool ok = QMetaObject::invokeMethod(activeWorker, "toggleRecording",
+                                                                    Qt::DirectConnection,
+                                                                    Q_ARG(bool, false),
+                                                                    Q_ARG(QString, QString()));
+
+                                if (!ok) {
+                                    qWarning() << " !!! [СБОЙ МЕТАСИСТЕМЫ]: Не удалось вызвать остановку записи!";
+                                }
                             }
                         });
                     }
