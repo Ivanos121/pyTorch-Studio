@@ -32,17 +32,29 @@ void RtspVideoInferenceWorker::stopVideoProcessing()
 
 void RtspVideoInferenceWorker::toggleRecording(bool start, const QString &savePath)
 {
-    // ЖЕСТКИЙ ФИКС БАРЬЕРА ПАМЯТИ: Блокируем мьютекс, чтобы вытолкнуть флаг из кэша процессора в ОЗУ
     m_writerMutex.lock();
-
-    m_isRecording = start ? 1 : 0; // Теперь Ядро №2 гарантированно увидит этот флаг!
-
-    m_writerMutex.unlock(); // Мгновенно отпускаем, GUI-поток не зависнет
+    m_isRecording = start ? 1 : 0;
+    m_writerMutex.unlock();
 
     if (start) {
-        qDebug() << " >>> [БЕЗОПАСНЫЙ СТАРТ]: Флаг m_isRecording атомарно изменен на TRUE!";
+        // Принудительно корректируем расширение
+        QString cleanPath = savePath;
+        cleanPath.replace(QStringLiteral(".mp4"), QStringLiteral(".avi"));
+        cleanPath.replace(QStringLiteral(".MP4"), QStringLiteral(".avi"));
+
+        // Атомарно обмениваем указатели в памяти
+        QString* oldPath = m_atomicSavePath.exchange(new QString(cleanPath));
+        if (oldPath) {
+            delete oldPath; // Чистим память, если там лежал старый путь
+        }
+        qDebug() << " >>> [БЕЗОПАСНЫЙ СТАРТ]: Флаг = TRUE. Путь атомарно передан в ОЗУ:" << cleanPath;
     } else {
-        qDebug() << " >>> [БЕЗОПАСНЫЙ СТОП]: Флаг m_isRecording атомарно изменен на FALSE!";
+        // При остановке зануляем атомарный указатель
+        QString* oldPath = m_atomicSavePath.exchange(nullptr);
+        if (oldPath) {
+            delete oldPath;
+        }
+        qDebug() << " >>> [БЕЗОПАСНЫЙ СТОП]: Флаг = FALSE. Запрос на финализацию...";
     }
 }
 
@@ -179,42 +191,52 @@ void RtspVideoInferenceWorker::startVideoProcessing()
         // =========================================================================
         // ЕДИНЫЙ ЦЕНТР ЗАПИСИ С ЖЕСТКО ЗАДАННЫМ ПУТЕМ (ПРОВЕРКА НАПРЯМУЮ)
         // =========================================================================
+        // =========================================================================
+        // СКОРРЕКТИРОВАННЫЙ ЕДИНЫЙ ЦЕНТР ЗАПИСИ (СПОСОБ 1: АТОМАРНЫЙ ОБМЕН В ОЗУ)
+        // =========================================================================
         {
             QMutexLocker locker(&m_writerMutex);
 
             // А. Старт записи: Кнопка нажата, но файл еще не открыт
-            // А. Старт записи: Кнопка нажата, но файл еще не открыт
             if (m_isRecording && !m_videoWriter.isOpened()) {
 
-                // Генерируем уникальное имя файла по времени прямо внутри текущего потока
-                QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_hh-mm-ss"));
-                QString dynamicPath = QStringLiteral("/home/elf/zcc/z1/data/raw/video/train_session_%1.avi").arg(timestamp);
+                QString dynamicPath = "";
+
+                // Атомарно загружаем указатель на строку из общей памяти ядер CPU
+                QString* sharedPathPtr = m_atomicSavePath.load();
+                if (sharedPathPtr && !sharedPathPtr->isEmpty()) {
+                    dynamicPath = *sharedPathPtr; // Безопасно копируем значение в текущий поток
+                } else {
+                    // Резервный Fallback по времени, если указатель пуст
+                    QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_hh-mm-ss"));
+                    dynamicPath = QStringLiteral("/home/elf/zcc/z1/data/raw/video/train_session_%1.avi").arg(timestamp);
+                }
 
                 int codec = cv::VideoWriter::fourcc('X', 'V', 'I', 'D');
                 int actualWidth = recordFrame.cols;
                 int actualHeight = recordFrame.rows;
 
-                qDebug() << " [ДИНАМИЧЕСКИЙ СТАРТ]: Открытие файла в существующей папке:" << dynamicPath;
+                qDebug() << " [АТОМАРНЫЙ СТАРТ]: Фоновый поток инициализирует FFmpeg по пути:" << dynamicPath;
 
-                // Открываем файл напрямую в ОЗУ текущего потока
+                // Открываем файл напрямую в контексте ИИ-потока
                 bool ok = m_videoWriter.open(dynamicPath.toStdString(),
                                              cv::CAP_FFMPEG,
                                              codec,
-                                             25.0,
+                                             25.0, // Рабочий FPS
                                              cv::Size(actualWidth, actualHeight),
                                              true);
                 if (ok) {
                     localFrameCounter = 0;
-                    qDebug() << " !!! [ДИНАМИЧЕСКИЙ УСПЕХ]: Видеофайл успешно создан!";
+                    qDebug() << " !!! [АТОМАРНЫЙ УСПЕХ]: Видеофайл успешно создан!";
                 } else {
-                    // Резервный откат на MJPEG
+                    // Резервный откат на кодек MJPEG
                     codec = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
                     ok = m_videoWriter.open(dynamicPath.toStdString(), cv::CAP_FFMPEG, codec, 25.0, cv::Size(actualWidth, actualHeight), true);
                     if (ok) {
                         localFrameCounter = 0;
                         qDebug() << " !!! [ЗАПАСНОЙ УСПЕХ]: Видеофайл создан с кодеком MJPEG.";
                     } else {
-                        qWarning() << " !!! [КРИТИЧЕСКИЙ СБОЙ]: Не удалось инициализировать запись в готовую папку!";
+                        qWarning() << " !!! [КРИТИЧЕСКИЙ СБОЙ]: OpenCV и FFmpeg отказали в создании атомарного файла!";
                     }
                 }
             }
@@ -232,7 +254,7 @@ void RtspVideoInferenceWorker::startVideoProcessing()
 
                 localFrameCounter++;
                 if (localFrameCounter % 15 == 0) {
-                    qDebug() << " -> [ЖЕСТКАЯ ЗАПИСЬ]: Кадры пишутся успешно! Сохранено:" << localFrameCounter;
+                    qDebug() << " -> [ФИЗИЧЕСКАЯ ЗАПИСЬ]: Кадры пишутся успешно! Сохранено:" << localFrameCounter;
                 }
             }
 
@@ -241,7 +263,12 @@ void RtspVideoInferenceWorker::startVideoProcessing()
                 m_videoWriter.release(); // Финализируем структуру видеофайла AVI
                 m_videoWriter = cv::VideoWriter(); // Очищаем дескриптор в ОЗУ
                 std::system("sync"); // Принудительно сбрасываем кэш диска Linux
-                qDebug() << " !!! [ЖЕСТКИЙ ТЕСТ - ФИНАЛИЗАЦИЯ]: Файл успешно сохранен и закрыт.";
+
+                // Чистим атомарную память после успешного закрытия сессии
+                QString* oldPath = m_atomicSavePath.exchange(nullptr);
+                if (oldPath) delete oldPath;
+
+                qDebug() << " !!! [АТОМАРНАЯ ФИНАЛИЗАЦИЯ]: Файл успешно запечен на жесткий диск.";
             }
         }
 

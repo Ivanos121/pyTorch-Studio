@@ -5,6 +5,8 @@
 #include <QImage>
 #include <QThread>
 #include <qmutex.h>
+#include <atomic>
+#include <memory>
 #include <torch/cuda.h>
 #include <opencv2/videoio.hpp>
 
@@ -47,6 +49,7 @@ private:
 
     QMutex m_writerMutex; // мьютекс, который мы добавили ранее
     cv::VideoWriter m_videoWriter;
+    std::atomic<QString*> m_atomicSavePath{nullptr};
 };
 
 Q_DECLARE_METATYPE(RtspVideoInferenceWorker*)
