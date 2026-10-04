@@ -23,6 +23,14 @@ RtspVideoInferenceWorker::RtspVideoInferenceWorker(const QString &streamUrl, con
 RtspVideoInferenceWorker::~RtspVideoInferenceWorker()
 {
     m_running = false;
+
+    // Безопасно очищаем атомарный указатель пути, если он остался в памяти
+    QString* oldPath = m_atomicSavePath.exchange(nullptr);
+    if (oldPath) {
+        delete oldPath;
+    }
+
+    qDebug() << " [ДЕСТРУКТОР]: Воркер успешно уничтожен, память очищена.";
 }
 
 void RtspVideoInferenceWorker::stopVideoProcessing()
@@ -89,24 +97,30 @@ void RtspVideoInferenceWorker::startVideoProcessing()
         modelLoadedSuccessfully = false;
     }
 
-    // 2. АДАПТИВНОЕ ПОДКЛЮЧЕНИЕ К КАМЕРЕ
+    // =========================================================================
+    // 2. АДАПТИВНОЕ ПОДКЛЮЧЕНИЕ К КАМЕРЕ (ОБНОВЛЕННЫЙ СТАРТ)
+    // =========================================================================
     cv::VideoCapture cap;
-    qDebug() << " [ПАК ТЕСТ]: Попытка жесткого захвата /dev/video0 через V4L2 API...";
 
-    // Принудительный бэкенд V4L2 обеспечивает стабильный FPS и захват на Arch Linux
-    cap.open(0, cv::CAP_V4L2);
+    // Считываем стартовый ID из метасистемы (0 - вебкамера, 2 - тепловизор)
+    int currentCameraId = this->property("requested_camera_id").isValid() ? this->property("requested_camera_id").toInt() : 0;
+
+    qDebug() << " [ХАРДВЕР]: Первичный захват устройства /dev/video" << currentCameraId << "через V4L2 API...";
+    cap.open(currentCameraId, cv::CAP_V4L2);
+
     if (!cap.isOpened()) {
-        qDebug() << " [OpenCV V4L2]: Режим CAP_V4L2 не ответил. Пробуем автовыбор CAP_ANY...";
-        cap.open(0, cv::CAP_ANY);
+        qDebug() << " [OpenCV V4L2]: Режим CAP_V4L2 не ответил для ID" << currentCameraId << ". Пробуем автовыбор CAP_ANY...";
+        cap.open(currentCameraId, cv::CAP_ANY);
     }
+
     if (!cap.isOpened()) {
-        qWarning() << " [КРИТИЧЕСКИЙ СБОЙ ХАРДВЕРА]: Локальная веб-камера /dev/video0 недоступна!";
-        emit errorOccurred(QStringLiteral("Локальная веб-камера /dev/video0 недоступна. Проверьте права доступа группы video!"));
+        qWarning() << " [КРИТИЧЕСКИЙ СБОЙ ХАРДВЕРА]: Выбранное устройство видеозахвата недоступно!";
+        emit errorOccurred(QStringLiteral("Локальное устройство захвата видео недоступно. Проверьте права доступа группы video!"));
         emit finished();
         return;
     }
 
-    // Настройка параметров камеры (Кодек MJPEG отключен, чтобы избежать холостых циклов rawFrame.empty)
+    // Жестко фиксируем разрешение под архитектуру ИИ-пульта
     cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
 
@@ -118,19 +132,80 @@ void RtspVideoInferenceWorker::startVideoProcessing()
     this->setProperty("real_height", realHeight);
 
     cv::Mat rawFrame;
-    int localFrameCounter = 0; // НАДЕЖНЫЙ СЧЕТЧИК КАДРОВ НА УРОВНЕ ФУНКЦИИ
-
+    int localFrameCounter = 0;
     qDebug() << " [СИСТЕМА]: Вход в бесконечный цикл обработки и записи...";
+    // =========================================================================
     // 3. ЦИКЛ ОБРАБОТКИ, ЗАПИСИ И ИНФЕРЕНСА В ОЗУ
+    // =========================================================================
     while (m_running) {
+
+        // МГНОВЕННЫЙ МОНИТОРИНГ ГОРЯЧЕЙ СМЕНЫ ИСТОЧНИКА ВИДЕОПОТОКА БЕЗ ПЕРЕЗАПУСКА ПРИЛОЖЕНИЯ
+        int targetCameraId = this->property("requested_camera_id").isValid() ? this->property("requested_camera_id").toInt() : 0;
+
+        if (targetCameraId != currentCameraId) {
+            qDebug() << " [ИИ ПОТОК]: Обнаружен запрос на смену камеры с" << currentCameraId << "на" << targetCameraId;
+
+            // Финализируем видеозапись, если она активна в момент переключения
+            {
+                QMutexLocker locker(&m_writerMutex);
+                if (m_videoWriter.isOpened()) {
+                    m_videoWriter.release();
+                    m_videoWriter = cv::VideoWriter();
+                    std::system("sync");
+                    m_isRecording = 0;
+                    m_pendingSavePath = "";
+
+                    emit notificationRequested(
+                        QStringLiteral("PyTorch Studio: Запись"),
+                        QStringLiteral("Текущая сессия сохранения видео автоматически закрыта из-за смены источника.")
+                        );
+                }
+            }
+
+            // ЖЕСТКИЙ ФИКС ГАШЕНИЯ СВЕТОДИОДА ВЕБКАМЕРЫ (СБРОС БУФЕРОВ ЯДРА)
+            rawFrame.release();
+            rawFrame = cv::Mat(); // Полностью зануляем ссылку на матрицу в памяти
+
+            cap.release(); // Закрываем аппаратный дескриптор V4L2
+            cap = cv::VideoCapture(); // Затираем старый контекст OpenCV
+
+            QThread::msleep(300); // Даем время планировщику Arch Linux снять питание с USB-шины
+
+            qDebug() << " [ИИ ПОТОК]: Физическое открытие нового устройства /dev/video" << targetCameraId;
+            cap.open(targetCameraId, cv::CAP_V4L2);
+            if (!cap.isOpened()) {
+                cap.open(targetCameraId, cv::CAP_ANY);
+            }
+
+            if (cap.isOpened()) {
+                cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+                cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+                cap.set(cv::CAP_PROP_FOURCC,cv::VideoWriter::fourcc('M','J','P','G'));
+                currentCameraId = targetCameraId;
+
+                QString deviceName = (currentCameraId == 2) ? QStringLiteral("Тепловизор (ID: 2)") : QStringLiteral("Веб-камера (ID: 0)");
+                emit notificationRequested(
+                    QStringLiteral("PyTorch Studio: Аппаратный захват"),
+                    QStringLiteral("Аппаратный layer V4L2 успешно переинициализирован.\nУстройство: %1").arg(deviceName)
+                    );
+            } else {
+                emit notificationRequested(
+                    QStringLiteral("PyTorch Studio: Сбой оборудования"),
+                    QStringLiteral("Не удалось открыть устройство /dev/video%1. Сбой переключения.").arg(targetCameraId)
+                    );
+                // Плавный возврат на старую камеру
+                cap.open(currentCameraId, cv::CAP_V4L2);
+            }
+            continue;
+        }
+
+        // Стандартное чтение кадра
         if (!cap.read(rawFrame) || rawFrame.empty()) {
             QThread::msleep(5);
             continue;
         }
 
-        // =========================================================================
-        // ИНИЦИАЛИЗАЦИЯ ПЕРЕМЕННЫХ GUI ДО ИХ ИСПОЛЬЗОВАНИЯ В СЕКЦИИ ЗАПИСИ (ФИКС C++)
-        // =========================================================================
+        // ИНИЦИАЛИЗАЦИЯ ПЕРЕМЕННЫХ GUI
         cv::Mat guiFrame;
         cv::resize(rawFrame, guiFrame, cv::Size(640, 480));
         cv::cvtColor(guiFrame, guiFrame, cv::COLOR_BGR2RGB);
@@ -138,9 +213,7 @@ void RtspVideoInferenceWorker::startVideoProcessing()
         QImage outImg = img.copy();
         float predictedValue = 36.6f;
 
-        // =========================================================================
         // ПРИНУДИТЕЛЬНОЕ ПРИВЕДЕНИЕ ТИПА МАТРИЦЫ ПОД СТАНДАРТ LINUX
-        // =========================================================================
         cv::Mat recordFrame;
         if (rawFrame.channels() == 1) {
             cv::cvtColor(rawFrame, recordFrame, cv::COLOR_GRAY2BGR);
@@ -150,12 +223,9 @@ void RtspVideoInferenceWorker::startVideoProcessing()
             recordFrame = rawFrame;
         }
 
-        // =========================================================================
-        // ВЫЧИСЛИТЕЛЬНЫЙ ИНФЕРЕНС (ОБРАБАТЫВАЕТСЯ ТОЛЬКО ЕСЛИ МОДЕЛЬ СТАБИЛЬНА)
-        // =========================================================================
+        // ВЫЧИСЛИТЕЛЬНЫЙ ИНФЕРЕНС
         if (modelLoadedSuccessfully) {
             try {
-                // Быстрая нормализация ImageNet средствами OpenCV вместо torch::tensor
                 cv::Mat blob;
                 cv::Size spatial_size(224, 224);
                 cv::Scalar mean_val(0.485 * 255, 0.456 * 255, 0.406 * 255);
@@ -163,15 +233,11 @@ void RtspVideoInferenceWorker::startVideoProcessing()
 
                 torch::NoGradGuard no_grad;
                 torch::Tensor inputTensor = torch::from_blob(blob.data, {1, 3, 224, 224}, torch::kFloat).to(device);
-                // =========================================================================
-                // ИСПРАВЛЕННЫЙ И БЕЗОПАСНЫЙ ИНФЕРЕНС (ФИКС ОШИБКИ СКАЛЯРА)
-                // =========================================================================
+
                 torch::Tensor outputTensor = module.forward({inputTensor}).toTensor();
                 if (outputTensor.defined() && outputTensor.numel() > 0) {
                     torch::Tensor flatTensor = outputTensor.flatten();
-
-                    // ИСПРАВЛЕНО: Явно берем индекс, чтобы избежать ошибки "2 elements cannot be converted to Scalar"
-                    float rawValue = flatTensor[0].item<float>();
+                    float rawValue = flatTensor.item<float>();
 
                     static float smoothedTemperature = 36.6f;
                     const float alpha = 0.15f;
@@ -187,27 +253,15 @@ void RtspVideoInferenceWorker::startVideoProcessing()
                 predictedValue = 36.6f;
             }
         }
-
-        // =========================================================================
-        // ЕДИНЫЙ ЦЕНТР ЗАПИСИ С ЖЕСТКО ЗАДАННЫМ ПУТЕМ (ПРОВЕРКА НАПРЯМУЮ)
-        // =========================================================================
-        // =========================================================================
-        // СКОРРЕКТИРОВАННЫЙ ЕДИНЫЙ ЦЕНТР ЗАПИСИ (СПОСОБ 1: АТОМАРНЫЙ ОБМЕН В ОЗУ)
-        // =========================================================================
+        // ЕДИНЫЙ ЦЕНТР ЗАПИСИ (СПОСОБ 1: АТОМАРНЫЙ ОБМЕН В ОЗУ)
         {
             QMutexLocker locker(&m_writerMutex);
-
-            // А. Старт записи: Кнопка нажата, но файл еще не открыт
             if (m_isRecording && !m_videoWriter.isOpened()) {
-
                 QString dynamicPath = "";
-
-                // Атомарно загружаем указатель на строку из общей памяти ядер CPU
                 QString* sharedPathPtr = m_atomicSavePath.load();
                 if (sharedPathPtr && !sharedPathPtr->isEmpty()) {
-                    dynamicPath = *sharedPathPtr; // Безопасно копируем значение в текущий поток
+                    dynamicPath = *sharedPathPtr;
                 } else {
-                    // Резервный Fallback по времени, если указатель пуст
                     QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_hh-mm-ss"));
                     dynamicPath = QStringLiteral("/home/elf/zcc/z1/data/raw/video/train_session_%1.avi").arg(timestamp);
                 }
@@ -218,18 +272,11 @@ void RtspVideoInferenceWorker::startVideoProcessing()
 
                 qDebug() << " [АТОМАРНЫЙ СТАРТ]: Фоновый поток инициализирует FFmpeg по пути:" << dynamicPath;
 
-                // Открываем файл напрямую в контексте ИИ-потока
-                bool ok = m_videoWriter.open(dynamicPath.toStdString(),
-                                             cv::CAP_FFMPEG,
-                                             codec,
-                                             25.0, // Рабочий FPS
-                                             cv::Size(actualWidth, actualHeight),
-                                             true);
+                bool ok = m_videoWriter.open(dynamicPath.toStdString(), cv::CAP_FFMPEG, codec, 25.0, cv::Size(actualWidth, actualHeight), true);
                 if (ok) {
                     localFrameCounter = 0;
                     qDebug() << " !!! [АТОМАРНЫЙ УСПЕХ]: Видеофайл успешно создан!";
                 } else {
-                    // Резервный откат на кодек MJPEG
                     codec = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
                     ok = m_videoWriter.open(dynamicPath.toStdString(), cv::CAP_FFMPEG, codec, 25.0, cv::Size(actualWidth, actualHeight), true);
                     if (ok) {
@@ -241,7 +288,6 @@ void RtspVideoInferenceWorker::startVideoProcessing()
                 }
             }
 
-            // Б. Запись кадра: Пишем, если файл успешно открылся
             if (m_isRecording && m_videoWriter.isOpened()) {
                 cv::Mat frameToSave;
                 if (recordFrame.cols != 640 || recordFrame.rows != 480) {
@@ -249,35 +295,26 @@ void RtspVideoInferenceWorker::startVideoProcessing()
                 } else {
                     frameToSave = recordFrame;
                 }
-
-                m_videoWriter.write(frameToSave); // Записываем матрицу на диск
-
+                m_videoWriter.write(frameToSave);
                 localFrameCounter++;
                 if (localFrameCounter % 15 == 0) {
                     qDebug() << " -> [ФИЗИЧЕСКАЯ ЗАПИСЬ]: Кадры пишутся успешно! Сохранено:" << localFrameCounter;
                 }
             }
 
-            // В. Стоп записи: Кнопка отжата интерфейсом, закрываем файл
             if (!m_isRecording && m_videoWriter.isOpened()) {
-                m_videoWriter.release(); // Финализируем структуру видеофайла AVI
-                m_videoWriter = cv::VideoWriter(); // Очищаем дескриптор в ОЗУ
-                std::system("sync"); // Принудительно сбрасываем кэш диска Linux
-
-                // Чистим атомарную память после успешного закрытия сессии
+                m_videoWriter.release();
+                m_videoWriter = cv::VideoWriter();
+                std::system("sync");
                 QString* oldPath = m_atomicSavePath.exchange(nullptr);
                 if (oldPath) delete oldPath;
-
                 qDebug() << " !!! [АТОМАРНАЯ ФИНАЛИЗАЦИЯ]: Файл успешно запечен на жесткий диск.";
             }
         }
 
-        // Вывод готового кадра и данных инференса в GUI Студии
         emit frameAnalyzed(outImg, predictedValue);
-
-        // Стабилизация FPS и аппаратная разгрузка процессора
         QThread::msleep(33);
-    }
+    } // Конец бесконечного цикла while (m_running)
 
     // Освобождение ресурсов при аварийном или плановом выходе из бесконечного цикла
     {
@@ -287,8 +324,8 @@ void RtspVideoInferenceWorker::startVideoProcessing()
             qDebug() << " [V4L2 ПОТОК]: Файл записи успешно сохранен и закрыт.";
         }
     }
-
     cap.release();
     qDebug() << " [ФОНОВЫЙ ПОТОК V4L2]: Аппаратные ресурсы вебкамеры успешно освобождены.";
     emit finished();
 }
+

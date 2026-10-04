@@ -311,7 +311,7 @@ QPushButton:disabled {
       </property>
       <widget class="QStackedWidget" name="centralStackedWidget">
        <property name="currentIndex">
-        <number>8</number>
+        <number>10</number>
        </property>
        <widget class="QWidget" name="page_teacher">
         <layout class="QGridLayout" name="gridLayout_9">
@@ -469,6 +469,20 @@ QTextEdit#inputChatText:focus {
         <layout class="QGridLayout" name="gridLayout_16">
          <item row="0" column="0">
           <widget class="ThermalMonitorBuilder" name="widget_9" native="true"/>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="page_10">
+        <layout class="QGridLayout" name="gridLayout_17">
+         <item row="0" column="0">
+          <widget class="SpeedPanel" name="speedPanel" native="true"/>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="page_11">
+        <layout class="QGridLayout" name="gridLayout_18">
+         <item row="0" column="0">
+          <widget class="all_spisok_progects_panel" name="Spisok_widget" native="true"/>
          </item>
         </layout>
        </widget>
@@ -648,7 +662,7 @@ QListWidget#quickActionsList::item:selected {
      <item row="0" column="0">
       <widget class="QStackedWidget" name="dockContentsStack">
        <property name="currentIndex">
-        <number>0</number>
+        <number>1</number>
        </property>
        <widget class="QWidget" name="page_3">
         <layout class="QGridLayout" name="gridLayout_8">
@@ -760,7 +774,7 @@ QListWidget#quickActionsList::item:selected {
           <string>Открыть проект</string>
          </property>
         </widget>
-        <widget class="QPushButton" name="pushButton_3">
+        <widget class="QPushButton" name="openProgectSpisok">
          <property name="geometry">
           <rect>
            <x>10</x>
@@ -770,7 +784,7 @@ QListWidget#quickActionsList::item:selected {
           </rect>
          </property>
          <property name="text">
-          <string>Склонировать репозиторий</string>
+          <string>Список проектов</string>
          </property>
         </widget>
         <widget class="Line" name="line">
@@ -931,6 +945,18 @@ QListWidget#quickActionsList::item:selected {
    <class>ThermalMonitorBuilder</class>
    <extends>QWidget</extends>
    <header>thermalmonitorbuilder.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>SpeedPanel</class>
+   <extends>QWidget</extends>
+   <header>speedpanel.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>all_spisok_progects_panel</class>
+   <extends>QWidget</extends>
+   <header>all_spisok_progects_panel.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

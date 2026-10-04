@@ -1,0 +1,124 @@
+{
+  "widget_class": "QWidget",
+  "widget_name": "all_spisok_progects_panel",
+  "layout": {
+    "type": "QVBoxLayout",
+    "margins": { "top": 10, "bottom": 10, "left": 20, "right": 20 },
+    "spacing": 10,
+    "children": [
+                  {
+        "comment": "1. Исправленная панель поиска, обновлений и фильтрации",
+        "widget_class": "QWidget",
+        "widget_name": "filterBar",
+        "layout": {
+          "type": "QHBoxLayout",
+          "margins": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+          "spacing": 10,
+          "children": [
+            {
+              "widget_class": "QPushButton",
+              "widget_name": "btnReload",
+              "text": "🔄 Обновить",
+              "min_height": 30,
+              "max_height": 30,
+              "action_binding": "registry_db_reload"
+            },
+            {
+              "widget_class": "QLineEdit",
+              "widget_name": "searchLine",
+              "placeholder": "Введите имя проекта для быстрого поиска...",
+              "min_width": 320,
+              "min_height": 30,
+              "max_height": 30,
+              "action_binding": "registry_live_search"
+            },
+            {
+              "widget_class": "QComboBox",
+              "widget_name": "cmbStatusFilter",
+              "items": ["Все статусы", "Создан", "В разработке", "Обучение модели", "Прошит в STM", "Завершено"],
+              "min_width": 160,
+              "min_height": 30,
+              "max_height": 30,
+              "action_binding": "registry_status_filter_changed"
+            },
+            {
+              "type": "QSpacerItem",
+              "orientation": "Horizontal"
+            },
+            {
+              "widget_class": "QPushButton",
+              "widget_name": "btnExportCSV",
+              "text": "📥 Экспорт ведомости",
+              "min_height": 30,
+              "max_height": 30,
+              "action_binding": "registry_export_csv"
+            },
+            {
+              "widget_class": "QLabel",
+              "widget_name": "lblCounter",
+              "text": "Всего проектов в ведомости: --",
+              "stylesheet": "color: #000000; font-weight: bold; padding-left: 5px;"
+            }
+          ]
+        }
+      },
+      {
+        "comment": "2. Таблица реестра проектов со столбцом project_path",
+        "widget_class": "QTableView",
+        "widget_name": "cleanProjectsTableView",
+        "properties": {
+          "alternatingRowColors": true,
+          "selectionMode": "SingleSelection",
+          "selectionBehavior": "SelectRows",
+          "sortingEnabled": true,
+          "showGrid": true,
+          "frameShape": "StyledPanel"
+        },
+        "datasource_setup": {
+          "target_table": "studio_projects",
+          "columns": [
+            {"field": "project_name", "header": "Название проекта", "policy": "ResizeToContents"},
+            {"field": "last_modified", "header": "Дата изменения", "policy": "ResizeToContents"},
+            {"field": "project_status", "header": "Текущий этап (Статус)", "policy": "ResizeToContents"},
+            {"field": "dataset_size", "header": "Размер датасета", "policy": "ResizeToContents"},
+            {"field": "project_path", "header": "project_path", "policy": "Stretch"},
+            {"field": "is_pinned", "header": "is_pinned", "policy": "ResizeToContents"}
+          ]
+        }
+      },
+      {
+        "comment": "3. Нижня панель действий — Кнопки без стилей цвета, растянуты на всю ширину",
+        "widget_class": "QWidget",
+        "widget_name": "actionsAndStatusWidget",
+        "layout": {
+          "type": "QHBoxLayout",
+          "margins": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+          "spacing": 10,
+          "children": [
+            {
+              "widget_class": "QPushButton",
+              "widget_name": "btnOpenProject",
+              "text": "📂 Открыть выбранный проект в Студии",
+              "min_height": 34,
+              "action_binding": "studio_load_selected_project"
+            },
+            {
+              "widget_class": "QPushButton",
+              "widget_name": "btnDeleteFromRegistry",
+              "text": "🗑️ Удалить из списка",
+              "min_height": 34,
+              "action_binding": "studio_delete_from_registry"
+            },
+            {
+              "widget_class": "QPushButton",
+              "widget_name": "btnDeleteFromDisk",
+              "text": "❌ Удалить с диска",
+              "min_height": 34,
+              "action_binding": "studio_delete_from_disk"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

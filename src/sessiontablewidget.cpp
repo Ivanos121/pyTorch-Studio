@@ -45,27 +45,44 @@ void SessionTableWidget::refreshTable() {
         bool configReadSuccess = false;
 
         if (fileConfig.open(QIODevice::ReadOnly)) {
-            // Парсим json-массив полей
-            QJsonArray arr = QJsonDocument::fromJson(fileConfig.readAll()).array();
+            // 1. Читаем документ как JSON-объект, а не массив
+            QJsonDocument doc = QJsonDocument::fromJson(fileConfig.readAll());
             fileConfig.close();
 
-            if (!arr.isEmpty()) {
-                m_columns.clear();
-                for (const QJsonValue &val : std::as_const(arr)) {
-                    QJsonObject obj = val.toObject();
+            if (!doc.isNull() && doc.isObject()) {
+                QJsonObject rootObj = doc.object();
 
-                    // Пропускаем невидимые колонки
-                    if (!obj[QStringLiteral("visible")].toBool()) continue;
-
-                    SessionColumn col;
-                    col.key = obj[QStringLiteral("key")].toString();
-                    col.header = obj[QStringLiteral("header")].toString();
-                    col.width = obj[QStringLiteral("width")].toInt();
-                    col.visible = true;
-                    m_columns << col;
+                // 2. Достаем настройки сетки (бонус: теперь они тоже применятся!)
+                if (rootObj.contains(QStringLiteral("alternating_row_colors"))) {
+                    m_tableWidget->setAlternatingRowColors(rootObj[QStringLiteral("alternating_row_colors")].toBool());
                 }
-                configReadSuccess = true;
-                qDebug() << ">>> [MLOps ТАБЛИЦА] УСПЕХ: Схема колонок успешно считана из:" << configPath;
+                if (rootObj.contains(QStringLiteral("grid_visible"))) {
+                    m_tableWidget->setShowGrid(rootObj[QStringLiteral("grid_visible")].toBool());
+                }
+
+                // 3. Заходим внутрь ключа "columns", где и лежит наш массив
+                if (rootObj.contains(QStringLiteral("columns")) && rootObj[QStringLiteral("columns")].isArray()) {
+                    QJsonArray arr = rootObj[QStringLiteral("columns")].toArray();
+
+                    if (!arr.isEmpty()) {
+                        m_columns.clear();
+                        for (const QJsonValue &val : std::as_const(arr)) {
+                            QJsonObject obj = val.toObject();
+
+                            // Пропускаем невидимые колонки
+                            if (!obj[QStringLiteral("visible")].toBool()) continue;
+
+                            SessionColumn col;
+                            col.key = obj[QStringLiteral("key")].toString();
+                            col.header = obj[QStringLiteral("header")].toString();
+                            col.width = obj[QStringLiteral("width")].toInt();
+                            col.visible = true;
+                            m_columns << col;
+                        }
+                        configReadSuccess = true;
+                        qDebug() << ">>> [MLOps ТАБЛИЦА] УСПЕХ: Схема колонок успешно считана из:" << configPath;
+                    }
+                }
             }
         }
 

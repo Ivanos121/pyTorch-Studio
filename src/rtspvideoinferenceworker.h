@@ -37,6 +37,7 @@ signals:
     void frameAnalyzed(const QImage &image, float value);
     void errorOccurred(const QString &message);
     void finished();
+    void notificationRequested(const QString &title, const QString &message);
 
 private:
     QString m_streamUrl;

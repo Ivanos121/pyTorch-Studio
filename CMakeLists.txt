@@ -15,6 +15,7 @@ find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets DBus Charts Network WebEngineWidgets
     Concurrent WebChannel WebSockets UiTools SerialPort Test PrintSupport
 )
+find_package(Qt6 REQUIRED COMPONENTS Sql)
 
 # Поиск компонентов KDE (KF6)
 find_package(KF6Parts REQUIRED)
@@ -69,6 +70,8 @@ set(PROJECT_SOURCES
     src/qcustomplot.h
     src/mlopsartifactloader.cpp
     src/mlopsartifactloader.h
+    src/statuscomboboxdelegate.cpp
+    src/statuscomboboxdelegate.h
 
     # Менеджеры данных, процессов и ИИ
     src/projectmanager.cpp
@@ -156,6 +159,10 @@ add_executable(pytorch-studio ${PROJECT_SOURCES}
     src/mlopsartifactloader.h src/mlopsartifactloader.cpp
     src/rtspvideoinferenceworker.h src/rtspvideoinferenceworker.cpp
     src/thermalmonitorbuilder.h src/thermalmonitorbuilder.cpp
+    src/speedpanel.h src/speedpanel.cpp
+    src/all_spisok_progects_panel.h src/all_spisok_progects_panel.cpp
+    src/statuscomboboxdelegate.h src/statuscomboboxdelegate.cpp
+    src/projectindicatorsproxymodel.h src/projectindicatorsproxymodel.cpp
 )
 
 # Указываем пути поиска заголовочных файлов
@@ -291,3 +298,4 @@ target_link_libraries(pytorch-studio PRIVATE
     # ПРИВЯЗКА БИНАРНЫХ БИБЛИОТЕК OPENCV:
     ${OpenCV_LIBS}
 )
+target_link_libraries(pytorch-studio PRIVATE Qt6::Sql)

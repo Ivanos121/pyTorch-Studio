@@ -15,6 +15,7 @@
 #include <QChart>
 #include <QLineSeries>
 #include <QValueAxis>
+#include <QComboBox>
 
 ThermalMonitorBuilder::ThermalMonitorBuilder(QWidget *parent)
     : QWidget(parent)
@@ -38,7 +39,7 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
 {
     QFile file(schemaPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "❌ [MonitorBuilder]: Не удалось открыть:" << schemaPath;
+        qWarning() << " [MonitorBuilder]: Не удалось открыть:" << schemaPath;
         return false;
     }
 
@@ -47,7 +48,7 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
     file.close();
 
     if (parseError.error != QJsonParseError::NoError) {
-        qWarning() << "❌ [MonitorBuilder]: Ошибка JSON:" << parseError.errorString();
+        qWarning() << " [MonitorBuilder]: Ошибка JSON:" << parseError.errorString();
         return false;
     }
 
@@ -62,7 +63,10 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
             QSplitter *splitter = new QSplitter(Qt::Horizontal, this);
             QString splitterName = elem[QStringLiteral("object_name")].toString();
             splitter->setObjectName(splitterName);
-            if (elem.contains(QStringLiteral("style_sheet"))) splitter->setStyleSheet(elem[QStringLiteral("style_sheet")].toString());
+
+            if (elem.contains(QStringLiteral("style_sheet"))) {
+                splitter->setStyleSheet(elem[QStringLiteral("style_sheet")].toString());
+            }
 
             // ВАЖНО: Разрешаем сплиттеру растягиваться на весь экран Студии
             splitter->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -72,7 +76,6 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
             QJsonArray children = elem[QStringLiteral("children")].toArray();
             for (int j = 0; j < children.size(); ++j) {
                 QJsonObject childContainer = children[j].toObject();
-
                 QWidget *containerWidget = new QWidget(splitter);
                 QVBoxLayout *containerLayout = new QVBoxLayout(containerWidget);
                 containerLayout->setSpacing(childContainer[QStringLiteral("spacing")].toInt(12));
@@ -88,6 +91,9 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
                     QString name = wObj[QStringLiteral("object_name")].toString();
                     QString textVal = wObj[QStringLiteral("text")].toString();
 
+                    // =========================================================================
+                    // ВЕТКА ОБРАБОТКИ QLABEL
+                    // =========================================================================
                     if (type == QStringLiteral("QLabel")) {
                         QLabel *label = new QLabel(textVal, containerWidget);
                         label->setObjectName(name);
@@ -102,41 +108,65 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
                             label->setMaximumHeight(50); // Ужимаем верхний виджет метрики по высоте
                         }
 
-                        if (wObj[QStringLiteral("alignment")].toString() == QStringLiteral("AlignCenter")) label->setAlignment(Qt::AlignCenter);
-                        if (wObj.contains(QStringLiteral("style_sheet"))) label->setStyleSheet(wObj[QStringLiteral("style_sheet")].toString());
+                        if (wObj[QStringLiteral("alignment")].toString() == QStringLiteral("AlignCenter")) {
+                            label->setAlignment(Qt::AlignCenter);
+                        }
+                        if (wObj.contains(QStringLiteral("style_sheet"))) {
+                            label->setStyleSheet(wObj[QStringLiteral("style_sheet")].toString());
+                        }
 
                         containerLayout->addWidget(label);
                         m_monitorWidgetsMap[name] = label;
                     }
+                    // =========================================================================
+                    // ВЕТКА ОБРАБОТКИ QCOMBOBOX (НОВАЯ, ОФИЦИАЛЬНО ДОБАВЛЕННАЯ)
+                    // =========================================================================
+                    // =========================================================================
+                    // БЕЗОПАСНАЯ ВЕТКА ОБРАБОТКИ QCOMBOBOX БЕЗ ПАРСИНГА ITEMS
+                    // =========================================================================
+                    else if (type == QStringLiteral("QComboBox")) {
+                        QComboBox *combo = new QComboBox(containerWidget);
+                        combo->setObjectName(name);
+
+                        if (wObj.contains(QStringLiteral("style_sheet"))) {
+                            combo->setStyleSheet(wObj[QStringLiteral("style_sheet")].toString());
+                        }
+
+                        combo->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+                        combo->setFixedHeight(35);
+                        combo->setFixedWidth(260);
+
+                        containerLayout->addWidget(combo, 0, Qt::AlignHCenter);
+                        m_monitorWidgetsMap[name] = combo;
+                    }
+
+                    // =========================================================================
+                    // ВЕТКА ОБРАБОТКИ QPUSHBUTTON
+                    // =========================================================================
                     else if (type == QStringLiteral("QPushButton")) {
                         QPushButton *btn = new QPushButton(textVal, containerWidget);
                         btn->setObjectName(name);
                         btn->setCursor(Qt::PointingHandCursor);
                         btn->setEnabled(true);
 
-                        // =========================================================================
-                        // ЖЕСТКИЙ ФИКС: РАСПОЗНАВАНИЕ ТУМБЛЕРА ПРИ ЛЮБОМ СИНТАКСИСЕ JSON
-                        // =========================================================================
                         if (wObj.contains(QStringLiteral("checkable"))) {
                             QJsonValue chVal = wObj[QStringLiteral("checkable")];
                             if (chVal.isBool()) {
                                 btn->setCheckable(chVal.toBool());
                             } else {
-                                // Если в JSON написано "true" или "true," в кавычках — всё равно включаем тумблер!
                                 QString strVal = chVal.toString().trimmed().toLower();
                                 btn->setCheckable(strVal.startsWith(QStringLiteral("true")));
                             }
                         } else {
-                            // Если это кнопка записи на нашей странице, принудительно делаем её чекаемой
                             if (name == QStringLiteral("btnRecordVideo")) {
                                 btn->setCheckable(true);
                             }
                         }
-                        // =========================================================================
 
                         btn->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
                         btn->setFixedHeight(35);
                         btn->setFixedWidth(260);
+
                         if (wObj.contains(QStringLiteral("style_sheet"))) {
                             btn->setStyleSheet(wObj[QStringLiteral("style_sheet")].toString());
                         }
@@ -144,7 +174,9 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
                         containerLayout->addWidget(btn, 0, Qt::AlignHCenter);
                         m_monitorWidgetsMap[name] = btn;
                     }
-
+                    // =========================================================================
+                    // ВЕТКА ОБРАБОТКИ QCHARTVIEW
+                    // =========================================================================
                     else if (type == QStringLiteral("QChartView")) {
                         QChart *chart = new QChart();
                         QLineSeries *series = new QLineSeries();
@@ -155,25 +187,35 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
                         chart->setTitle(props[QStringLiteral("title")].toString());
 
                         // Горизонтальная ось X (Время)
+                        // =========================================================================
+                        // ИСПРАВЛЕННЫЙ ВАРИАНТ РАЗБОРА ОСЕЙ (СТРОГО КАК БЫЛО, С ФИКСОМ СИНТАКСИСА)
+                        // =========================================================================
+                        // 1. Горизонтальная ось X (Время)
                         QValueAxis *axisX = new QValueAxis();
                         QJsonObject jX = props[QStringLiteral("axis_x")].toObject();
                         axisX->setTitleText(jX[QStringLiteral("label")].toString());
                         QJsonArray rX = jX[QStringLiteral("range")].toArray();
-                        // ИСПРАВЛЕНО: Извлекаем значения по индексам 0 и 1 массива JSON
+
+                        // ИСПРАВЛЕНО: Безопасное приведение через QVariant полностью исключает Token Error
                         if (rX.size() == 2) {
-                            axisX->setRange(rX[0].toDouble(), rX[1].toDouble());
+                            double minX = rX.at(0).toVariant().toDouble();
+                            double maxX = rX.at(1).toVariant().toDouble();
+                            axisX->setRange(minX, maxX);
                         }
                         chart->addAxis(axisX, Qt::AlignBottom);
                         series->attachAxis(axisX);
 
-                        // Вертикальная ось Y (Градусы)
+                        // 2. Вертикальная ось Y (Градусы)
                         QValueAxis *axisY = new QValueAxis();
                         QJsonObject jY = props[QStringLiteral("axis_y")].toObject();
                         axisY->setTitleText(jY[QStringLiteral("label")].toString());
                         QJsonArray rY = jY[QStringLiteral("range")].toArray();
-                        // ИСПРАВЛЕНО: Извлекаем значения по индексам 0 и 1 массива JSON
+
+                        // ИСПРАВЛЕНО: Безопасное приведение через QVariant полностью исключает Token Error
                         if (rY.size() == 2) {
-                            axisY->setRange(rY[0].toDouble(), rY[1].toDouble());
+                            double minY = rY.at(0).toVariant().toDouble();
+                            double maxY = rY.at(1).toVariant().toDouble();
+                            axisY->setRange(minY, maxY);
                         }
                         chart->addAxis(axisY, Qt::AlignLeft);
                         series->attachAxis(axisY);
@@ -185,7 +227,9 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
                         // ФИКС №2: Разрешаем графику расширяться на ВСЮ оставшуюся высоту и ширину
                         chartView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-                        if (wObj.contains(QStringLiteral("style_sheet"))) chartView->setStyleSheet(wObj[QStringLiteral("style_sheet")].toString());
+                        if (wObj.contains(QStringLiteral("style_sheet"))) {
+                            chartView->setStyleSheet(wObj[QStringLiteral("style_sheet")].toString());
+                        }
 
                         chartView->setProperty("data_series", QVariant::fromValue(series));
                         chartView->setProperty("axis_x", QVariant::fromValue(axisX));
@@ -193,15 +237,15 @@ bool ThermalMonitorBuilder::buildMonitorUi(const QString &schemaPath)
                         containerLayout->addWidget(chartView);
                         m_monitorWidgetsMap[name] = chartView;
                     }
-                }
+                } // Конец цикла по виджетам контейнера
 
                 // ВНИМАНИЕ: Сюда мы НЕ добавляем addStretch(1), чтобы макет не сжимал график и видео!
                 splitter->addWidget(containerWidget);
             }
-
             // Жестко выставляем пропорцию сплиттера: 60% лево, 40% право
             splitter->setSizes(QList<int>({600, 400}));
         }
     }
     return true;
 }
+

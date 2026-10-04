@@ -79,6 +79,35 @@ void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &contex
     }
 }
 
+// =========================================================================
+// ФИНАЛЬНЫЙ СКОРРЕКТИРОВАННЫЙ ОБРАБОТЧИК ЛОГОВ (УБРАНА ЗАВИСИМОСТЬ ОТ ОКНА)
+// =========================================================================
+// void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
+// {
+//     // 1. ПОЛНЫЙ ИГНОР ЛОГОВ ПОТОКОВ ПРИ ЗАКРЫТИИ (ИСПРАВЛЕНИЕ КРАША thread is still running)
+//     if (msg.contains(QStringLiteral("QThread: Destroyed while thread is still running")) ||
+//         msg.contains(QStringLiteral("QObjectPrivate::deleteChildren")) ||
+//         msg.contains(QStringLiteral("QObject::killTimer")))
+//     {
+//         std::cout << " [СИСТЕМНЫЙ ИГНОР]: Поток или таймер закрывается. Блокируем вызов GUI." << std::endl;
+//         std::cout.flush();
+//         return;
+//     }
+
+//     // 2. БЕЗОПАСНЫЙ СТАНДАРТНЫЙ ВЫВОД В КОНСОЛЬ LINUX ARCH
+//     if (type == QtInfoMsg) {
+//         std::cout << "[INFO]: " << msg.toStdString() << std::endl;
+//     } else if (type == QtWarningMsg) {
+//         std::cerr << "[WARN]: " << msg.toStdString() << " (" << context.file << ":" << context.line << ")" << std::endl;
+//     } else if (type == QtCriticalMsg || type == QtFatalMsg) {
+//         std::cerr << "\n🔴 [CRITICAL ERROR]: " << msg.toStdString() << std::endl;
+//         std::cerr.flush();
+//     } else {
+//         std::cout << msg.toStdString() << std::endl;
+//     }
+// }
+
+
 
 int main(int argc, char *argv[])
 {

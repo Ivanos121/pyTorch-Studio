@@ -251,6 +251,7 @@ private slots:
     void onPromptSubmitted(const QString &promptText);
 
 private:
+    bool isMediaActive = false;
     QComboBox *m_clonedFileComboBox;
     QComboBox *m_clonedFuncComboBox;
     bool m_isPipelineExecutionActive = false;
