@@ -1,5 +1,6 @@
 #include "projectindicatorsproxymodel.h"
 #include "all_spisok_progects_panel.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QSqlTableModel>

@@ -5875,17 +5875,37 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
             // Передаем новый путь к БД и JSON-разметку в функцию сборки
             ui->Spisok_widget->initPanel(globalRegistryDb, panelJsonLayout);
 
-            // 3. Перехватываем сигналы панели через безопасные лямбда-функции
+            // ============================================================================
+            // ИСПРАВЛЕНИЕ ШАГА 1: Нативный перехват сигнала загрузки асинхронного мотора
+            // ============================================================================
             connect(ui->Spisok_widget, &all_spisok_progects_panel::requestOpenProject,
-                    this, [this](const QString& projectName) {
-                        qDebug() << "[Studio Kernel] Загрузка проекта из ведомости:" << projectName;
+                    this, [this](const QString& projectPath) {
+                        qDebug() << "[Studio Kernel] Аппаратная загрузка проекта по пути:" << projectPath;
 
-                        // TODO: Подставьте сюда вашу функцию открытия папки, например:
-                        // this->loadProjectFolder(projectName);
+                        // 1. Инициализируем дерево файлов асинхронного проекта (Разворачиваем паспорт)
+                        this->initProjectTreeModel(projectPath);
 
-                        // Возврат обратно на рабочую область стартового окна (Индекс 9)
+                        // 2. ДИНАМИЧЕСКИЙ ПОИСК И ОТКРЫТИЕ ПЛЕЙСХОЛДЕРА В СТЭКЕ
                         if (ui->centralStackedWidget) {
-                            ui->centralStackedWidget->setCurrentIndex(9);
+                            // Ищем созданный ранее виджет БЕЗ повторного указания типа (защита от redefinition)
+                            QWidget *foundPlaceholder = ui->centralStackedWidget->findChild<QWidget*>(QStringLiteral("JETBRAINS_PLACEHOLDER"));
+
+                            if (foundPlaceholder) {
+                                // Получаем реальный порядковый индекс найденного плейсхолдера
+                                int actualPlaceholderIdx = ui->centralStackedWidget->indexOf(foundPlaceholder);
+
+                                // Сохраняем индекс в свойства для ядра (если это необходимо вашей системе)
+                                this->setProperty("placeholderIndex", actualPlaceholderIdx);
+
+                                // КРИТИЧЕСКИЙ ШАГ: Принудительно переключаем стек дока на этот плейсхолдер!
+                                ui->centralStackedWidget->setCurrentIndex(actualPlaceholderIdx);
+
+                                qDebug() << ">>> [СТУДИЯ СИНХРОНИЗАЦИЯ]: Стек переключен на плейсхолдер, Index:" << actualPlaceholderIdx;
+                            } else {
+                                // Резервный фолбэк: если плейсхолдер не найден по имени, включаем стандартный индекс рабочей зоны (0)
+                                ui->centralStackedWidget->setCurrentIndex(0);
+                                qWarning() << ">>> [СТУДИЯ СИНХРОНИЗАЦИЯ]: JETBRAINS_PLACEHOLDER не найден, включен Index 0 по умолчанию.";
+                            }
                         }
                     });
 
@@ -7730,18 +7750,28 @@ void Neuro_programm::openRecentProject()
     if (!projectDir.exists() || !projectDir.exists("passport.pystudio.json")) {
         qWarning() << "[RECENT_MENU] Ошибка: Папка проекта удалена или повреждена:" << targetProjectPath;
         QMessageBox::critical(
-                    this,
-                    "Проект не найден",
-                    "<b>Не удалось открыть недавний проект.</b><br><br>"
-                    "Директория была удалена с жесткого диска, переименована или в ней отсутствует файл паспорта."
-                    );
+            this,
+            "Проект не найден",
+            "<b>Не удалось открыть недавний проект.</b><br><br>"
+            "Директория была удалена с жесткого диска, переименована или в ней отсутствует файл паспорта."
+        );
         return;
+    }
+
+    // ============================================================================
+    // ИНТЕГРАЦИЯ С ШАГОМ 2: АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ ЛОКАЛЬНОЙ БД КОНСТАНТ АД
+    // ============================================================================
+    // При вызове из верхнего подменю недавних проектов принудительно разворачиваем
+    // подпапку db/ и файл project_local.db со всеми полями схемы замещения мотора!
+    if (ui && ui->Spisok_widget) {
+        ui->Spisok_widget->ensureLocalProjectDatabase(targetProjectPath);
     }
 
     // ЖЕЛЕЗНЫЙ ВЫЗОВ: Передаем управление в метод инициализации дерева!
     // Он сам переключит стек дока на индекс 0 и развернет структуру файлов.
     this->initProjectTreeModel(targetProjectPath);
 }
+
 
 void Neuro_programm::saveCurrentActiveFile()
 {
@@ -7889,7 +7919,6 @@ void Neuro_programm::onCloseProjectClicked()
     // =========================================================================
     bool hasUnsavedChanges = false;
     CodeEditor *activeEditor = nullptr;
-
     QWidget *currentPage = ui->centralStackedWidget ? ui->centralStackedWidget->currentWidget() : nullptr;
     if (currentPage) {
         activeEditor = currentPage->findChild<CodeEditor*>();
@@ -7904,12 +7933,11 @@ void Neuro_programm::onCloseProjectClicked()
     if (hasUnsavedChanges) {
         QMessageBox::StandardButton reply;
         reply = QMessageBox::warning(this,
-                                     "Несохраненные изменения",
-                                     "В проекте или открытом файле есть несохраненные изменения.\n"
-                                     "Хотите сохранить их перед закрытием проекта?",
-                                     QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel
-                                     );
-
+            "Несохраненные изменения",
+            "В проекте или открытом файле есть несохраненные изменения.\n"
+            "Хотите保存 их перед закрытием проекта?",
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel
+        );
         if (reply == QMessageBox::Save) {
             this->saveCurrentActiveFile();
             qDebug() << "[ЗАКРЫТИЕ] Проект принудительно сохранен пользователем перед выходом.";
@@ -7922,7 +7950,7 @@ void Neuro_programm::onCloseProjectClicked()
 
     // =========================================================================
     // ЭТАП 2: СОХРАНЕНИЕ ПОСЛЕДНЕГО АКТИВНОГО ФАЙЛА В ИСТОРИЮ PYSTUDIO.CONF
-    // =========================================================================
+    // ============================================================================
     if (currentPage && activeEditor && !activeEditor->currentFilePath.isEmpty() && !this->currentOpenProjectPath.isEmpty()) {
         QString configAbsolutePath = QDir::homePath() + "/.config/PyTorchStudio/pystudio.conf";
         QSettings settings(configAbsolutePath, QSettings::IniFormat);
@@ -7946,7 +7974,6 @@ void Neuro_programm::onCloseProjectClicked()
         if (i == 0 || i == 1 || i == placeholderIndex) {
             continue;
         }
-
         QWidget *w = ui->centralStackedWidget->widget(i);
         if (w) {
             qDebug() << ">>> [УДАЛЕНИЕ] Закрываю открытую вкладку кода:" << w->objectName();
@@ -7971,19 +7998,16 @@ void Neuro_programm::onCloseProjectClicked()
         mainScreenItem->setData(Qt::UserRole, QString("MAIN_SCREEN"));
         QListWidgetItem *chatScreenItem = new QListWidgetItem(" ИИ-Ассистент", ui->openFilesListWidget);
         chatScreenItem->setData(Qt::UserRole, QString("AI_CHAT_SCREEN"));
-
         ui->openFilesListWidget->setCurrentRow(0);
         if (ui->openFilesContainer) ui->openFilesContainer->setVisible(false);
-    }
-
-    // Обнуляем файловую модель дерева TreeView
-    if (ui->treeView) {
-        ui->treeView->setModel(nullptr);
     }
 
     // =========================================================================
     // ЭТАП 5: ТОТАЛЬНОЕ СТИРАНИЕ ПУТЕЙ И СБРОС ЗАГЛОВКОВ (ЧИСТЫЙ ФИКС СЕССИИ)
     // =========================================================================
+    // Переводим внутренние флаги ядра Студии в стартовый режим
+    this->setIDEInStartMode(true);
+
     this->currentOpenProjectPath = "";
     this->setProperty("currentOpenProjectPath", ""); // Зачищаем свойство для DocumentManager
     this->setWindowModified(false);
@@ -7996,17 +8020,50 @@ void Neuro_programm::onCloseProjectClicked()
         if (this->titleLabel) this->titleLabel->setText("PyTorch Studio");
     }
 
-    // Переводим интерфейс в режим пустой стартовой заставки шорткатов
-    this->setIDEInStartMode(true);
-
     if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(false);
     if (ui->fileComboBox) ui->fileComboBox->setEnabled(false);
 
     // Гасим нижний терминал и REPL
-    if (panelOther)  panelOther->setVisible(false);
+    if (panelOther) panelOther->setVisible(false);
     if (btnTerminal) btnTerminal->setChecked(false);
 
-    // Выводим плейсхолдер шорткатов JetBrains на передний план по центру
+    // Обнуляем файловую модель дерева TreeView строго ПОСЛЕ переключения флагов режима IDE [pdf_0.1.8]
+    if (ui->treeView) {
+        ui->treeView->setModel(nullptr);
+    }
+
+    // ============================================================================
+    // АППАРАТНАЯ СИМУЛЯЦИЯ КЛИКА ДЛЯ СБРОСА БОКОВОЙ ПАНЕЛИ К КНОПКАМ
+    // ============================================================================
+    // Находим QStackedWidget боковой панели, в котором живет дерево treeView
+    QStackedWidget *leftStack = nullptr;
+    if (ui->treeView) {
+        leftStack = qobject_cast<QStackedWidget*>(ui->treeView->parentWidget());
+        if (!leftStack && ui->treeView->parentWidget()) {
+            leftStack = qobject_cast<QStackedWidget*>(ui->treeView->parentWidget()->parentWidget());
+        }
+    }
+
+    if (leftStack) {
+        // Принудительно выставляем 0-й индекс (Экран с кнопками "Новый проект" / "Список проектов")
+        leftStack->setCurrentIndex(0);
+        leftStack->update();
+    }
+
+    // Прокачиваем системную очередь графических событий Linux для сброса зависшего буфера
+    QCoreApplication::processEvents();
+
+    // ИСПРАВЛЕНИЕ: Вызываем метод trigger() вместо click() для объекта QAction (actProject)
+    // Это заставит боковой стек принудительно обновить верстку и вернуть кнопки в один клик
+    if (actProject) {
+        actProject->trigger();
+        QCoreApplication::processEvents();
+        actProject->trigger();
+    }
+
+    // ============================================================================
+    // ГАРАНТИРОВАННОЕ ОТКРЫТИЕ ЦЕНТРАЛЬНОГО ПЛЕЙСХОЛДЕРА ХОТКЕЕВ (JETBRAINS)
+    // ============================================================================
     placeholderIndex = ui->centralStackedWidget->indexOf(ui->centralStackedWidget->findChild<QWidget*>("JETBRAINS_PLACEHOLDER"));
     if (placeholderIndex == -1) {
         placeholderIndex = this->property("placeholderIndex").toInt();
@@ -8016,12 +8073,17 @@ void Neuro_programm::onCloseProjectClicked()
         if (ui->cursorPosLabel) {
             ui->cursorPosLabel->hide(); // Прячем индикатор строк, так как файлов на экране нет
         }
+
+        // Принудительно выводим JETBRAINS_PLACEHOLDER на передний план, если он был скрыт
         ui->centralStackedWidget->setCurrentIndex(placeholderIndex);
         ui->centralStackedWidget->update();
     }
 
-    qInfo() << "[PROJECT_MGR] Проект успешно закрыт. ОЗУ зачищена. Интерфейс в исходном состоянии.";
-} // <-- Метод теперь гарантированно и правильно закрывается здесь!
+    // Финальная фиксация графического окна в Linux Breeze
+    QCoreApplication::processEvents();
+
+    qInfo() << "[PROJECT_MGR] Проект успешно закрыт. Интерфейс возвращен к кнопкам в один клик.";
+}
 
 void Neuro_programm::initLspServer()
 {

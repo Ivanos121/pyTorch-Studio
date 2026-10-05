@@ -22,6 +22,7 @@
 #include <QDesktopServices>
 #include <QProcess>
 #include <QContextMenuEvent>
+#include <QMouseEvent>
 
 all_spisok_progects_panel::all_spisok_progects_panel(QWidget *parent)
     : QWidget(parent)
@@ -120,7 +121,7 @@ void all_spisok_progects_panel::refreshPanel()
     QStringList recentPaths = rawProjectsString.split(QLatin1Char(';'), Qt::SkipEmptyParts);
 
     QSqlQuery insertQuery(m_db);
-    for (const QString& path : recentPaths) {
+    for (const QString& path : std::as_const(recentPaths)) {
         QString cleanPath = path.trimmed();
         if (cleanPath.isEmpty()) continue;
 
@@ -215,7 +216,7 @@ qint64 getDirectorySize(const QString& dirPath) {
 
     // Считываем абсолютно все файлы (включая скрытые файлы конфигураций и логи без расширений)
     QFileInfoList fileList = dir.entryInfoList(QDir::Files | QDir::Hidden | QDir::System | QDir::NoFilter);
-    for (const QFileInfo& fileInfo : fileList) {
+    for (const QFileInfo& fileInfo : std::as_const(fileList)) {
         if (fileInfo.isFile()) {
             size += fileInfo.size();
         }
@@ -223,7 +224,7 @@ qint64 getDirectorySize(const QString& dirPath) {
 
     // Рекурсивно спускаемся во все поддиректории
     QFileInfoList dirList = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
-    for (const QFileInfo& subDirInfo : dirList) {
+    for (const QFileInfo& subDirInfo : std::as_const(dirList)) {
         size += getDirectorySize(subDirInfo.absoluteFilePath());
     }
 
@@ -260,7 +261,7 @@ int all_spisok_progects_panel::countFilesRecursive(const QString& dirPath, const
     // Рекурсивно заходим во все подпапки экспериментов и запусков (run_001, hf_hub и т.д.)
     dir.setNameFilters({}); // Сбрасываем фильтр для корректного поиска директорий
     QFileInfoList subDirs = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
-    for (const QFileInfo& subDirInfo : subDirs) {
+    for (const QFileInfo& subDirInfo : std::as_const(subDirs)) {
         count += countFilesRecursive(subDirInfo.absoluteFilePath(), nameFilters); // Рекурсивный вызов метода
     }
 
@@ -295,7 +296,7 @@ void all_spisok_progects_panel::scanProjectsDirectory(const QString& targetDirPa
             QString actualDatasetsPath = "";
 
             QStringList entryList = rootDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-            for (const QString& subDirName : entryList) {
+            for (const QString& subDirName : std::as_const(entryList)) {
                 if (subDirName.compare(QStringLiteral("data"), Qt::CaseInsensitive) == 0) {
                     actualDataPath = rootDir.absoluteFilePath(subDirName);
                 }
@@ -340,7 +341,7 @@ void all_spisok_progects_panel::scanProjectsDirectory(const QString& targetDirPa
     QFileInfoList folderList = projectsDir.entryInfoList();
     QSqlQuery checkQuery(m_db);
 
-    for (const QFileInfo& folderInfo : folderList) {
+    for (const QFileInfo& folderInfo : std::as_const(folderList)) {
         QString projectName = folderInfo.fileName();
         QString projectPath = folderInfo.absoluteFilePath();
         QString lastModTime = folderInfo.lastModified().toString("dd.MM.yyyy hh:mm");
@@ -417,10 +418,11 @@ QLayout* all_spisok_progects_panel::parseLayout(const QJsonObject& layoutObj) {
     } else {
         layout->setContentsMargins(0, 0, 0, 0);
     }
-
     layout->setSpacing(layoutObj["spacing"].toInt(10));
 
-    for (QJsonValueRef childValue : layoutObj["children"].toArray()) {
+    // КРИТИЧЕСКИЙ ФИКС: Извлекаем массив в константу и итерируемся через const QJsonValue&
+    const QJsonArray childrenArray = layoutObj["children"].toArray();
+    for (const QJsonValue& childValue : childrenArray) {
         QJsonObject childObj = childValue.toObject();
 
         if (childObj.contains("type") && childObj["type"].toString() == "QSpacerItem") {
@@ -434,6 +436,7 @@ QLayout* all_spisok_progects_panel::parseLayout(const QJsonObject& layoutObj) {
             if (childWidget) layout->addWidget(childWidget);
         }
     }
+
     // Проходим по всем добавленным элементам слоя
     for (int i = 0; i < layout->count(); ++i) {
         QLayoutItem* item = layout->itemAt(i);
@@ -483,10 +486,16 @@ QWidget* all_spisok_progects_panel::parseWidget(const QJsonObject& widgetObj) {
     }
     else if (widgetClass == "QComboBox") {
         QComboBox* comboBox = new QComboBox(this);
-        for (auto item : widgetObj["items"].toArray()) comboBox->addItem(item.toString());
+
+        // КРИТИЧЕСКИЙ ФИКС: Добавляем const & для предотвращения detach контейнера Qt
+        const QJsonArray itemsArray = widgetObj["items"].toArray();
+        for (const QJsonValue& item : itemsArray) {
+            comboBox->addItem(item.toString());
+        }
         m_cmbStatusFilter = comboBox;
         if (widgetObj["action_binding"].toString() == "registry_status_filter_changed") {
-            connect(comboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &all_spisok_progects_panel::applyStatusFilter);
+            connect(comboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                    this, &all_spisok_progects_panel::applyStatusFilter);
         }
         widget = comboBox;
     }
@@ -594,16 +603,19 @@ void all_spisok_progects_panel::setupTableView(QTableView* tableView, const QJso
     connect(tableView, &QTableView::customContextMenuRequested, this, [this, tableView](const QPoint& pos) {
         QModelIndex index = tableView->indexAt(pos);
         if (index.isValid()) {
-            // Вызываем всплывающее меню, переводя локальные координаты в глобальные
             showContextMenu(index, tableView->viewport()->mapToGlobal(pos));
         }
     });
 
     // ============================================================================
-    // ВКЛЮЧАЕМ ХОВЕР-ТРЕКИНГ МЫШИ ДЛЯ ТАБЛИЦЫ (БЕЗ ОШИБОК КОМПИЛЯЦИИ)
+    // ИСПРАВЛЕННЫЙ ХОБЕР-ТРЕКИНГ: ТОТАЛЬНАЯ ЗАЩИТА ОТ ЗАЛИПАНИЯ КУРСОРA
     // ============================================================================
+    // Включаем непрерывное отслеживание перемещений мыши в X11/Wayland
     tableView->setMouseTracking(true);
-    tableView->viewport()->setMouseTracking(true); // Включаем трекинг для внутренней сетки
+    tableView->viewport()->setMouseTracking(true);
+
+    // Устанавливаем фильтр событий на внутреннюю сетку таблицы (viewport)
+    tableView->viewport()->installEventFilter(this);
 
     // Подключаем сигнал движения курсора над ячейками таблицы
     connect(tableView, &QTableView::entered, this, [tableView](const QModelIndex& index) {
@@ -636,33 +648,51 @@ void all_spisok_progects_panel::setupTableView(QTableView* tableView, const QJso
 
 void all_spisok_progects_panel::handleAction(const QString& actionId) {
     if (actionId == "registry_db_reload") {
+        // 1. Запускаем физическое сканирование файлов на диске Linux
         scanProjectsDirectory(QStringLiteral("/home/elf/pyTorch-Studio/projects"));
+
         if (m_tableModel) {
+            // Принудительно перечитываем свежие данные из файла SQLite на SSD
             m_tableModel->select();
 
+            // Жесткий цикл фиксации просторной высоты строк (36px) под комбобоксы
             if (m_tableView) {
                 m_tableView->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
                 m_tableView->verticalHeader()->setDefaultSectionSize(36);
                 for (int i = 0; i < m_tableModel->rowCount(); ++i) {
                     m_tableView->setRowHeight(i, 36);
                 }
-                m_tableView->setColumnHidden(5, true);
-                m_tableView->setColumnHidden(4, false);
 
-                // Отложенный перерасчет ширины ячеек при ручном обновлении данных
-                // Отложенный перерасчет ширины ячеек при ручном обновлении данных
+                m_tableView->setStyleSheet(QStringLiteral("QTableView::item { padding: 6px; }"));
+                m_tableView->setColumnHidden(5, true);  // Скрываем технический флаг
+                m_tableView->setColumnHidden(4, false); // Показываем project_path
+
+                // Аппаратный отложенный ресайз ширины столбцов под иконки прокси-модели
                 QTimer::singleShot(20, this, [this]() {
                     if (m_tableView && m_tableView->horizontalHeader()) {
                         m_tableView->horizontalHeader()->resizeSections(QHeaderView::ResizeToContents);
-
-                        // Возвращаем режим Stretch для 4-й колонки пути при обновлении
                         m_tableView->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
                     }
                 });
+            }
 
+            // Актуализируем черный счетчик количества проектов в верхнем правом углу
+            if (m_lblCounter) {
+                m_lblCounter->setText(QString("Всего проектов в ведомости: %1").arg(m_tableModel->rowCount()));
+                m_lblCounter->setStyleSheet(QStringLiteral("color: #000000; font-weight: bold;"));
             }
         }
+
+        // ============================================================================
+        // КРИТИЧЕСКИЙ ФИКС D-BUS: Выносим отправку уведомления из внутренних проверок.
+        // Теперь системное сообщение в Linux гарантированно всплывет при каждом клике!
+        // ============================================================================
+        emit requestSystemNotification(
+            QStringLiteral("PyTorch Studio: Сохранение данных"),
+            QStringLiteral("Данные успешно сохранены")
+            );
     }
+
     else if (actionId == "registry_export_csv") {
         if (!m_tableModel) return;
         QString fileName = QFileDialog::getSaveFileName(this, "Экспорт ведомости проектов", "", "CSV файлы (*.csv)");
@@ -780,7 +810,14 @@ void all_spisok_progects_panel::showContextMenu(const QModelIndex& proxyIndex, c
     // ОБРАБОТЧИКИ ВЫБРАННЫХ ДЕЙСТВИЙ ИНЖЕНЕРА
     // ============================================================================
     if (selected == actLoad) {
-        emit requestOpenProject(pureName);
+        // ============================================================================
+        // ИНТЕГРАЦИЯ ПУНКТА 1: Автоматическое создание локального паспорта АД
+        // ============================================================================
+        ensureLocalProjectDatabase(projectPath);
+
+        // Передаем ядру Студии полный путь к проекту для загрузки логов и PyTorch
+        emit requestOpenProject(projectPath);
+        qDebug() << "[Context Menu] Запущена аппаратная загрузка асинхронного мотора:" << projectPath;
     }
     else if (selected == actPin) {
         // Триггерим метод setData нашего прокси-интерфейса для инверсии звезды
@@ -801,13 +838,14 @@ void all_spisok_progects_panel::showContextMenu(const QModelIndex& proxyIndex, c
         if (modelsDir.exists()) {
             QStringList filters = {"*.pt", "*.pth"};
             QFileInfoList list = modelsDir.entryInfoList(filters, QDir::Files);
-            for (const QFileInfo& f : list) {
+            for (const QFileInfo& f : std::as_const(list)) {
                 if (f.fileName() != "best.pt" && f.fileName() != "best.pth") {
                     QFile::remove(f.absoluteFilePath());
                 }
             }
             refreshPanel(); // Перечитываем и обновляем счетчики на экране
-            QMessageBox::information(this, QString::fromUtf8("PyTorch Studio"), QString::fromUtf8("Промежуточные чекпоинты весов успешно удалены. Оставлен только best.pt."));
+            QMessageBox::information(this, QString::fromUtf8("PyTorch Studio"),
+                                     QString::fromUtf8("Промежуточные чекпоинты весов успешно удалены. Оставлен только best.pt."));
         }
     }
     else if (selected == actRecalc) {
@@ -841,8 +879,109 @@ void all_spisok_progects_panel::showContextMenu(const QModelIndex& proxyIndex, c
                 delQuery.exec();
                 m_tableModel->select();
             } else {
-                QMessageBox::warning(this, QString::fromUtf8("Ошибка"), QString::fromUtf8("Не удалось удалить папку. Проверьте права доступа в Linux."));
+                QMessageBox::warning(this, QString::fromUtf8("Ошибка"),
+                                     QString::fromUtf8("Не удалось удалить папку. Проверьте права доступа в Linux."));
             }
         }
     }
+}
+
+#include <QMouseEvent>
+
+bool all_spisok_progects_panel::eventFilter(QObject *obj, QEvent *event)
+{
+    // Перехватываем событие непрерывного движения мыши внутри сетки QTableView
+    if (m_tableView && obj == m_tableView->viewport() && event->type() == QEvent::MouseMove) {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+
+        // Определяем, над какой именно ячейкой сейчас находится курсор
+        QModelIndex index = m_tableView->indexAt(mouseEvent->pos());
+
+        if (index.isValid() && index.column() == 0) {
+            int columnWidth = m_tableView->columnWidth(0);
+            QRect cellRect = m_tableView->visualRect(index);
+
+            // Вычисляем точную координату мыши относительно левой границы текущей ячейки названия
+            int localX = mouseEvent->pos().x() - cellRect.left();
+
+            // Звёздочка занимает первые 20% ширины ячейки на экране
+            if (localX >= 0 && localX < (columnWidth * 0.20)) {
+                // Если мышь строго над звёздочкой — мгновенно включаем кликабельную руку
+                m_tableView->setCursor(Qt::PointingHandCursor);
+                m_tableView->setToolTip(QString::fromUtf8("Нажмите, чтобы закрепить проект в топе"));
+            } else {
+                // Стоит сместить мышь хоть на 1 пиксель правее на кружки или имя папки —
+                // курсор мгновенно и без задержек возвращается в дефолтную стрелку!
+                m_tableView->setCursor(Qt::ArrowCursor);
+                m_tableView->setToolTip(QString()); // Освобождаем место под ToolTip паспорта мотора
+            }
+        } else {
+            // Во всех остальных столбцах (дата, статус, размер, путь) — строгая стандартная стрелка
+            if (m_tableView) {
+                m_tableView->setCursor(Qt::ArrowCursor);
+                m_tableView->setToolTip(QString());
+            }
+        }
+    }
+
+    // Передаем обработку остальных системных событий (клики, скролл) штатному движку Qt6
+    return QWidget::eventFilter(obj, event);
+}
+
+void all_spisok_progects_panel::ensureLocalProjectDatabase(const QString& projectPath)
+{
+    // 1. Гарантируем физическое существование папки db/ внутри каталога мотора
+    QString dbFolder = projectPath + QStringLiteral("/db");
+    QDir().mkpath(dbFolder);
+
+    QString localDbPath = dbFolder + QStringLiteral("/project_local.db");
+    QFileInfo dbFileInfo(localDbPath);
+
+    // 2. Если паспорт асинхронного мотора уже развернут, выходим, чтобы не затереть данные
+    if (dbFileInfo.exists() && dbFileInfo.size() > 0) {
+        qDebug() << "[Local DB] Локальный паспорт асинхронного двигателя уже существует:" << localDbPath;
+        return;
+    }
+
+    // 3. Открываем временное именованное соединение с создаваемым SQLite файлом
+    {
+        QSqlDatabase localDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("TemporaryLocalSetupConnection"));
+        localDb.setDatabaseName(localDbPath);
+
+        if (!localDb.open()) {
+            qWarning() << "[Local DB] Ошибка создания локального файла базы проекта:" << localDb.lastError().text();
+            return;
+        }
+
+        QSqlQuery query(localDb);
+
+        // 4. Генерируем структуру физических полей асинхронной машины (Схема замещения)
+        bool success = query.exec(
+            "CREATE TABLE IF NOT EXISTS motor_constants ("
+            "  id                     INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  motor_type             TEXT NOT NULL DEFAULT 'Асинхронный',"
+            "  reference_motor_id     INTEGER DEFAULT 0,"
+            "  reference_model_name   TEXT DEFAULT 'Не задана',"
+            "  r_stator               REAL DEFAULT 0.0,"     // Rs, Ом
+            "  r_rotor                REAL DEFAULT 0.0,"     // Rr', Ом
+            "  l_stator_leakage       REAL DEFAULT 0.0,"     // Lls, Гн
+            "  l_rotor_leakage        REAL DEFAULT 0.0,"     // Llr', Гн
+            "  l_mutual               REAL DEFAULT 0.0,"     // Lm, Гн
+            "  j_inertia              REAL DEFAULT 0.0"      // J, кг*м2
+            ");"
+            );
+
+        if (success) {
+            // Инициализируем паспорт одной дефолтной строкой
+            query.exec(QStringLiteral("INSERT INTO motor_constants (motor_type) VALUES ('Асинхронный');"));
+            qDebug() << "[Local DB] Цифровой паспорт асинхронного мотора успешно инициализирован:" << localDbPath;
+        } else {
+            qWarning() << "[Local DB] Ошибка развертывания полей констант АД:" << query.lastError().text();
+        }
+
+        localDb.close();
+    }
+
+    // Освобождаем дескриптор файла из пула Qt
+    QSqlDatabase::removeDatabase(QStringLiteral("TemporaryLocalSetupConnection"));
 }

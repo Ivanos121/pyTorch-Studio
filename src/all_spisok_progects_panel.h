@@ -22,18 +22,20 @@ public:
     void initPanel(const QString& dbPath, const QJsonObject& layoutConfig);
     void refreshPanel();
     static int countFilesRecursive(const QString& dirPath, const QStringList& nameFilters);
+    void ensureLocalProjectDatabase(const QString& projectPath);
 
 signals:
-    void requestOpenProject(const QString& projectName);
+    void requestOpenProject(const QString& projectPath);
     void requestChangeStatus(const QString& projectName);
     void requestSystemNotification(const QString& title, const QString& message);
+
 
 protected:
     // Перехватывает абсолютно любые изменения состояния виджета в системе Qt6
     bool event(QEvent *event) override;
 
-// protected:
-//     void showEvent(QShowEvent *event) override;
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     // Функция запуска сборки интерфейса
