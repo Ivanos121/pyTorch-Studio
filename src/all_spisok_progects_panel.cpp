@@ -249,20 +249,32 @@ QString formatSize(qint64 bytes) {
 // ============================================================================
 // УНИВЕРСАЛЬНЫЙ РЕКУРСИВНЫЙ ПОДСЧЕТ ФАЙЛОВ МОДЕЛЕЙ (PyTorch и ONNX)
 // ============================================================================
-int all_spisok_progects_panel::countFilesRecursive(const QString& dirPath, const QStringList& nameFilters) {
+int all_spisok_progects_panel::countFilesRecursive(const QString& dirPath, const QStringList& nameFilters)
+{
     int count = 0;
     QDir dir(dirPath);
     if (!dir.exists()) return 0;
 
-    // Считаем файлы, подходящие под фильтр, в текущем каталоге Linux
-    dir.setNameFilters(nameFilters);
-    count += dir.entryInfoList(QDir::Files).size();
+    // 1. Быстрый подсчет файлов в текущей папке без создания тяжелых QFileInfo
+    count += dir.entryList(nameFilters, QDir::Files | QDir::NoSymLinks).size();
 
-    // Рекурсивно заходим во все подпапки экспериментов и запусков (run_001, hf_hub и т.д.)
-    dir.setNameFilters({}); // Сбрасываем фильтр для корректного поиска директорий
-    QFileInfoList subDirs = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
-    for (const QFileInfo& subDirInfo : std::as_const(subDirs)) {
-        count += countFilesRecursive(subDirInfo.absoluteFilePath(), nameFilters); // Рекурсивный вызов метода
+    // 2. Получаем подпапки (исключаем symlink'и, чтобы не попасть в вечный цикл)
+    QStringList subDirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
+
+    for (const QString& subDirName : std::as_const(subDirs)) {
+        // Черный список папок, обход которых вешает диск и GUI
+        if (subDirName.startsWith('.') ||                 // Пропускаем все скрытые папки (.git, .cache и т.д.)
+            subDirName == QLatin1String("venv") ||
+            subDirName == QLatin1String(".venv") ||
+            subDirName == QLatin1String("__pycache__") ||
+            subDirName == QLatin1String("site-packages") ||
+            subDirName == QLatin1String("build") ||
+            subDirName == QLatin1String("node_modules"))
+        {
+            continue;
+        }
+
+        count += countFilesRecursive(dir.filePath(subDirName), nameFilters);
     }
 
     return count;

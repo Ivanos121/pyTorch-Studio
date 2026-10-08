@@ -123,6 +123,24 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
 
     ui->setupUi(this);
 
+    // ============================================================================
+    // ЭТАЛОННАЯ СТАРТОВАЯ ИНИЦИАЛИЗАЦИЯ DOCUMENT MANAGER (ПРИ ПЕРВОМ СТАРТЕ)
+    // ============================================================================
+    if (ui->openFilesListWidget) {
+        ui->openFilesListWidget->clear(); // Полностью ПУСТ при старте программы
+    }
+
+    if (ui->fileComboBox) {
+        ui->fileComboBox->clear(); // Удаляем дефолтную запись "Панель управления" из UI Designer
+        ui->fileComboBox->addItem(QStringLiteral("<нет документа>"), -1); // Строго одна запись плейсхолдера
+        ui->fileComboBox->setCurrentIndex(0);
+    }
+
+    if (ui->btnCloseFile) {
+        ui->btnCloseFile->setEnabled(false); // Кнопка закрытия гарантированно НЕАКТИВНА
+    }
+
+
     qRegisterMetaType<QString>("QString");
     qRegisterMetaType<bool>("bool");
 
@@ -598,7 +616,6 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     connect(New_progect, &QAction::triggered, this, &Neuro_programm::new_progect);
 
     // Действие "Новый файл" (Ctrl + N)
-    // Действие "Новый файл" (Ctrl + N)
     QAction *New_file = new QAction(" Новый файл", this);
     New_file->setShortcut(QKeySequence("Ctrl+N"));
     New_file->setIcon(QIcon(":/Data/system_icons/document-new.svg"));
@@ -731,11 +748,13 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     // Действие "Закрыть проект" (Ctrl + W)
     QAction *actionCloseProject = new QAction("Закрыть проект", this);
     actionCloseProject->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
+    //actionCloseProject->setShortcutContext(Qt::ApplicationShortcut); // Работает во всем приложении
+    //this->addAction(actionCloseProject);
     connect(actionCloseProject, &QAction::triggered, this, &Neuro_programm::onCloseProjectClicked);
 
     // Действие "Выход" (Ctrl + Q)
     QAction *actionClose = new QAction("Выход", this);
-    actionClose->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
+    actionClose->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q));
     actionClose->setIcon(QIcon(":/Data/system_icons/application-exit.svg"));
     connect(actionClose, &QAction::triggered,this, &Neuro_programm::close_program);
 
@@ -1471,7 +1490,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
                         errorFormat.setUnderlineColor(QColor(Qt::red));
                         errorFormat.setUnderlineStyle(QTextCharFormat::WaveUnderline);
 
-                        for (int lineNum : cachedErrors) {
+                        for (int lineNum : std::as_const(cachedErrors)) {
                             QTextBlock block = rightEditor->document()->findBlockByLineNumber(lineNum);
                             if (block.isValid()) {
                                 QTextEdit::ExtraSelection errorSel;
@@ -2933,11 +2952,10 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
         // Задаем пропорции (верхнее дерево занимает все место, нижний список скрыт при старте)
         ui->leftVerticalSplitter->setStretchFactor(0, 1);
         ui->leftVerticalSplitter->setStretchFactor(1, 1);
-        ui->leftVerticalSplitter->setCollapsible(0, false);
-        ui->leftVerticalSplitter->setCollapsible(1, true);
 
-        ui->openFilesContainer->setVisible(false);
-        ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
+        ui->leftVerticalSplitter->setCollapsible(0, false);
+        ui->leftVerticalSplitter->setCollapsible(1, false); // Запрещаем схлопывать нижний контейнер
+        ui->leftVerticalSplitter->setChildrenCollapsible(false);
     }
 
     ui->treeView->setIndentation(20);
@@ -5876,37 +5894,50 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
             ui->Spisok_widget->initPanel(globalRegistryDb, panelJsonLayout);
 
             // ============================================================================
-            // ИСПРАВЛЕНИЕ ШАГА 1: Нативный перехват сигнала загрузки асинхронного мотора
+            // СИНХРОНИЗАЦИЯ ДОКУМЕНТ-МЕНЕДЖЕРА ПРИ ЛЮБОМ ОТКРЫТИИ ПРОЕКТА (ПЕРВОМ И ПОВТОРНОМ)
+            // ============================================================================
+            // ============================================================================
+            // ЧАСТЬ 2: СБРОС ИБ-КОНТУРА ДОКУМЕНТОВ ПРИ ОТКРЫТИИ НОВОГО ПРОЕКТА
+            // ============================================================================
+            // ============================================================================
+            // ГАРАНТИРОВАННЫЙ СБРОС ДЕФОЛТОВ UI ПОСЛЕ ЗАВЕРШЕНИЯ ВСЕХ ЦИКЛОВ ЯДРА
+            // ============================================================================
+            // ============================================================================
+            // ЧАСТЬ 1: АТОМАРНАЯ СИНХРОНИЗАЦИЯ И СБРОС ДЕФОЛТОВ UI ПРИ ОТКРЫТИИ ПРОЕКТА
             // ============================================================================
             connect(ui->Spisok_widget, &all_spisok_progects_panel::requestOpenProject,
                     this, [this](const QString& projectPath) {
                         qDebug() << "[Studio Kernel] Аппаратная загрузка проекта по пути:" << projectPath;
 
-                        // 1. Инициализируем дерево файлов асинхронного проекта (Разворачиваем паспорт)
+                        // 1. СИНХРОННЫЙ UX-ФИКС: Очищаем UI ДО запуска внутренних сканеров ядра,
+                        // чтобы MLOps-валидаторы не смогли считать старые дефолтные значения!
+                        if (ui->openFilesListWidget) {
+                            ui->openFilesListWidget->clear(); // Стираем дефолты из XML формы
+                        }
+
+                        if (ui->fileComboBox) {
+                            ui->fileComboBox->blockSignals(true);
+                            ui->fileComboBox->clear(); // Вырезаем "Панель управления" на корню
+                            ui->fileComboBox->addItem(QStringLiteral("<нет документа>"), -1); // Строго по ТЗ
+                            ui->fileComboBox->setCurrentIndex(0);
+                            ui->fileComboBox->blockSignals(false);
+                        }
+
+                        if (ui->btnCloseFile) {
+                            ui->btnCloseFile->setEnabled(false); // Кнопка закрытия ГАРАНТИРОВАННО НЕАКТИВНА
+                        }
+
+                        // 2. Инициализируем файловое дерево (метод переключит leftDockWidget -> page_3)
                         this->initProjectTreeModel(projectPath);
 
-                        // 2. ДИНАМИЧЕСКИЙ ПОИСК И ОТКРЫТИЕ ПЛЕЙСХОЛДЕРА В СТЭКЕ
+                        // 3. Выводим центральный JETBRAINS_PLACEHOLDER на передний план по умолчанию
                         if (ui->centralStackedWidget) {
-                            // Ищем созданный ранее виджет БЕЗ повторного указания типа (защита от redefinition)
                             QWidget *foundPlaceholder = ui->centralStackedWidget->findChild<QWidget*>(QStringLiteral("JETBRAINS_PLACEHOLDER"));
-
                             if (foundPlaceholder) {
-                                // Получаем реальный порядковый индекс найденного плейсхолдера
-                                int actualPlaceholderIdx = ui->centralStackedWidget->indexOf(foundPlaceholder);
-
-                                // Сохраняем индекс в свойства для ядра (если это необходимо вашей системе)
-                                this->setProperty("placeholderIndex", actualPlaceholderIdx);
-
-                                // КРИТИЧЕСКИЙ ШАГ: Принудительно переключаем стек дока на этот плейсхолдер!
-                                ui->centralStackedWidget->setCurrentIndex(actualPlaceholderIdx);
-
-                                qDebug() << ">>> [СТУДИЯ СИНХРОНИЗАЦИЯ]: Стек переключен на плейсхолдер, Index:" << actualPlaceholderIdx;
-                            } else {
-                                // Резервный фолбэк: если плейсхолдер не найден по имени, включаем стандартный индекс рабочей зоны (0)
-                                ui->centralStackedWidget->setCurrentIndex(0);
-                                qWarning() << ">>> [СТУДИЯ СИНХРОНИЗАЦИЯ]: JETBRAINS_PLACEHOLDER не найден, включен Index 0 по умолчанию.";
+                                ui->centralStackedWidget->setCurrentIndex(ui->centralStackedWidget->indexOf(foundPlaceholder));
                             }
                         }
+                        QCoreApplication::processEvents();
                     });
 
             connect(ui->Spisok_widget, &all_spisok_progects_panel::requestChangeStatus,
@@ -5941,6 +5972,95 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     } else {
         qWarning() << "[Neuro_programm] ui->openProgectSpisok не найден в скомпилированном ui_neuro_programm.h";
     }
+
+    connect(ui->btnCloseFile, &QPushButton::clicked, this, &Neuro_programm::onCloseFileButtonClicked);
+
+    // ============================================================================
+    // СИНХРОНИЗАЦИЯ КЛИКОВ: ОДИНАКОВОЕ ПОВЕДЕНИЕ СПИСКА И КОМБОБОКСА
+    // ============================================================================
+    // А) Выбрали элемент в нижнем списке openFilesListWidget (одиночный или двойной клик)
+    connect(ui->openFilesListWidget, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        if (!item) return;
+        QString targetKey = item->data(Qt::UserRole).toString().trimmed();
+        if (targetKey.isEmpty()) return;
+
+        if (ui->fileComboBox) {
+            int comboIdx = ui->fileComboBox->findText(item->text());
+            if (comboIdx != -1) {
+                ui->fileComboBox->setCurrentIndex(comboIdx); // Активирует штатную логику комбобокса
+            }
+        }
+    });
+
+    // Б) Выбрали элемент в верхнем выпадающем fileComboBox
+    connect(ui->fileComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (index >= 0) {
+            int targetIndex = ui->fileComboBox->itemData(index).toInt();
+
+            // Если выбран плейсхолдер "<нет документа>" (индекс зашит как -1) — ничего не переключаем!
+            if (targetIndex == -1) return;
+
+            ui->centralStackedWidget->setCurrentIndex(targetIndex);
+
+            // Синхронизируем синее выделение с нижним openFilesListWidget
+            QString text = ui->fileComboBox->itemText(index);
+            auto foundItems = ui->openFilesListWidget->findItems(text, Qt::MatchExactly);
+            if (!foundItems.isEmpty()) {
+                ui->openFilesListWidget->setCurrentItem(foundItems.first());
+            }
+        }
+    });
+
+    // А) Кликнули по элементу в нижнем списке openFilesListWidget
+    // А) Кликнули по элементу в нижнем списке openFilesListWidget
+    // А) Кликнули по элементу в нижнем списке openFilesListWidget
+    connect(ui->openFilesListWidget, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        if (!item) return;
+
+        // Перебираем стек виджетов и ищем страницу, чей базовый файл совпадает с текстом строки
+        for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+            QWidget* page = ui->centralStackedWidget->widget(i);
+            if (page && QFileInfo(page->objectName()).fileName() == item->text()) {
+                ui->centralStackedWidget->setCurrentIndex(i);
+                break;
+            }
+        }
+
+        if (ui->fileComboBox) {
+            int comboIdx = ui->fileComboBox->findText(item->text());
+            if (comboIdx != -1) {
+                ui->fileComboBox->blockSignals(true);
+                ui->fileComboBox->setCurrentIndex(comboIdx);
+                ui->fileComboBox->blockSignals(false);
+            }
+        }
+    });
+
+    // Б) Выбрали элемент в верхнем выпадающем fileComboBox
+    connect(ui->fileComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (index >= 0) {
+            QString selectedText = ui->fileComboBox->itemText(index);
+            if (selectedText == QStringLiteral("<нет документа>")) return;
+
+            for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+                QWidget* page = ui->centralStackedWidget->widget(i);
+                if (page && QFileInfo(page->objectName()).fileName() == selectedText) {
+                    ui->centralStackedWidget->setCurrentIndex(i);
+                    break;
+                }
+            }
+
+            if (ui->openFilesListWidget) {
+                auto foundItems = ui->openFilesListWidget->findItems(selectedText, Qt::MatchExactly);
+                if (!foundItems.isEmpty()) {
+                    ui->openFilesListWidget->setCurrentItem(foundItems.first());
+                }
+            }
+        }
+    });
+
+    connect(ui->fileComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, &Neuro_programm::onFileComboBoxIndexChanged);
 
     // 4. Логика кнопки переключения на стартовом окне (openProgectSpisok)
     // QPushButton* btnOpenSpisok = ui->centralwidget->findChild<QPushButton*>("openProgectSpisok");
@@ -5984,6 +6104,7 @@ Neuro_programm::Neuro_programm(const QString &startupPath, QWidget *parent)
     add_vars_debug();
     this->setupDebugInterface();
     createMenus();
+    resetFileControlsToDefault();
 
 }
 
@@ -6505,112 +6626,134 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
 {
     // 1. ИЗВЛЕКАЕМ АБСОЛЮТНЫЙ ПУТЬ К ФАЙЛУ ИЗ МОДЕЛИ ДЕРЕВА
     if (!index.isValid()) return;
-
     QModelIndex sourceIndex;
     if (this->projectProxyModel != nullptr) {
         sourceIndex = this->projectProxyModel->mapToSource(index);
     } else {
         sourceIndex = index;
     }
-
     QString filePath;
     if (sourceIndex.isValid() && projectModel != nullptr) {
         filePath = projectModel->fileInfo(sourceIndex).absoluteFilePath();
     } else {
         filePath = currentOpenProjectPath;
     }
-
     QFileInfo checkInfo(filePath);
-    if (!checkInfo.exists() || checkInfo.isDir()) return;
 
-    // 🔥 АППАРАТНАЯ БЛОКИРОВКА: Входим в режим «тихой загрузки» файла
-    // Это запретит фоновым линтерам и сигналам textChanged самопроизвольно распахивать терминал
+    // СИНХРОННЫЙ ГВАРД ПАПОК: Если это каталог — сбрасываем UI к чистому состоянию ТЗ
+    if (!checkInfo.exists() || checkInfo.isDir()) {
+        if (ui->fileComboBox) {
+            ui->fileComboBox->blockSignals(true);
+            ui->fileComboBox->clear();
+            ui->fileComboBox->addItem(QStringLiteral("<нет документа>"), -1);
+            ui->fileComboBox->setCurrentIndex(0);
+            ui->fileComboBox->blockSignals(false);
+        }
+        if (ui->openFilesListWidget) ui->openFilesListWidget->clear();
+        if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(false);
+        this->m_isOpeningFile = false;
+        return;
+    }
+
     this->m_isOpeningFile = true;
+    QString fileName = checkInfo.fileName();
 
-    // =========================================================================
-    // ИНТЕГРАЦИЯ МЕНЕДЖЕРА ПАКЕТОВ PIP (requirements.txt)
-    // =========================================================================
-    if (checkInfo.fileName().toLower() == "requirements.txt") {
+    // Стираем стартовый плейсхолдер перед вставкой первого реального файла
+    if (ui->fileComboBox && ui->fileComboBox->count() == 1 && ui->fileComboBox->itemData(0).toInt() == -1) {
+        ui->fileComboBox->clear();
+    }
+
+    // Блок обработки requirements.txt
+    if (fileName.toLower() == "requirements.txt") {
         if (!m_pipPage) {
             QString venvPath = QDir(currentOpenProjectPath).filePath("venv");
             m_pipPage = new PipManagerPage(venvPath, filePath, this);
             ui->centralStackedWidget->addWidget(m_pipPage);
         }
+        int pageIdx = ui->centralStackedWidget->indexOf(m_pipPage);
         ui->centralStackedWidget->setCurrentWidget(m_pipPage);
         m_pipPage->loadPipData();
 
         if (ui->fileComboBox) {
-            int comboIdx = ui->fileComboBox->findText(checkInfo.fileName());
+            int comboIdx = ui->fileComboBox->findData(filePath);
+            if (comboIdx == -1) comboIdx = ui->fileComboBox->findText(fileName);
             if (comboIdx == -1) {
-                int pageIdx = ui->centralStackedWidget->indexOf(m_pipPage);
-                ui->fileComboBox->addItem(checkInfo.fileName(), QVariant(pageIdx));
+                ui->fileComboBox->addItem(fileName, filePath);
                 ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
             } else {
                 ui->fileComboBox->setCurrentIndex(comboIdx);
             }
         }
-        updateCustomTitle(checkInfo.fileName());
 
-        // Снимаем блокировку, так какrequirements.txt не генерирует код-события
+        if (ui->openFilesListWidget) {
+            QListWidgetItem *foundItem = nullptr;
+            for (int i = 0; i < ui->openFilesListWidget->count(); ++i) {
+                QListWidgetItem *it = ui->openFilesListWidget->item(i);
+                if (it && (it->data(Qt::UserRole).toString() == filePath || it->text() == fileName)) {
+                    foundItem = it;
+                    break;
+                }
+            }
+            if (!foundItem) {
+                QListWidgetItem* item = new QListWidgetItem(fileName, ui->openFilesListWidget);
+                item->setData(Qt::UserRole, filePath);
+                ui->openFilesListWidget->setCurrentItem(item);
+            } else {
+                ui->openFilesListWidget->setCurrentItem(foundItem);
+            }
+        }
+
+        if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(true);
+        updateCustomTitle(fileName);
         this->m_isOpeningFile = false;
         return;
     }
 
-    // =========================================================================
-    // ОТКРЫТИЕ ОБЫЧНОГО Python ФАЙЛА
-    // =========================================================================
+    // ОТКРЫТИЕ ОБЫЧНОГО Python ФАЙЛА (МГНОВЕННОЕ ЧТЕНИЕ, БЕЗ ВЫДЕРЖКИ)
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qCritical() << " [ОШИБКА] Не удалось физически прочитать файл с диска:" << filePath;
         this->m_isOpeningFile = false;
         return;
     }
     QString fileContent = QString::fromUtf8(file.readAll());
     file.close();
 
-    // 2. ПРОВЕРЯЕМ, НЕ ОТКРЫТ ЛИ ЭТОТ ДОКУМЕНТ УЖЕ В СОСЕДНЕЙ ВКЛАДКЕ
+    // Проверяем, не открыт ли документ уже в соседней вкладке центрального стэка
     for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
         QWidget *page = ui->centralStackedWidget->widget(i);
         if (page && page->objectName() == filePath) {
             ui->centralStackedWidget->setCurrentWidget(page);
-
-            if (ui && ui->cursorPosLabel) {
-                ui->cursorPosLabel->show();
-            }
+            if (ui && ui->cursorPosLabel) ui->cursorPosLabel->show();
             this->updateCursorPositionIndicator();
-
             CodeEditor *existingEditor = page->findChild<CodeEditor*>();
-            if (existingEditor) {
-                this->updateFunctionNavigator(existingEditor);
-            }
+            if (existingEditor) this->updateFunctionNavigator(existingEditor);
 
-            if (this->docMgr) {
-                this->docMgr->handleFileActivation(filePath);
+            // Синхронизируем комбобокс и список открытых окон
+            if (ui->fileComboBox) {
+                int comboIdx = ui->fileComboBox->findData(filePath);
+                if (comboIdx == -1) comboIdx = ui->fileComboBox->findText(fileName);
+                if (comboIdx != -1) ui->fileComboBox->setCurrentIndex(comboIdx);
             }
-
-            // Файл уже был в памяти, мягко гасим панель на случай ложного вызова из docMgr
-            if (panelOther) {
-                panelOther->setVisible(false);
-                panelOther->hide();
+            if (ui->openFilesListWidget) {
+                for (int j = 0; j < ui->openFilesListWidget->count(); ++j) {
+                    QListWidgetItem *it = ui->openFilesListWidget->item(j);
+                    if (it && (it->data(Qt::UserRole).toString() == filePath || it->text().startsWith(fileName))) {
+                        ui->openFilesListWidget->setCurrentItem(it);
+                        break;
+                    }
+                }
             }
-            if (btnTerminal) {
-                btnTerminal->blockSignals(true);
-                btnTerminal->setChecked(false);
-                btnTerminal->blockSignals(false);
-            }
-
+            if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(true);
             this->m_isOpeningFile = false;
             return;
         }
     }
 
-    // 3. СОЗДАЕМ НОВУЮ ГРАФИЧЕСКУЮ СТРАНИЦУ-КОНТЕЙНЕР ДЛЯ КОДА
     this->setIDEInStartMode(false);
     QWidget *newPage = new QWidget(ui->centralStackedWidget);
     newPage->setObjectName(filePath);
     QVBoxLayout *layout = new QVBoxLayout(newPage);
     layout->setContentsMargins(0, 0, 0, 0);
-
     CodeEditor *editor = nullptr;
     MinimapArea *minimap = nullptr;
     QWidget *editorContainer = CodeEditor::createEditorWithMinimap(newPage, editor, minimap);
@@ -6624,7 +6767,6 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         editor->currentFilePath = filePath;
         editor->setObjectName(filePath);
         editor->isLspFreeze = false;
-
         QFont codeFont;
         codeFont.setFamilies(QStringList() << "JetBrains Mono" << "Fira Code" << "Monospace");
         codeFont.setStyleHint(QFont::Monospace);
@@ -6632,120 +6774,77 @@ void Neuro_programm::onFileDoubleClicked(const QModelIndex &index)
         editor->setFont(codeFont);
         editor->setLineWrapMode(QPlainTextEdit::NoWrap);
 
-        // Блокируем сигналы эдитора при первичной вставке текста шаблона
-        editor->blockSignals(true);
-        if (editor->document()) editor->document()->blockSignals(true);
-        editor->setPlainText(fileContent);
-        editor->blockSignals(false);
-        if (editor->document()) editor->document()->blockSignals(false);
+        // Явно обрываем любые старые связи перед созданием новой сессии
+        disconnect(editor, nullptr, this, nullptr);
 
-        connect(editor, &CodeEditor::logMessage, this, [this](const QString &message) {
-            QTextEdit *console = panelOther->findChild<QTextEdit*>("consoleOutput");
-            if (console) console->append(message);
-        });
+        // Заполняем текст и принудительно сбрасываем флаг изменений, чтобы файл стартовал без звездочки
+        editor->blockSignals(true);
+        editor->setPlainText(fileContent);
+        if (editor->document()) {
+            editor->document()->setModified(false);
+        }
+        editor->blockSignals(false);
 
         connect(editor, &CodeEditor::textChanged, this, &Neuro_programm::onCurrentFileTextChanged);
         this->updateFunctionNavigator(editor);
+        connect(editor, &CodeEditor::cursorPositionChanged, this, &Neuro_programm::updateCursorPositionIndicator);
 
-        connect(editor, &CodeEditor::textChanged, this, [this, editor]() {
-            this->updateFunctionNavigator(editor);
-        });
-        connect(editor, &CodeEditor::cursorPositionChanged, this, [this]() {
-            this->updateCursorPositionIndicator();
-        });
-
-        connect(editor, &CodeEditor::documentationRequested, this, [this](const QString &fPath, int ln, int ch) {
-            if (!lspProcess || lspProcess->state() != QProcess::Running) return;
-            QJsonObject hoverParams;
-            QJsonObject textDocumentObj;
-            QString cleanPath = QDir::fromNativeSeparators(fPath);
-            textDocumentObj["uri"] = QUrl::fromLocalFile(cleanPath).toString();
-            hoverParams["textDocument"] = textDocumentObj;
-            QJsonObject positionObj;
-            positionObj["line"] = ln;
-            positionObj["character"] = ch;
-            hoverParams["position"] = positionObj;
-            this->sendLspRequest("textDocument/hover", hoverParams, 555);
-        });
+        // =========================================================================
+        // МОНИТОРИНГ ИЗМЕНЕНИЯ ТЕКСТА: ДОБАВЛЕНИЕ И СНЯТИЕ ЗВЁЗДОЧЕК
+        // =========================================================================
+        if (editor->document()) {
+            connect(editor->document(), &QTextDocument::modificationChanged, this, [this, filePath](bool modified) {
+                this->setWindowModified(modified);
+                if (this->docMgr) {
+                    this->docMgr->handleDocumentModificationChanged(filePath, modified);
+                }
+            });
+        }
     }
 
-    // 4. ДОБАВЛЯЕМ СТРАНИЦУ В ЦЕНТРАЛЬНЫЙ СТЭК
+    // ДОБАВЛЯЕМ СТРАНИЦУ В ЦЕНТРАЛЬНЫЙ СТЭК
     int newPageIndex = ui->centralStackedWidget->addWidget(newPage);
-
-    if (this->docMgr) {
-        this->docMgr->registerNewOpenFile(filePath, editor);
-    }
-
     ui->centralStackedWidget->setCurrentIndex(newPageIndex);
 
-    if (ui->btnCloseFile) {
-        ui->btnCloseFile->setEnabled(true);
-    }
-    if (ui && ui->cursorPosLabel) {
-        ui->cursorPosLabel->show();
+    // Регистрируем файл в комбобоксе с сохранением полного пути в UserData
+    if (ui->fileComboBox) {
+        int existingIdx = ui->fileComboBox->findData(filePath);
+        if (existingIdx == -1) {
+            ui->fileComboBox->addItem(fileName, filePath);
+            ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
+        } else {
+            ui->fileComboBox->setCurrentIndex(existingIdx);
+        }
     }
 
+    // Регистрируем файл в левом списке документов с сохранением пути в Qt::UserRole
+    if (ui->openFilesListWidget) {
+        QListWidgetItem* item = new QListWidgetItem(fileName, ui->openFilesListWidget);
+        item->setData(Qt::UserRole, filePath);
+        ui->openFilesListWidget->setCurrentItem(item);
+    }
+
+    if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(true);
+    if (ui && ui->cursorPosLabel) ui->cursorPosLabel->show();
     this->updateCursorPositionIndicator();
     this->sendLspDidOpenForFile(filePath, fileContent);
 
     if (editor) {
         editor->setFocus();
         editor->update();
-        editor->sendLspDidOpen();
     }
 
     if (ui->openFilesContainer && ui->leftVerticalSplitter) {
         ui->openFilesContainer->setVisible(true);
-        ui->openFilesContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);
-        ui->openFilesContainer->setMaximumHeight(10000);
-        int totalHeight = ui->leftVerticalSplitter->height();
-        if (totalHeight <= 0) totalHeight = this->height() - 150;
-        int topSize = totalHeight - 180;
-        if (topSize < 100) topSize = 350;
-        ui->leftVerticalSplitter->setSizes(QList<int>({topSize, 180}));
-        ui->leftVerticalSplitter->updateGeometry();
+        ui->leftVerticalSplitter->setSizes(QList<int>({ui->leftVerticalSplitter->height() - 180, 180}));
     }
 
     this->applyGlobalFonts();
-    updateCustomTitle(checkInfo.fileName());
+    updateCustomTitle(fileName);
+    this->m_isOpeningFile = false;
 
-    // Асинхронный сброс модификаций документа
-    QTimer::singleShot(50, this, [this, editor]() {
-        if (editor) editor->document()->setModified(false);
-        this->setWindowModified(false);
-    });
-
-    // -------------------------------------------------------------------------
-    // 🔥 ФИНАЛЬНЫЙ СБРОС БЛОКИРОВКИ: Насильно удерживаем панель закрытой
-    // -------------------------------------------------------------------------
-    // Даем 250 мс на то, чтобы макеты окон успокоились, после чего тихо гасим панель логов
-    QTimer::singleShot(250, this, [this]() {
-        if (panelOther) {
-            panelOther->setVisible(false);
-            panelOther->hide();
-        }
-        if (btnTerminal) {
-            btnTerminal->blockSignals(true);
-            btnTerminal->setChecked(false);
-            btnTerminal->blockSignals(false);
-        }
-
-        // Освобождаем блокировку — IDE переходит в штатный рабочий режим
-        this->m_isOpeningFile = false;
-
-        // Корректируем геометрию, чтобы текстовый редактор занял всё доступное место
-        if (ui && ui->centralwidget && ui->centralwidget->layout()) {
-            ui->centralwidget->layout()->activate();
-        }
-    });
-
-    QSettings settings(QStringLiteral("/home/elf/.config/PyTorchStudio/pystudio.conf"), QSettings::IniFormat);
-    settings.setValue(QStringLiteral("Projects/LastOpenedPath"), this->currentOpenProjectPath);
-    settings.sync(); // Принудительно сохраняем файл на диск Linux
-
-    // Сообщаем таблице живой путь для автоматического вывода строк
-    if (this->sessionTable)
-    {
+    // ЖЕЛЕЗНЫЙ NULLPTR-GUARD ТАБЛИЦ СЕССИЙ
+    if (this->sessionTable != nullptr) {
         this->sessionTable->setProjectPath(this->currentOpenProjectPath);
     }
 }
@@ -6836,116 +6935,116 @@ void Neuro_programm::onCloseCurrentFileClicked()
 
     // А. ЕСЛИ РЕАЛЬНЫХ ФАЙЛОВ БОЛЬШЕ НЕ ОСТАЛОСЬ — ЖЕСТКО СБРАСЫВАЕМ ИНТЕРФЕЙС В СТАРТ
     if (!hasAnyOpenedFiles) {
-        qDebug() << ">>> [НАВИГАЦИЯ] Все рабочие файлы закрыты. Откатываем интерфейс.";
+            qDebug() << ">>> [НАВИГАЦИЯ] Все рабочие файлы закрыты. Откатываем интерфейс.";
 
-        // Намертво очищаем и прячем навигатор функций comboDevice
-        if (ui->comboDevice) {
-            ui->comboDevice->blockSignals(true);
-            ui->comboDevice->clear();
-            ui->comboDevice->hide();
-            ui->comboDevice->blockSignals(false);
+            // Намертво очищаем и прячем навигатор функций comboDevice
+            if (ui->comboDevice) {
+                ui->comboDevice->blockSignals(true);
+                ui->comboDevice->clear();
+                ui->comboDevice->hide();
+                ui->comboDevice->blockSignals(false);
+            }
+
+            // Возвращаем верхний комбобокс в штатный плейсхолдер "<нет документа>"
+            if (ui->fileComboBox) {
+                ui->fileComboBox->blockSignals(true);
+                ui->fileComboBox->clear();
+                ui->fileComboBox->addItem(QStringLiteral("<нет документа>"), -1);
+                ui->fileComboBox->setCurrentIndex(0);
+                ui->fileComboBox->blockSignals(false);
+            }
+
+            // Деактивируем крестик закрытия
+            if (ui->btnCloseFile) {
+                ui->btnCloseFile->setEnabled(false);
+            }
+
+            if (ui && ui->cursorPosLabel) {
+                ui->cursorPosLabel->hide();
+            }
+
+            // Выводим на экран заставку шорткатов JetBrains
+            if (placeholderIndex > 0) {
+                ui->centralStackedWidget->setCurrentIndex(placeholderIndex);
+            }
+
+            // =========================================================================
+            // ИСПРАВЛЕНИЕ: Контейнер НЕ скрываем и НЕ схлопываем сплиттер в 0!
+            // Если проект открыт — нижний контейнер должен оставаться на месте.
+            // =========================================================================
+            if (ui->openFilesContainer) {
+                ui->openFilesContainer->setVisible(true);
+            }
+
+            if (ui->leftVerticalSplitter) {
+                ui->leftVerticalSplitter->setChildrenCollapsible(false);
+                int totalH = ui->leftVerticalSplitter->height();
+                if (totalH <= 0) totalH = 600;
+                int bottomH = 180;
+                int topH = qMax(120, totalH - bottomH);
+                ui->leftVerticalSplitter->setSizes(QList<int>() << topH << bottomH);
+                ui->leftVerticalSplitter->updateGeometry();
+            }
+
+            updateCustomTitle("");
         }
+        // Б. ЕСЛИ ЕСТЬ ДРУГИЕ ОТКРЫТЫЕ ФАЙЛЫ — ПЕРЕКЛЮЧАЕМСЯ НА ПОСЛЕДНИЙ АКТИВНЫЙ
+        else {
+            if (lastFileIndex >= 0) {
+                ui->centralStackedWidget->setCurrentIndex(lastFileIndex);
 
-        ui->fileComboBox->blockSignals(true);
-        ui->fileComboBox->setCurrentIndex(-1);
-        ui->fileComboBox->blockSignals(false);
+                QWidget *activePage = ui->centralStackedWidget->widget(lastFileIndex);
+                if (activePage) {
+                    int comboIdx = ui->fileComboBox->findData(activePage->objectName());
+                    if (comboIdx != -1) {
+                        ui->fileComboBox->blockSignals(true);
+                        ui->fileComboBox->setCurrentIndex(comboIdx);
+                        ui->fileComboBox->blockSignals(false);
+                    }
 
-        if (ui && ui->cursorPosLabel) {
-            ui->cursorPosLabel->hide();
-        }
+                    // Пересчитываем структуру функций навигатора comboDevice под открывшийся файл!
+                    CodeEditor *activeEditor = activePage->findChild<CodeEditor*>();
+                    if (activeEditor) {
+                        this->updateFunctionNavigator(activeEditor);
+                    }
 
-        // Выводим на экран заставку шорткатов JetBrains
-        if (placeholderIndex > 0) {
-            ui->centralStackedWidget->setCurrentIndex(placeholderIndex);
-        }
-
-        if (ui->openFilesContainer) ui->openFilesContainer->setVisible(false);
-        if (ui->leftVerticalSplitter) ui->leftVerticalSplitter->setSizes(QList<int>({1000, 0}));
-        updateCustomTitle("");
-    }
-    // Б. ЕСЛИ ЕСТЬ ДРУГИЕ ОТКРЫТЫЕ ФАЙЛЫ — ПЕРЕКЛЮЧАЕМСЯ НА ПОСЛЕДНИЙ АКТИВНЫЙ
-    else {
-        if (lastFileIndex >= 0) {
-            ui->centralStackedWidget->setCurrentIndex(lastFileIndex);
-
-            QWidget *activePage = ui->centralStackedWidget->widget(lastFileIndex);
-            if (activePage) {
-                int comboIdx = ui->fileComboBox->findData(activePage->objectName());
-                if (comboIdx != -1) {
-                    ui->fileComboBox->blockSignals(true);
-                    ui->fileComboBox->setCurrentIndex(comboIdx);
-                    ui->fileComboBox->blockSignals(false);
+                    QFileInfo fileInfo(activePage->objectName());
+                    updateCustomTitle(fileInfo.fileName());
                 }
-
-                // Пересчитываем структуру функций навигатора comboDevice под открывшийся файл!
-                CodeEditor *activeEditor = activePage->findChild<CodeEditor*>();
-                if (activeEditor) {
-                    this->updateFunctionNavigator(activeEditor);
-                }
-
-                QFileInfo fileInfo(activePage->objectName());
-                updateCustomTitle(fileInfo.fileName());
             }
         }
-    }
 }
 
 void Neuro_programm::onOpenFileListItemDoubleClicked(QListWidgetItem *item)
 {
     if (!item) return;
 
-    // Извлекаем уникальный ключ страницы (MAIN_SCREEN, AI_CHAT_SCREEN или абсолютный путь к файлу)
+    // 1. Извлекаем уникальный строковый ключ (абсолютный путь к файлу .py или MAIN_SCREEN / AI_CHAT_SCREEN)
     QString targetKey = item->data(Qt::UserRole).toString().trimmed();
     if (targetKey.isEmpty()) return;
 
-    qDebug() << ">>> [СПИСОК ОТКРЫТЫХ ФАЙЛОВ] Двойной клик по ключу:" << targetKey;
+    qDebug() << ">>> [ДОКУМЕНТ-МЕНЕДЖЕР] Активация объекта из openFilesListWidget по ключу:" << targetKey;
 
     // =========================================================================
-    // СЦЕНАРИЙ 1: ПЕРЕКЛЮЧЕНИЕ НА СЕРВИСНЫЕ ЭКРАНЫ
+    // СИНХРОНИЗАЦИЯ С ШАГОМ 4: Передаем управление в fileComboBox
     // =========================================================================
-    if (targetKey == "MAIN_SCREEN" || targetKey == "AI_CHAT_SCREEN") {
-        if (ui->fileComboBox) {
-            int comboIdx = ui->fileComboBox->findData(targetKey);
-            if (comboIdx != -1) {
-                ui->fileComboBox->setCurrentIndex(comboIdx); // Активирует встроенную логику
-            }
-        }
-        return;
-    }
+    if (ui->fileComboBox) {
+        // Ищем в комбобоксе элемент, у которого в userData зашит этот же ключ/путь
+        int comboIdx = ui->fileComboBox->findData(targetKey);
 
-    // =========================================================================
-    // СЦЕНАРИЙ 2: ПЕРЕКЛЮЧЕНИЕ НА РЕАЛЬНЫЙ СТАК ФАЙЛА КОДА (.PY)
-    // =========================================================================
-    if (ui->centralStackedWidget) {
-        bool pageFound = false;
-
-        // Ищем в центральном стеке виджетов страницу, чье objectName хранит этот абсолютный путь
-        for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
-            QWidget *page = ui->centralStackedWidget->widget(i);
-            if (page && page->objectName().trimmed() == targetKey) {
-
-                // Перелистываем центральный экран на этот файл
-                ui->centralStackedWidget->blockSignals(true);
-                ui->centralStackedWidget->setCurrentIndex(i);
-                ui->centralStackedWidget->blockSignals(false);
-                pageFound = true;
-                break;
-            }
+        // Если по какой-то причине findData вернул -1, ищем резервным обходом по тексту
+        if (comboIdx == -1) {
+            comboIdx = ui->fileComboBox->findText(item->text());
         }
 
-        // Если страница кода найдена — просим менеджер выставить синее выделение и обновить комбобокс
-        if (pageFound && this->docMgr) {
-            this->docMgr->handleFileActivation(targetKey);
-        }
-    }
-
-    // Возвращаем фокус ввода клавиатуры на текстовый холст редактора кода для удобства
-    QWidget *currentPage = ui->centralStackedWidget ? ui->centralStackedWidget->currentWidget() : nullptr;
-    if (currentPage) {
-        CodeEditor *currentEditor = currentPage->findChild<CodeEditor*>();
-        if (currentEditor) {
-            currentEditor->setFocus();
-            currentEditor->update();
+        if (comboIdx != -1) {
+            // Принудительно выставляем индекс в комбобоксе.
+            // Это автоматически запустит всю вашу встроенную нативную логику:
+            // переключит центральный стек, выставит фокус на CodeEditor и обновит docMgr!
+            ui->fileComboBox->setCurrentIndex(comboIdx);
+            qDebug() << ">>> [ДОКУМЕНТ-МЕНЕДЖЕР] fileComboBox успешно синхронизирован на индекс:" << comboIdx;
+        } else {
+            qWarning() << " [ДОКУМЕНТ-МЕНЕДЖЕР] Ошибка: Объект не найден внутри fileComboBox:" << targetKey;
         }
     }
 }
@@ -7732,6 +7831,46 @@ void Neuro_programm::updateRecentProjectActions()
     }
 }
 
+// void Neuro_programm::openRecentProject()
+// {
+//     // 1. Извлекаем указатель на нажатый пункт верхнего подменю
+//     QAction *action = qobject_cast<QAction*>(sender());
+//     if (!action) return;
+
+//     // Вытаскиваем абсолютный путь к папке проекта, который зашит в data экшена
+//     QString targetProjectPath = action->data().toString().trimmed();
+//     if (targetProjectPath.isEmpty()) return;
+
+//     qInfo() << "[RECENT_MENU] Быстрый запуск недавней сессии по пути:" << targetProjectPath;
+
+//     QDir projectDir(targetProjectPath);
+
+//     // Валидируем физическое наличие паспорта-манифеста на диске
+//     if (!projectDir.exists() || !projectDir.exists("passport.pystudio.json")) {
+//         qWarning() << "[RECENT_MENU] Ошибка: Папка проекта удалена или повреждена:" << targetProjectPath;
+//         QMessageBox::critical(
+//             this,
+//             "Проект не найден",
+//             "<b>Не удалось открыть недавний проект.</b><br><br>"
+//             "Директория была удалена с жесткого диска, переименована или в ней отсутствует файл паспорта."
+//         );
+//         return;
+//     }
+
+//     // ============================================================================
+//     // ИНТЕГРАЦИЯ С ШАГОМ 2: АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ ЛОКАЛЬНОЙ БД КОНСТАНТ АД
+//     // ============================================================================
+//     // При вызове из верхнего подменю недавних проектов принудительно разворачиваем
+//     // подпапку db/ и файл project_local.db со всеми полями схемы замещения мотора!
+//     if (ui && ui->Spisok_widget) {
+//         ui->Spisok_widget->ensureLocalProjectDatabase(targetProjectPath);
+//     }
+
+//     // ЖЕЛЕЗНЫЙ ВЫЗОВ: Передаем управление в метод инициализации дерева!
+//     // Он сам переключит стек дока на индекс 0 и развернет структуру файлов.
+//     this->initProjectTreeModel(targetProjectPath);
+// }
+
 void Neuro_programm::openRecentProject()
 {
     // 1. Извлекаем указатель на нажатый пункт верхнего подменю
@@ -7761,17 +7900,92 @@ void Neuro_programm::openRecentProject()
     // ============================================================================
     // ИНТЕГРАЦИЯ С ШАГОМ 2: АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ ЛОКАЛЬНОЙ БД КОНСТАНТ АД
     // ============================================================================
-    // При вызове из верхнего подменю недавних проектов принудительно разворачиваем
-    // подпапку db/ и файл project_local.db со всеми полями схемы замещения мотора!
     if (ui && ui->Spisok_widget) {
         ui->Spisok_widget->ensureLocalProjectDatabase(targetProjectPath);
     }
 
-    // ЖЕЛЕЗНЫЙ ВЫЗОВ: Передаем управление в метод инициализации дерева!
-    // Он сам переключит стек дока на индекс 0 и развернет структуру файлов.
-    this->initProjectTreeModel(targetProjectPath);
-}
+    // ============================================================================
+    // СБРОС СОСТОЯНИЯ ИНТЕРФЕЙСА ДЛЯ НОВОГО ПРОЕКТА
+    // ============================================================================
+    // 1. Полная зачистка нижнего списка открытых документов под деревом
+    if (ui && ui->openFilesListWidget) {
+        ui->openFilesListWidget->blockSignals(true);
+        ui->openFilesListWidget->clear();
+        ui->openFilesListWidget->blockSignals(false);
+    }
 
+    // 2. Сброс комбобокса в "<нет документа>" с id = -1 (оставляем активным для клика)
+    if (ui && ui->fileComboBox) {
+        ui->fileComboBox->blockSignals(true);
+        ui->fileComboBox->clear();
+        ui->fileComboBox->addItem(QStringLiteral("<нет документа>"), -1);
+        ui->fileComboBox->setCurrentIndex(0);
+        ui->fileComboBox->setEnabled(true); // РАЗРЕШАЕМ ОТКРЫТИЕ ВЫПАДАЮЩЕГО СПИСКА
+
+        // 1. Политика подстройки размера: фиксировать размер по самому длинному элементу
+        // либо не менять размер динамически
+        ui->fileComboBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        ui->fileComboBox->setMinimumContentsLength(20); // Резерв под 20 символов
+
+        // 2. Фиксация размера или минимальной ширины в layout
+        ui->fileComboBox->setMinimumWidth(180);
+        ui->fileComboBox->setMaximumWidth(280);
+        ui->fileComboBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+
+        // 3. Если нужно, чтобы выпадающий список был доступен для клика всегда:
+        ui->fileComboBox->setEnabled(true);
+    }
+
+    // 3. Жесткая деактивация кнопки закрытия вкладки (крестика)
+    if (ui && ui->btnCloseFile) {
+        ui->btnCloseFile->setEnabled(false);
+    }
+
+    // 4. Скрываем индикатор положения курсора
+    if (ui && ui->cursorPosLabel) {
+        ui->cursorPosLabel->hide();
+    }
+
+    // 5. Установка центрального виджета на экран подсказок хоткеев (JETBRAINS_PLACEHOLDER)
+    if (ui && ui->centralStackedWidget) {
+        QWidget *placeholder = ui->centralStackedWidget->findChild<QWidget*>(QStringLiteral("JETBRAINS_PLACEHOLDER"));
+        if (placeholder) {
+            ui->centralStackedWidget->setCurrentWidget(placeholder);
+        }
+    }
+
+    // ============================================================================
+    // ИНИЦИАЛИЗАЦИЯ ДЕРЕВА И СЕССИИ
+    // ============================================================================
+    this->currentOpenProjectPath = targetProjectPath;
+
+    // Инициализация таблицы сессий (если используется)
+    if (this->sessionTable) {
+        this->sessionTable->setProjectPath(targetProjectPath);
+    }
+
+    // ЖЕЛЕЗНЫЙ ВЫЗОВ: Передаем управление в метод инициализации дерева!
+    this->initProjectTreeModel(targetProjectPath);
+
+    // ============================================================================
+    // ВСТАВКА: ПРИНУДИТЕЛЬНОЕ ВОССТАНОВЛЕНИЕ НИЖНЕГО КОНТЕЙНЕРА И СПЛИТТЕРА
+    // ============================================================================
+    if (ui && ui->openFilesContainer && ui->leftVerticalSplitter) {
+        ui->openFilesContainer->setVisible(true);
+        ui->leftVerticalSplitter->setChildrenCollapsible(false);
+
+        int totalH = ui->leftVerticalSplitter->height();
+        if (totalH <= 0) {
+            totalH = this->height() > 0 ? this->height() - 150 : 600;
+        }
+
+        int bottomH = 180;
+        int topH = qMax(120, totalH - bottomH);
+
+        ui->leftVerticalSplitter->setSizes(QList<int>() << topH << bottomH);
+        ui->leftVerticalSplitter->updateGeometry();
+    }
+}
 
 void Neuro_programm::saveCurrentActiveFile()
 {
@@ -7919,170 +8133,171 @@ void Neuro_programm::onCloseProjectClicked()
     // =========================================================================
     bool hasUnsavedChanges = false;
     CodeEditor *activeEditor = nullptr;
+
     QWidget *currentPage = ui->centralStackedWidget ? ui->centralStackedWidget->currentWidget() : nullptr;
     if (currentPage) {
         activeEditor = currentPage->findChild<CodeEditor*>();
     }
 
-    // Проверяем флаг модификации окна или документа Qt
-    if (this->isWindowModified() || (activeEditor && activeEditor->document()->isModified())) {
+    if (this->isWindowModified() || (activeEditor && activeEditor->document() && activeEditor->document()->isModified())) {
         hasUnsavedChanges = true;
     }
 
-    // Вывод предупреждения (Диалоговое окно в стиле JetBrains / PyCharm)
     if (hasUnsavedChanges) {
-        QMessageBox::StandardButton reply;
-        reply = QMessageBox::warning(this,
+        QMessageBox::StandardButton reply = QMessageBox::warning(
+            this,
             "Несохраненные изменения",
-            "В проекте или открытом файле есть несохраненные изменения.\n"
-            "Хотите保存 их перед закрытием проекта?",
+            "В проекте или открытом файле есть несохраненные изменения.\nХотите сохранить их перед закрытием проекта?",
             QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel
         );
+
         if (reply == QMessageBox::Save) {
             this->saveCurrentActiveFile();
             qDebug() << "[ЗАКРЫТИЕ] Проект принудительно сохранен пользователем перед выходом.";
-        }
-        else if (reply == QMessageBox::Cancel) {
+        } else if (reply == QMessageBox::Cancel) {
             qDebug() << "[ЗАКРЫТИЕ] Закрытие отменено пользователем. Остаемся в проекте.";
-            return; // ПРЕРЫВАЕМ МЕТОД, остаемся работать в кодовой базе!
+            return;
         }
     }
 
     // =========================================================================
-    // ЭТАП 2: СОХРАНЕНИЕ ПОСЛЕДНЕГО АКТИВНОГО ФАЙЛА В ИСТОРИЮ PYSTUDIO.CONF
-    // ============================================================================
+    // ЭТАП 2: СОХРАНЕНИЕ ПОСЛЕДНЕГО АКТИВНОГО ФАЙЛА В ИСТОРИЮ
+    // =========================================================================
     if (currentPage && activeEditor && !activeEditor->currentFilePath.isEmpty() && !this->currentOpenProjectPath.isEmpty()) {
         QString configAbsolutePath = QDir::homePath() + "/.config/PyTorchStudio/pystudio.conf";
         QSettings settings(configAbsolutePath, QSettings::IniFormat);
-
-        // Привязываем последний открытый файл к базовому имени текущей папки репозитория
         QString projBaseName = QFileInfo(this->currentOpenProjectPath).baseName();
         settings.setValue("General/lastActiveFile_" + projBaseName, activeEditor->currentFilePath);
         settings.sync();
     }
 
     // =========================================================================
-    // ЭТАП 3: ХИРУРГИЧЕСКАЯ ОЧИСТКА ДИНАМИЧЕСКИХ ВКЛАДОК КОДА ИЗ СТЭКА СЗАДУ НАПЕРЕД
+    // ЭТАП 3: ОЧИСТКА ДИНАМИЧЕСКИХ ВКЛАДОК И СБРОС СТРАНИЦ
     // =========================================================================
-    ui->fileComboBox->blockSignals(true);
-    int placeholderIndex = this->property("placeholderIndex").toInt();
+    if (ui->fileComboBox) ui->fileComboBox->blockSignals(true);
+    if (ui->openFilesListWidget) ui->openFilesListWidget->blockSignals(true);
 
-    // Удаляем вкладки с конца, чтобы не поплыли индексы позиций Qt
-    for (int i = ui->centralStackedWidget->count() - 1; i >= 0; --i)
-    {
-        // Категорически пропускаем Панель ИИ, Чат и заставку JetBrains шорткатов
-        if (i == 0 || i == 1 || i == placeholderIndex) {
-            continue;
-        }
-        QWidget *w = ui->centralStackedWidget->widget(i);
-        if (w) {
-            qDebug() << ">>> [УДАЛЕНИЕ] Закрываю открытую вкладку кода:" << w->objectName();
-            ui->centralStackedWidget->removeWidget(w);
-            w->deleteLater();
+    // Сбрасываем кэш PipManagerPage при закрытии
+    if (this->m_pipPage) {
+        this->m_pipPage = nullptr;
+    }
+
+    if (ui->centralStackedWidget) {
+        int placeholderIdx = ui->centralStackedWidget->indexOf(
+            ui->centralStackedWidget->findChild<QWidget*>("JETBRAINS_PLACEHOLDER")
+        );
+
+        for (int i = ui->centralStackedWidget->count() - 1; i >= 0; --i) {
+            if (i == 0 || i == 1 || i == placeholderIdx) continue;
+            QWidget *w = ui->centralStackedWidget->widget(i);
+            if (w) {
+                ui->centralStackedWidget->removeWidget(w);
+                w->deleteLater();
+            }
         }
     }
 
-    // Переинициализируем верхний комбобокс до базового состояния заставки
-    ui->fileComboBox->clear();
-    ui->fileComboBox->addItem(" Панель обучения ИИ", QVariant("MAIN_SCREEN"));
-    ui->fileComboBox->addItem(" ИИ-Ассистент", QVariant("AI_CHAT_SCREEN"));
-    ui->fileComboBox->setCurrentIndex(-1); // Сбрасываем стрелку в нейтраль
-    ui->fileComboBox->blockSignals(false);
-
     // =========================================================================
-    // ЭТАП 4: ОЧИСТКА ЛЕВОГО НИЖНЕГО СПИСКА "ОТКРЫТЫЕ ДОКУМЕНТЫ"
+    // ЭТАП 4: ПОЛНАЯ ЗАЧИСТКА СПИСКОВ UI
     // =========================================================================
     if (ui->openFilesListWidget) {
         ui->openFilesListWidget->clear();
-        QListWidgetItem *mainScreenItem = new QListWidgetItem(" Панель обучения ИИ", ui->openFilesListWidget);
-        mainScreenItem->setData(Qt::UserRole, QString("MAIN_SCREEN"));
-        QListWidgetItem *chatScreenItem = new QListWidgetItem(" ИИ-Ассистент", ui->openFilesListWidget);
-        chatScreenItem->setData(Qt::UserRole, QString("AI_CHAT_SCREEN"));
-        ui->openFilesListWidget->setCurrentRow(0);
-        if (ui->openFilesContainer) ui->openFilesContainer->setVisible(false);
+        ui->openFilesListWidget->blockSignals(false);
     }
 
-    // =========================================================================
-    // ЭТАП 5: ТОТАЛЬНОЕ СТИРАНИЕ ПУТЕЙ И СБРОС ЗАГЛОВКОВ (ЧИСТЫЙ ФИКС СЕССИИ)
-    // =========================================================================
-    // Переводим внутренние флаги ядра Студии в стартовый режим
-    this->setIDEInStartMode(true);
-
-    this->currentOpenProjectPath = "";
-    this->setProperty("currentOpenProjectPath", ""); // Зачищаем свойство для DocumentManager
-    this->setWindowModified(false);
-
-    // Вежливо просим наш модуль вернуть исходное чистое имя программы
-    if (this->docMgr) {
-        this->docMgr->updateUiTitles("");
-    } else {
-        this->setWindowTitle("PyTorch Studio");
-        if (this->titleLabel) this->titleLabel->setText("PyTorch Studio");
+    if (ui->fileComboBox) {
+        ui->fileComboBox->clear();
+        ui->fileComboBox->addItem(QStringLiteral("<нет документа>"), -1);
+        ui->fileComboBox->setCurrentIndex(0);
+        ui->fileComboBox->blockSignals(false);
+        ui->fileComboBox->setEnabled(true);
     }
 
     if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(false);
-    if (ui->fileComboBox) ui->fileComboBox->setEnabled(false);
 
-    // Гасим нижний терминал и REPL
-    if (panelOther) panelOther->setVisible(false);
-    if (btnTerminal) btnTerminal->setChecked(false);
+    // =========================================================================
+    // ЭТАП 5: СБРОС СОСТОЯНИЯ ПРОЕКТА, ТАБЛИЦ СЕССИЙ И МОДЕЛЕЙ ДЕРЕВА
+    // =========================================================================
+    this->setIDEInStartMode(true);
+    this->currentOpenProjectPath = "";
+    this->setProperty("currentOpenProjectPath", "");
+    this->setWindowModified(false);
 
-    // Обнуляем файловую модель дерева TreeView строго ПОСЛЕ переключения флагов режима IDE [pdf_0.1.8]
+    // Фикс краша: сбрасываем таблицу сессий или зануляем указатель
+    if (this->sessionTable) {
+        this->sessionTable->setProjectPath(""); // Безопасная очистка пути в таблице
+        // Если жизненный цикл sessionTable привязан к конкретному проекту:
+        // this->sessionTable->deleteLater();
+        // this->sessionTable = nullptr;
+    }
+
+    // Отвязка и очистка моделей файловой системы
     if (ui->treeView) {
         ui->treeView->setModel(nullptr);
     }
 
-    // ============================================================================
-    // АППАРАТНАЯ СИМУЛЯЦИЯ КЛИКА ДЛЯ СБРОСА БОКОВОЙ ПАНЕЛИ К КНОПКАМ
-    // ============================================================================
-    // Находим QStackedWidget боковой панели, в котором живет дерево treeView
-    QStackedWidget *leftStack = nullptr;
-    if (ui->treeView) {
-        leftStack = qobject_cast<QStackedWidget*>(ui->treeView->parentWidget());
-        if (!leftStack && ui->treeView->parentWidget()) {
-            leftStack = qobject_cast<QStackedWidget*>(ui->treeView->parentWidget()->parentWidget());
-        }
+    if (this->docMgr) {
+        this->docMgr->updateUiTitles("");
+    } else {
+        this->setWindowTitle("PyTorch Studio");
     }
 
-    if (leftStack) {
-        // Принудительно выставляем 0-й индекс (Экран с кнопками "Новый проект" / "Список проектов")
-        leftStack->setCurrentIndex(0);
-        leftStack->update();
+    if (this->titleLabel) this->titleLabel->setText("PyTorch Studio");
+    if (panelOther) panelOther->setVisible(false);
+    if (btnTerminal) btnTerminal->setChecked(false);
+
+    // Сброс левой боковой панели
+    if (ui->dockContentsStack && ui->page_4) {
+        ui->dockContentsStack->setCurrentWidget(ui->page_4);
+        ui->dockContentsStack->update();
     }
 
-    // Прокачиваем системную очередь графических событий Linux для сброса зависшего буфера
     QCoreApplication::processEvents();
 
-    // ИСПРАВЛЕНИЕ: Вызываем метод trigger() вместо click() для объекта QAction (actProject)
-    // Это заставит боковой стек принудительно обновить верстку и вернуть кнопки в один клик
     if (actProject) {
         actProject->trigger();
         QCoreApplication::processEvents();
         actProject->trigger();
     }
 
-    // ============================================================================
-    // ГАРАНТИРОВАННОЕ ОТКРЫТИЕ ЦЕНТРАЛЬНОГО ПЛЕЙСХОЛДЕРА ХОТКЕЕВ (JETBRAINS)
-    // ============================================================================
-    placeholderIndex = ui->centralStackedWidget->indexOf(ui->centralStackedWidget->findChild<QWidget*>("JETBRAINS_PLACEHOLDER"));
-    if (placeholderIndex == -1) {
-        placeholderIndex = this->property("placeholderIndex").toInt();
-    }
-
-    if (ui->centralStackedWidget && placeholderIndex >= 0) {
-        if (ui->cursorPosLabel) {
-            ui->cursorPosLabel->hide(); // Прячем индикатор строк, так как файлов на экране нет
+    // =========================================================================
+    // ЭТАП 6: АКТИВАЦИЯ СТАРТОВОГО ЭКРАНА (JETBRAINS_PLACEHOLDER)
+    // =========================================================================
+    int targetPlaceholderIdx = -1;
+    if (ui->centralStackedWidget) {
+        QWidget *placeholderWidget = ui->centralStackedWidget->findChild<QWidget*>(QStringLiteral("JETBRAINS_PLACEHOLDER"));
+        if (placeholderWidget) {
+            targetPlaceholderIdx = ui->centralStackedWidget->indexOf(placeholderWidget);
         }
 
-        // Принудительно выводим JETBRAINS_PLACEHOLDER на передний план, если он был скрыт
-        ui->centralStackedWidget->setCurrentIndex(placeholderIndex);
-        ui->centralStackedWidget->update();
+        if (targetPlaceholderIdx == -1) {
+            for (int i = 0; i < ui->centralStackedWidget->count(); ++i) {
+                QWidget *w = ui->centralStackedWidget->widget(i);
+                if (w && (w->objectName() == QStringLiteral("JETBRAINS_PLACEHOLDER") ||
+                          w->inherits("start_progect") || w->inherits("StartProject"))) {
+                    targetPlaceholderIdx = i;
+                    break;
+                }
+            }
+        }
+
+        if (targetPlaceholderIdx == -1) {
+            targetPlaceholderIdx = this->property("placeholderIndex").toInt();
+        }
+
+        if (targetPlaceholderIdx >= 0) {
+            if (ui->cursorPosLabel) ui->cursorPosLabel->hide();
+            ui->centralStackedWidget->setCurrentIndex(targetPlaceholderIdx);
+            ui->centralStackedWidget->update();
+            this->setProperty("placeholderIndex", targetPlaceholderIdx);
+            qDebug() << ">>> [СТУДИЯ СИНХРОНИЗАЦИЯ]: Стартовый экран успешно выведен, Index:" << targetPlaceholderIdx;
+        } else {
+            ui->centralStackedWidget->setCurrentIndex(0);
+            qWarning() << ">>> [СТУДИЯ СИНХРОНИЗАЦИЯ]: Критическая ошибка: JETBRAINS_PLACEHOLDER не обнаружен!";
+        }
     }
 
-    // Финальная фиксация графического окна в Linux Breeze
     QCoreApplication::processEvents();
-
-    qInfo() << "[PROJECT_MGR] Проект успешно закрыт. Интерфейс возвращен к кнопкам в один клик.";
 }
 
 void Neuro_programm::initLspServer()
@@ -12653,7 +12868,7 @@ void Neuro_programm::initializeEnvironmentOnStartup()
 
     this->setIDEInStartMode(true);
     if (ui->btnCloseFile) ui->btnCloseFile->setEnabled(false);
-    if (ui->fileComboBox) ui->fileComboBox->setEnabled(false);
+    if (ui->fileComboBox) ui->fileComboBox->setEnabled(true);
 }
 
 void Neuro_programm::showVenvEmergencyDialog(const QString &reason)
@@ -15967,6 +16182,8 @@ void Neuro_programm::validatePythonSyntax(const QString &filePath)
     connect(syntaxProcess, &QProcess::finished, this, [this, syntaxProcess]() {
         QString filePath = syntaxProcess->property("validatedFilePath").toString();
 
+        syntaxProcess->deleteLater();
+
         // Очищаем таблицу проблем на нижней дочерней панели
         panelOther->clearErrorsForFile(filePath);
 
@@ -16020,36 +16237,35 @@ void Neuro_programm::validatePythonSyntax(const QString &filePath)
         // =========================================================================
         // 4. УПРАВЛЕНИЕ АДАПТИВНОЙ ГЕОМЕТРИЕЙ СПЛИТТЕРА ОКОН
         // =========================================================================
-        if (errorLines.size() > 0 && mainVerticalSplitter) {
-            panelOther->setVisible(true);
-            panelOther->show();
-            int totalHeight = this->height();
-            mainVerticalSplitter->setSizes(QList<int>({totalHeight - 320, 320}));
-        }
+        // if (errorLines.size() > 0 && mainVerticalSplitter) {
+        //     panelOther->setVisible(true);
+        //     panelOther->show();
+        //     int totalHeight = this->height();
+        //     mainVerticalSplitter->setSizes(QList<int>({totalHeight - 320, 320}));
+        // }
 
         // =========================================================================
         // МОДИФИЦИРОВАННОЕ УПРАВЛЕНИЕ АДАПТИВНОЙ ГЕОМЕТРИЕЙ СНИЗУ
         // =========================================================================
         // Проверяем: если линт запущен из правого окна — ЗАПРЕЩАЕМ открывать panelOther!
-        bool isRightActive = this->property("isRightPanelFocused").toBool();
+        // bool isRightActive = this->property("isRightPanelFocused").toBool();
 
-        if (errorLines.size() > 0 && mainVerticalSplitter && !isRightActive)
-        {
-            // Этот блок сработает СТРОГО для левого оригинального окна!
-            panelOther->setVisible(true);
-            panelOther->show();
-            int totalHeight = this->height();
-            mainVerticalSplitter->setSizes(QList<int>({totalHeight - 320, 320}));
-        }
-        else if (isRightActive)
-        {
-            // Если проверка шла для правой панели — принудительно гарантируем,
-            // что нижняя панель логов останется закрытой и не вылезет на экран
-            panelOther->setVisible(false);
-            panelOther->hide();
-        }
+        // if (errorLines.size() > 0 && mainVerticalSplitter && !isRightActive)
+        // {
+        //     // Этот блок сработает СТРОГО для левого оригинального окна!
+        //     panelOther->setVisible(true);
+        //     panelOther->show();
+        //     int totalHeight = this->height();
+        //     mainVerticalSplitter->setSizes(QList<int>({totalHeight - 320, 320}));
+        // }
+        // else if (isRightActive)
+        // {
+        //     // Если проверка шла для правой панели — принудительно гарантируем,
+        //     // что нижняя панель логов останется закрытой и не вылезет на экран
+        //     panelOther->setVisible(false);
+        //     panelOther->hide();
+        // }
 
-        syntaxProcess->deleteLater();
     });
 
     syntaxProcess->start(pythonPath, arguments);
@@ -16246,11 +16462,236 @@ void Neuro_programm::applyHighlighterErrors(const QString &filePath, const QList
     }
 }
 
-
-// Метод полной очистки маркеров, если flake8 вернул пустой лог (ошибок нет)
 void Neuro_programm::clearHighlighterErrors(const QString &filePath)
 {
     this->applyHighlighterErrors(filePath, QList<int>());
 }
 
+void Neuro_programm::syncDocumentManagerUi()
+{
+    if (!ui->openFilesListWidget || !ui->fileComboBox || !ui->btnCloseFile) return;
 
+    int totalOpenObjects = ui->openFilesListWidget->count();
+
+    if (totalOpenObjects > 0) {
+        ui->btnCloseFile->setEnabled(true);
+        ui->fileComboBox->setEnabled(true);
+    } else {
+        // Как только объектов становится 0 — кнопка ПРИНУДИТЕЛЬНО ГАСНЕТ
+        ui->btnCloseFile->setEnabled(false);
+
+        // Приводим комбобокс в дефолтное состояние
+        ui->fileComboBox->blockSignals(true);
+        ui->fileComboBox->clear();
+        ui->fileComboBox->addItem(QStringLiteral("<нет документа>"), -1);
+        ui->fileComboBox->setCurrentIndex(0);
+        ui->fileComboBox->setEnabled(true);
+        ui->fileComboBox->blockSignals(false);
+
+        // Прячем индикатор курсора строки/колонки
+        if (ui->cursorPosLabel) {
+            ui->cursorPosLabel->hide();
+        }
+
+        // Защита: переводим центральный экран обратно на плейсхолдер хоткеев JetBrains
+        if (ui->centralStackedWidget) {
+            QWidget *placeholder = ui->centralStackedWidget->findChild<QWidget*>(QStringLiteral("JETBRAINS_PLACEHOLDER"));
+            if (placeholder) {
+                ui->centralStackedWidget->setCurrentWidget(placeholder);
+            }
+        }
+    }
+}
+
+void Neuro_programm::registerNewOpenDocument(const QString& objectName, int stackedWidgetIndex)
+{
+    if (objectName.isEmpty() || !ui->openFilesListWidget || !ui->fileComboBox) return;
+
+    // 1. Проверяем на дубликаты, чтобы не открывать один и тот же файл дважды
+    for (int i = 0; i < ui->openFilesListWidget->count(); ++i) {
+        if (ui->openFilesListWidget->item(i)->text() == objectName) {
+            ui->openFilesListWidget->setCurrentRow(i);
+            // Если в комбобоксе есть реальный элемент, синхронизируем индекс
+            int comboIdx = ui->fileComboBox->findText(objectName);
+            if (comboIdx != -1) ui->fileComboBox->setCurrentIndex(comboIdx);
+            ui->centralStackedWidget->setCurrentIndex(stackedWidgetIndex);
+            return;
+        }
+    }
+
+    // 2. Если комбобокс содержал только "<нет документа>" (индекс первого элемента равен -1)
+    if (ui->fileComboBox->count() == 1 && ui->fileComboBox->itemData(0).toInt() == -1) {
+        ui->fileComboBox->clear(); // Удаляем плейсхолдер перед вставкой первого реального файла
+    }
+
+    // 3. Синхронно добавляем открытый объект в оба виджета
+    QListWidgetItem* listItem = new QListWidgetItem(objectName, ui->openFilesListWidget);
+    listItem->setData(Qt::UserRole, stackedWidgetIndex); // Зашиваем индекс страницы stackedWidget
+
+    ui->fileComboBox->addItem(objectName, stackedWidgetIndex);
+
+    // 4. Переводим фокус на новый документ
+    ui->openFilesListWidget->setCurrentItem(listItem);
+    ui->fileComboBox->setCurrentIndex(ui->fileComboBox->count() - 1);
+    ui->centralStackedWidget->setCurrentIndex(stackedWidgetIndex);
+
+    // 5. Активируем кнопку закрытия, так как в стеке появился живой объект
+    if (ui->btnCloseFile) {
+        ui->btnCloseFile->setEnabled(true);
+    }
+}
+
+void Neuro_programm::onCloseFileButtonClicked()
+{
+    if (!ui->centralStackedWidget || !ui->openFilesListWidget || !ui->fileComboBox) return;
+
+    // Если список пуст — сразу тушим кнопку и выходим
+    if (ui->openFilesListWidget->count() == 0) {
+        this->syncDocumentManagerUi();
+        return;
+    }
+
+    // 1. ОПРЕДЕЛЯЕМ ЗАКРЫВАЕМЫЙ ЭЛЕМЕНТ
+    // Берем текущую выбранную строку в списке. Если строка не выделена — берем нулевую.
+    int currentRow = ui->openFilesListWidget->currentRow();
+    if (currentRow < 0 || currentRow >= ui->openFilesListWidget->count()) {
+        currentRow = 0;
+    }
+
+    QListWidgetItem *targetItem = ui->openFilesListWidget->item(currentRow);
+    if (!targetItem) {
+        this->syncDocumentManagerUi();
+        return;
+    }
+
+    QString targetFileName = targetItem->text().trimmed();
+    int targetPageIdx = targetItem->data(Qt::UserRole).toInt();
+
+    // 2. УДАЛЯЕМ ИЗ СПИСКА ПО ИНДЕКСУ СТРОКИ
+    delete ui->openFilesListWidget->takeItem(currentRow);
+
+    // 3. УДАЛЯЕМ ИЗ КОМБОБОКСА ПО ИМЕНИ ТЕКСТА
+    ui->fileComboBox->blockSignals(true);
+    int comboIdx = ui->fileComboBox->findText(targetFileName);
+    if (comboIdx != -1) {
+        ui->fileComboBox->removeItem(comboIdx);
+    } else {
+        // Запасной вариант: ищем по pageIdx в данных
+        for (int i = 0; i < ui->fileComboBox->count(); ++i) {
+            if (ui->fileComboBox->itemData(i).toInt() == targetPageIdx) {
+                ui->fileComboBox->removeItem(i);
+                break;
+            }
+        }
+    }
+    ui->fileComboBox->blockSignals(false);
+
+    // 4. УДАЛЯЕМ ВИДЖЕТ ИЗ CENTRALSTACKEDWIDGET
+    // Ищем виджет либо по индексу, либо по совпадению objectName
+    QWidget *widgetToRemove = nullptr;
+    if (targetPageIdx >= 0 && targetPageIdx < ui->centralStackedWidget->count()) {
+        QWidget *candidate = ui->centralStackedWidget->widget(targetPageIdx);
+        // Защита системных экранов (0, 1 и плейсхолдер)
+        if (candidate && targetPageIdx != 0 && targetPageIdx != 1 &&
+            candidate->objectName() != QStringLiteral("JETBRAINS_PLACEHOLDER")) {
+            widgetToRemove = candidate;
+        }
+    }
+
+    // Если по индексу не нашли (индекс мог сместиться), ищем по имени файла в objectName
+    if (!widgetToRemove) {
+        for (int i = ui->centralStackedWidget->count() - 1; i >= 0; --i) {
+            if (i == 0 || i == 1) continue;
+            QWidget *w = ui->centralStackedWidget->widget(i);
+            if (w && (w->objectName().endsWith(targetFileName) || w->objectName() == targetFileName)) {
+                widgetToRemove = w;
+                break;
+            }
+        }
+    }
+
+    if (widgetToRemove) {
+        if (widgetToRemove == this->m_pipPage) {
+            this->m_pipPage = nullptr;
+        }
+        ui->centralStackedWidget->removeWidget(widgetToRemove);
+        widgetToRemove->deleteLater();
+    }
+
+    // 5. ПРОВЕРЯЕМ ОСТАВШИЕСЯ ФАЙЛЫ
+    if (ui->openFilesListWidget->count() > 0) {
+        // Если еще есть файлы, выбираем первый
+        ui->openFilesListWidget->setCurrentRow(0);
+        QListWidgetItem *nextItem = ui->openFilesListWidget->item(0);
+        if (nextItem) {
+            this->onOpenFileListItemDoubleClicked(nextItem);
+        }
+    }
+
+    // 6. СИНХРОНИЗАЦИЯ: если файлов 0, метод сам погасит кнопку, сбросит комбобокс и включит плейсхолдер
+    this->syncDocumentManagerUi();
+}
+
+void Neuro_programm::resetFileControlsToDefault()
+{
+    if (ui->fileComboBox) {
+            ui->fileComboBox->blockSignals(true);
+            ui->fileComboBox->clear();
+            ui->fileComboBox->addItem(QStringLiteral("<нет документа>"), -1);
+            ui->fileComboBox->setCurrentIndex(0);
+
+            // 1. ОСТАВЛЯЕМ АКТИВНЫМ: теперь по нему можно кликать и открывать список
+            ui->fileComboBox->setEnabled(true);
+
+            // 1. Запрещаем комбобоксу вообще подстраиваться под длину текста элементов
+            ui->fileComboBox->setSizeAdjustPolicy(QComboBox::AdjustToContentsOnFirstShow);
+
+            // 2. Жестко фиксируем точную ширину (например, 220 пикселей)
+            ui->fileComboBox->setFixedWidth(220);
+
+            // 3. Задаем фиксированную политику компоновки
+            ui->fileComboBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+            // 4. (Опционально) Фиксируем ширину выпадающего списка, чтобы он тоже не плясал:
+            if (ui->fileComboBox->view()) {
+                ui->fileComboBox->view()->setFixedWidth(220);
+            }
+
+            ui->fileComboBox->blockSignals(false);
+        }
+
+    // 2. Полная очистка списка открытых документов под деревом
+    if (ui->openFilesListWidget) {
+        ui->openFilesListWidget->blockSignals(true);
+        ui->openFilesListWidget->clear();
+        ui->openFilesListWidget->blockSignals(false);
+    }
+
+    // 3. Жесткая блокировка крестика закрытия
+    if (ui->btnCloseFile) {
+        ui->btnCloseFile->setEnabled(false);
+    }
+
+    // 4. Скрытие индикатора курсора строк/колонок
+    if (ui->cursorPosLabel) {
+        ui->cursorPosLabel->hide();
+    }
+}
+
+void Neuro_programm::onFileComboBoxIndexChanged(int index)
+{
+    if (index < 0 || !ui->fileComboBox) return;
+
+    // Если выбран фиктивный пункт "<нет документа>"
+    if (ui->fileComboBox->itemData(index).toInt() == -1) {
+        if (ui->btnCloseFile) {
+            ui->btnCloseFile->setEnabled(false); // Крестик закрытия гасим
+        }
+        return; // Никакие вкладки и редакторы не переключаем
+    }
+
+    // Если выбран реальный файл — зажигаем кнопку закрытия
+    if (ui->btnCloseFile) {
+        ui->btnCloseFile->setEnabled(true);
+    }
+}

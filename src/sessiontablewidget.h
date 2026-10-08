@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QSettings>
+#include <QPointer>
 
 // Структура для декларативного хранения настроек колонок из json-файла
 struct SessionColumn {
@@ -53,7 +54,7 @@ private:
     void setupUi();
 
 private:
-    QTableWidget        *m_tableWidget;        // Главный внутренний виджет сетки ячеек
+    QTableWidget *m_tableWidget = nullptr;
     QString              m_currentProjectPath; // Координаты открытого проекта z1
     QList<SessionColumn> m_columns;            // Конфиг структуры колонок, прочитанный из JSON
 };

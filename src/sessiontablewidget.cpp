@@ -33,7 +33,13 @@ void SessionTableWidget::setProjectPath(const QString &projectPath) {
     this->refreshTable(); // Запуск динамической отрисовки
 }
 
-void SessionTableWidget::refreshTable() {
+void SessionTableWidget::refreshTable()
+{
+    if (!m_tableWidget) {
+        qWarning() << "SessionTableWidget: m_tableWidget is null!";
+        return;
+    }
+
     // 1. Очищаем старые строки перед каждым свежим заполнением
     m_tableWidget->setRowCount(0);
 

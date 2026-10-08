@@ -155,38 +155,48 @@ void DocumentManager::handleFileActivation(const QString &absoluteFilePath)
 
 void DocumentManager::handleDocumentModificationChanged(const QString &absoluteFilePath, bool isModified)
 {
+    if (absoluteFilePath.isEmpty() || absoluteFilePath == "MAIN_SCREEN" || absoluteFilePath == "AI_CHAT_SCREEN")
+        return;
+
     QFileInfo info(absoluteFilePath);
     QString baseName = info.fileName();
+    QString displayName = isModified ? (baseName + " *") : baseName;
 
-    if (absoluteFilePath == "MAIN_SCREEN" || absoluteFilePath == "AI_CHAT_SCREEN") return;
-
-    QString displayName = isModified ? baseName + " *" : baseName;
-
-    // 1. УМНОЕ ОБНОВЛЕНИЕ ВЕРХНЕГО КОМБОБОКСА СО ЗВЕЗДОЧКОЙ
+    // 1. ОБНОВЛЕНИЕ ВЕРХНЕГО КОМБОБОКСА
     if (m_fileCombo) {
-        int comboIdx = m_fileCombo->findData(absoluteFilePath); // Теперь совпадение 100% найдется!
+        // Ищем элемент по сохраненному пути в data, либо по имени файла
+        int comboIdx = m_fileCombo->findData(absoluteFilePath);
+        if (comboIdx == -1) {
+            comboIdx = m_fileCombo->findText(baseName);
+            if (comboIdx == -1) comboIdx = m_fileCombo->findText(baseName + " *");
+        }
+
         if (comboIdx != -1) {
+            m_fileCombo->blockSignals(true);
             m_fileCombo->setItemText(comboIdx, displayName);
+            m_fileCombo->blockSignals(false);
             m_fileCombo->update();
         }
     }
 
-    // 2. ОБНОВЛЕНИЕ ЛЕВОГО СПИСКА "ОТКРЫТЫЕ ДОКУМЕНТЫ"
+    // 2. ОБНОВЛЕНИЕ НИЖНЕГО СПИСКА "ОТКРЫТЫЕ ДОКУМЕНТЫ"
     if (m_filesListWidget) {
         for (int i = 0; i < m_filesListWidget->count(); ++i) {
             QListWidgetItem *item = m_filesListWidget->item(i);
-            if (item && item->data(Qt::UserRole).toString() == absoluteFilePath) {
-                item->setText(isModified ? " " : " " + baseName);
-                if (isModified) {
-                    item->setText(" " + baseName + " *");
-                }
+            if (!item) continue;
+
+            QString itemPath = item->data(Qt::UserRole).toString();
+            // Проверяем совпадение по пути или базовому имени
+            if (itemPath == absoluteFilePath || item->text().trimmed().startsWith(baseName)) {
+                item->setText(isModified ? (baseName + " *") : baseName);
                 m_filesListWidget->update();
                 break;
             }
         }
     }
 
-    if (m_activeFilePath == absoluteFilePath) {
+    // 3. ОБНОВЛЕНИЕ ЗАГОЛОВКА ОКНА
+    if (m_activeFilePath == absoluteFilePath || m_activeFilePath.endsWith(baseName)) {
         updateUiTitles(absoluteFilePath);
     }
 }
@@ -296,8 +306,10 @@ void DocumentManager::updateUiTitles(const QString &absoluteFilePath)
         else relativeSubDir = projName;
     }
 
-    QString finalTitle = QString("%1%2(%3@%4)[%4.pystudio] - PyTorch Studio")
-                             .arg(fileName).arg(modifiedMarker).arg(relativeSubDir).arg(projName);
+    // QString finalTitle = QString("%1%2(%3@%4)[%4.pystudio] - PyTorch Studio")
+    //                          .arg(fileName).arg(modifiedMarker).arg(relativeSubDir).arg(projName);
+    QString finalTitle = QString("%1[*] (%2@%3)[%3.pystudio] PyTorch Studio")
+                             .arg(fileName).arg(relativeSubDir).arg(projName);
 
     m_window->setWindowTitle(finalTitle);
     if (liveTitleLabel) {

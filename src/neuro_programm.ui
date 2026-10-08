@@ -662,7 +662,7 @@ QListWidget#quickActionsList::item:selected {
      <item row="0" column="0">
       <widget class="QStackedWidget" name="dockContentsStack">
        <property name="currentIndex">
-        <number>1</number>
+        <number>0</number>
        </property>
        <widget class="QWidget" name="page_3">
         <layout class="QGridLayout" name="gridLayout_8">

@@ -45,6 +45,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QElapsedTimer>
+#include <QPointer>
 
 
 class JupyterClient;
@@ -125,6 +126,8 @@ public:
     void onWrightFlash();
     void onReadFlash();
     void startFlashWritingProcess();
+    void registerNewOpenDocument(const QString& objectName, int stackedWidgetIndex);
+
 
 public slots:
     void updateJediStatusText(const QString &message, bool isError);
@@ -149,6 +152,7 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
 
+    void onCloseFileButtonClicked();
 protected slots:
     void new_progect();
     void openNewFileInEditor(const QString &absoluteFilePath);
@@ -207,6 +211,7 @@ private:
     void validatePythonSyntax(const QString &filePath);
     void setupSessionTableConnections();
     QTimer *linterDebounceTimer = nullptr;
+    void syncDocumentManagerUi();
 
 private slots:
     void onFileDoubleClicked(const QModelIndex &index);
@@ -250,6 +255,7 @@ private slots:
     void openAiPromptBox();
     void onPromptSubmitted(const QString &promptText);
 
+    void onFileComboBoxIndexChanged(int index);
 private:
     bool isMediaActive = false;
     QComboBox *m_clonedFileComboBox;
@@ -265,7 +271,7 @@ private:
     QMetaObject::Connection jupyterFinishConnection;
     QMetaObject::Connection jupyterReadyConnection;
     SessionDetailsWidget *detailsDashboard;
-    SessionTableWidget *sessionTable{nullptr};
+    QPointer<SessionTableWidget> sessionTable;
     AI_panel *m_aiPanel = nullptr;
     bool m_isOpeningFile = false;
     bool isAiProcessing = false;
@@ -389,5 +395,6 @@ private:
     void runJediAnalysisForWidget(const QString &filePath, QPlainTextEdit *targetEditor);
     void applyHighlighterErrors(const QString &filePath, const QList<int> &errorLines);
     void clearHighlighterErrors(const QString &filePath);
+    void resetFileControlsToDefault();
 };
 #endif // NEURO_PROGRAMM_H
