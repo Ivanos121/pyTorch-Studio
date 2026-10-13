@@ -1,5 +1,4 @@
 #include "debugmanager.h"
-#include "neuro_programm.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -8,7 +7,6 @@
 #include <QDebug>
 #include <QMap>
 #include <QTimer>
-#include <qstackedwidget.h>
 
 DebugManager::DebugManager(QObject *parent)
     : QObject(parent)
@@ -17,26 +15,37 @@ DebugManager::DebugManager(QObject *parent)
     , m_debugPort(5678)
     , m_commandSequence(1)
     , m_isConnected(false)
+    , m_currentThreadId(1)
 {
     connect(m_process, &QProcess::readyReadStandardError, this, &DebugManager::handleReadyReadStandardError);
     connect(m_process, &QProcess::readyReadStandardOutput, this, &DebugManager::handleReadyReadStandardOutput);
     connect(m_process, &QProcess::finished, this, &DebugManager::handleProcessFinished);
+
     connect(m_tcpSocket, &QTcpSocket::connected, this, &DebugManager::handleSocketConnected);
     connect(m_tcpSocket, &QTcpSocket::readyRead, this, &DebugManager::handleSocketReadyRead);
+    connect(m_tcpSocket, &QAbstractSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+        // Ошибки подключения при попытках коннекта игнорируем до успешной стыковки
+    });
 }
 
 DebugManager::~DebugManager()
 {
+    this->disconnect();
     stopDebugSession();
 }
 
 bool DebugManager::startDebugSession(const QString &projectFolderPath, const QString &scriptPath,
                                      const QString &venvPath, int port)
 {
-    if (m_process->state() != QProcess::NotRunning) return false;
+    if (m_process->state() != QProcess::NotRunning) {
+        return false;
+    }
+
     m_debugPort = port;
     m_currentScript = scriptPath;
     m_isConnected = false;
+    m_accumulatedErrors.clear();
+    m_networkBuffer.clear();
 
     // 1. Вычисляем путь к интерпретатору Python внутри venv
     QDir venvDir(venvPath);
@@ -46,78 +55,100 @@ bool DebugManager::startDebugSession(const QString &projectFolderPath, const QSt
     QString pythonExe = venvDir.absoluteFilePath("bin/python");
 #endif
 
-    // 2. НАСТРАИВАЕМ ОКРУЖЕНИЕ И АКТИВИРУЕМ ПАПКУ DATASETS
+    // 2. Настраиваем окружение и активируем папку datasets
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert("PYDEVD_DISABLE_FILE_VALIDATION", "1");
     env.insert("PYTHONUNBUFFERED", "1");
+    env.insert("MPLBACKEND", "Agg");
+    env.insert("QT_QPA_PLATFORM", "wayland");
 
-    // --- ВРЕЗКА УПРАВЛЕНИЯ ПАПКОЙ ДАТАСЕТОВ ---
     QDir projectDir(projectFolderPath);
     QString datasetsPath = projectDir.absoluteFilePath("datasets");
-
-    // Автоматически создаем папку datasets в корне, если её физически нет
     if (!projectDir.exists("datasets")) {
         projectDir.mkdir("datasets");
-        qInfo() << ">>> [IDE CORE] Создана центральная папка датасетов:" << datasetsPath;
     }
-
-    // Зашиваем путь в переменную окружения Linux, чтобы скрипт Python её сразу считал
+    qInfo() << ">>> [IDE CORE] Создана центральная папка датасетов:" << datasetsPath;
     env.insert("PROJECT_DATASETS_DIR", datasetsPath);
-    // ------------------------------------------
 
     m_process->setProcessEnvironment(env);
     m_process->setWorkingDirectory(projectFolderPath);
 
-    // 3. СБОРКА АРГУМЕНТОВ С ОБХОДОМ FROZEN MODULES (Необходимо для Python 3.11+)
+    // 3. Сборка аргументов с обходом frozen modules
+    QString cleanScriptPath = QFileInfo(scriptPath).canonicalFilePath();
+    if (cleanScriptPath.isEmpty()) {
+        cleanScriptPath = QDir::cleanPath(scriptPath);
+    }
+
     QStringList arguments;
     arguments << "-Xfrozen_modules=off"
               << "-m" << "debugpy"
               << "--listen" << QString("127.0.0.1:%1").arg(m_debugPort)
               << "--wait-for-client"
-              << scriptPath;
+              << cleanScriptPath; // Передаем канонический путь
 
-    qDebug() << "[DEBUG_LAUNCH] Запуск:" << pythonExe << arguments.join(" ");
     m_process->start(pythonExe, arguments);
 
-    // 1. АСИНХРОННАЯ ПРОВЕРКА ЗАПУСКА ПРОЦЕССА (Вместо блокирующего waitForStarted)
-    QTimer::singleShot(100, this, [this, pythonExe]() {
-        if (!m_process || m_process->state() == QProcess::NotRunning) {
-            QByteArray rawErr = m_process ? m_process->readAllStandardError() : QByteArray();
-            emit debugSessionError(
-                "Ошибка запуска интерпретатора",
-                QString("Не удалось запустить файл: %1\nСистемная ошибка: %2")
-                    .arg(pythonExe, QString::fromUtf8(rawErr))
-                );
+    if (!m_process->waitForStarted(2000)) {
+        emit debugSessionError(
+            "Ошибка запуска интерпретатора",
+            QString("Не удалось запустить процесс Python: %1").arg(pythonExe)
+            );
+        return false;
+    }
+
+    emit statusMessageReady(QString("Сервер ожидания запущен на порту %1. Инициирую мост...").arg(m_debugPort), 4000);
+
+    // 4. Безопасное циклическое подключение к порту вместо слепой задержки
+    QTimer *retryTimer = new QTimer(this);
+    QTimer *timeoutTimer = new QTimer(this);
+
+    connect(retryTimer, &QTimer::timeout, this, [this, retryTimer]() {
+        if (m_isConnected) {
+            retryTimer->stop();
+            retryTimer->deleteLater();
+            return;
+        }
+        if (m_process && m_process->state() == QProcess::Running) {
+            if (m_tcpSocket->state() == QAbstractSocket::UnconnectedState) {
+                m_tcpSocket->connectToHost("127.0.0.1", m_debugPort);
+            }
         }
     });
 
-    // 2. СООБЩЕНИЕ О СТАРТЕ (Отправляем сразу, так как старт теперь асинхронный)
-    emit statusMessageReady(QString("🪲 Сервер ожидания запущен на порту %1. Инициирую мост...").arg(m_debugPort), 4000);
+    // 5. Сторожевой таймер только на этап первого рукопожатия (15 сек для PyTorch)
+    timeoutTimer->setSingleShot(true);
+    connect(timeoutTimer, &QTimer::timeout, this, [this, retryTimer, timeoutTimer]() {
+        retryTimer->stop();
+        retryTimer->deleteLater();
+        timeoutTimer->deleteLater();
 
-    // 3. ПОДКЛЮЧЕНИЕ К СОКЕТУ (Ваша оригинальная логика через 1.5 секунды)
-    QTimer::singleShot(1500, this, [this]() {
-        if (m_tcpSocket && !m_isConnected) {
-            m_tcpSocket->connectToHost("127.0.0.1", m_debugPort);
-        }
-    });
-
-    // 4. ЗАЩИТНЫЙ ТАЙМЕР ТАЙМАУТА (Сработает через 4 секунды)
-    QTimer::singleShot(4000, this, [this]() {
         if (m_process && m_process->state() == QProcess::Running && !m_isConnected) {
-            qWarning() << "!!! [ТАЙМАУТ ОТЛАДКИ] Отладчик debugpy не ответил. Проверяю буфер логов...";
+            qWarning() << "!!! [ТАЙМАУТ ОТЛАДКИ] Отладчик debugpy не ответил за отведенное время.";
             QString errorDetails = m_accumulatedErrors.trimmed();
             m_accumulatedErrors.clear();
-
             if (errorDetails.isEmpty()) {
-                errorDetails = "Превышено время ожидания ответа от ядра debugpy.\nВозможно, в коде скрипта синтаксическая ошибка.";
+                errorDetails = "Превышено время ожидания ответа от ядра debugpy.\n"
+                               "Возможно, скрипт долго импортирует библиотеки или содержит синтаксические ошибки.";
             }
-
-            // 1. СНАЧАЛА стреляем окном ошибки в интерфейс главного окна
-            emit debugSessionError("Критическая ошибка в Python-коде", errorDetails);
-            // 2. И ТОЛЬКО ПОТОМ тушим упавшую сессию отладки
+            emit debugSessionError("Таймаут инициализации отладки", errorDetails);
             stopDebugSession();
         }
     });
+
+    // При успешном коннекте глушим таймеры
+    connect(m_tcpSocket, &QTcpSocket::connected, this, [retryTimer, timeoutTimer]() {
+        if (retryTimer) {
+            retryTimer->stop();
+            retryTimer->deleteLater();
+        }
+        if (timeoutTimer) {
+            timeoutTimer->stop();
+            timeoutTimer->deleteLater();
+        }
+    });
+
+    retryTimer->start(350);
+    timeoutTimer->start(15000);
 
     return true;
 }
@@ -125,7 +156,7 @@ bool DebugManager::startDebugSession(const QString &projectFolderPath, const QSt
 void DebugManager::handleSocketConnected()
 {
     m_isConnected = true;
-    emit statusMessageReady(" Мост отладки DAP успешно состыкован с ядром PyTorch!", 5000);
+    emit statusMessageReady("Мост отладки DAP успешно состыкован с ядром PyTorch!", 5000);
 
     // Этап 1: Приветствуем ядро debugpy
     QJsonObject args;
@@ -134,105 +165,120 @@ void DebugManager::handleSocketConnected()
     args["linesStartAt1"] = true;
     args["columnsStartAt1"] = true;
     args["pathFormat"] = "path";
-
     sendDapCommand("initialize", args);
 }
 
-
 void DebugManager::sendDapCommand(const QString &commandType, const QJsonObject &arguments)
 {
-    if (!m_isConnected) return;
+    if (!m_isConnected || !m_tcpSocket || m_tcpSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
     QJsonObject request;
     request["seq"] = m_commandSequence++;
     request["type"] = "request";
     request["command"] = commandType;
-    if (!arguments.isEmpty()) request["arguments"] = arguments;
+    if (!arguments.isEmpty()) {
+        request["arguments"] = arguments;
+    }
 
     QByteArray body = QJsonDocument(request).toJson(QJsonDocument::Compact);
-
-    // ВЫВОДИМ В ТЕРМИНАЛ ТО, ЧТО СТУДИЯ ОТПРАВЛЯЕТ В PYTHON:
     qDebug() << "===> [DAP ОТПРАВКА]:" << QString::fromUtf8(body);
 
     QString header = QString("Content-Length: %1\r\n\r\n").arg(body.length());
     m_tcpSocket->write(header.toUtf8());
     m_tcpSocket->write(body);
+    m_tcpSocket->flush();
 }
-
 
 void DebugManager::handleSocketReadyRead()
 {
-    // 1. Накапливаем все прилетающие байты в буфер класса
     m_networkBuffer.append(m_tcpSocket->readAll());
 
-        // 2. Крутим бесконечный цикл сборки DAP-пакетов
-        while (true)
-    {
+    while (true) {
         QByteArray lowerBuffer = m_networkBuffer.toLower();
-            int headerIndex = lowerBuffer.indexOf("content-length:");
-            if (headerIndex == -1) break; // Заголовок еще не прилетел, выходим ждать следующую порцию
+        int headerIndex = lowerBuffer.indexOf("content-length:");
+        if (headerIndex == -1) {
+            break;
+        }
 
         int jsonStartIndex = m_networkBuffer.indexOf("\r\n\r\n", headerIndex);
-            int headerDelimiterLength = 4;
+        int headerDelimiterLength = 4;
+        if (jsonStartIndex == -1) {
+            jsonStartIndex = m_networkBuffer.indexOf("\n\n", headerIndex);
+            headerDelimiterLength = 2;
             if (jsonStartIndex == -1) {
-                jsonStartIndex = m_networkBuffer.indexOf("\n\n", headerIndex);
-                headerDelimiterLength = 2;
-        }
-        if (jsonStartIndex == -1) break;
-
-            int lengthOffset = headerIndex + 15;
-            QByteArray lengthStr = m_networkBuffer.mid(lengthOffset, jsonStartIndex - lengthOffset).trimmed();
-            int expectedJsonLength = lengthStr.toInt();
-            int pureJsonStart = jsonStartIndex + headerDelimiterLength;
-            int totalPacketLength = pureJsonStart + expectedJsonLength;
-
-            // Защита: если тело JSON прилетело не полностью, прерываем цикл до докачки байт
-            if (m_networkBuffer.size() < totalPacketLength) {
                 break;
+            }
         }
 
-        // Извлекаем чистые данные пакета и удаляем обработанную область из буфера ОЗУ
+        int lengthOffset = headerIndex + 15;
+        QByteArray lengthStr = m_networkBuffer.mid(lengthOffset, jsonStartIndex - lengthOffset).trimmed();
+        int expectedJsonLength = lengthStr.toInt();
+        int pureJsonStart = jsonStartIndex + headerDelimiterLength;
+        int totalPacketLength = pureJsonStart + expectedJsonLength;
+
+        if (m_networkBuffer.size() < totalPacketLength) {
+            break;
+        }
+
         QByteArray cleanJsonData = m_networkBuffer.mid(pureJsonStart, expectedJsonLength);
-            m_networkBuffer.remove(0, totalPacketLength);
+        m_networkBuffer.remove(0, totalPacketLength);
 
-            QJsonParseError error;
-            QJsonDocument doc = QJsonDocument::fromJson(cleanJsonData, &error);
-            if (error.error != QJsonParseError::NoError) continue;
+        QJsonParseError error;
+        QJsonDocument doc = QJsonDocument::fromJson(cleanJsonData, &error);
+        if (error.error != QJsonParseError::NoError) {
+            continue;
+        }
 
-            QJsonObject jsonObj = doc.object();
-            QString type = jsonObj["type"].toString();
-            // ---------------------------------------------------------------------
-            // ОБРАБОТКА ОТВЕТОВ СЕРВЕРА (RESPONSES)
-            // ---------------------------------------------------------------------
-            if (type == "response")
-        {
+        QJsonObject jsonObj = doc.object();
+        QString type = jsonObj["type"].toString();
+
+        // =========================================================================
+        // 1. ОБРАБОТКА ОТВЕТОВ (RESPONSES)
+        // =========================================================================
+        if (type == "response") {
             QString command = jsonObj["command"].toString();
 
-                if (command == "initialize")
-            {
+            if (command == "initialize") {
                 qInfo() << ">>> [DAP] Ответ initialize получен успешно. Отправляю запрос attach...";
-                    QJsonObject attachArgs;
-                    attachArgs["connect"] = QJsonObject{ {"host", "127.0.0.1"}, {"port", m_debugPort} };
-                    attachArgs["mode"] = "attach";
-                    sendDapCommand("attach", attachArgs);
+                QJsonObject attachArgs;
+                attachArgs["connect"] = QJsonObject{ {"host", "127.0.0.1"}, {"port", m_debugPort} };
+                attachArgs["mode"] = "attach";
+                sendDapCommand("attach", attachArgs);
             }
-            else if (command == "attach")
-            {
+            else if (command == "attach") {
                 if (jsonObj["success"].toBool(true)) {
-                        qInfo() << ">>> [DAP] Сессия attach успешно подтверждена. Ожидаю инициализацию...";
+                    qInfo() << ">>> [DAP] Сессия attach успешно подтверждена. Ожидаю initialized...";
                 }
             }
-            else if (command == "setBreakpoints")
-            {
+            else if (command == "setBreakpoints") {
+                qInfo().noquote() << ">>> [DAP ОТВЕТ НА ТОЧКИ]:"
+                                  << QJsonDocument(jsonObj).toJson(QJsonDocument::Compact);
+
+                QJsonObject body = jsonObj["body"].toObject();
+                QJsonArray breakpoints = body["breakpoints"].toArray();
+                for (const QJsonValue &val : breakpoints) {
+                    QJsonObject bp = val.toObject();
+                    bool verified = bp["verified"].toBool();
+                    int line = bp["line"].toInt();
+                    qInfo() << ">>> [DAP BP STATUS] Строка:" << line
+                            << "Подтверждена (verified):" << verified;
+                    if (!verified && bp.contains("message")) {
+                        qWarning() << ">>> [DAP BP ПРИЧИНА]:" << bp["message"].toString();
+                    }
+                }
+
+                // Завершаем фазу конфигурирования после регистрации точек
                 if (jsonObj["success"].toBool(true)) {
-                        qInfo() << ">>> [DAP] Точки зафиксированы в ОЗУ. Запуск конфигурации...";
-                        this->sendConfigurationDone();
+                    qInfo() << ">>> [DAP] Точки зафиксированы в debugpy. Отправляю configurationDone...";
+                    this->sendConfigurationDone();
                 }
             }
-            // =========================================================================
-            // ИСПРАВЛЕННЫЙ СБОР СТЕКА И ИСХОДНЫХ ТЕКСТОВ ПРОЕКТА (RESPONSE stackTrace)
-            // =========================================================================
-            else if (command == "stackTrace")
-            {
+            else if (command == "configurationDone") {
+                qInfo() << ">>> [DAP] Конфигурация подтверждена debugpy. Ожидаю остановки на точке...";
+            }
+            else if (command == "stackTrace") {
                 QJsonObject body = jsonObj["body"].toObject();
                 QJsonArray frames = body["stackFrames"].toArray();
                 QList<QStringList> stackFramesForUi;
@@ -241,72 +287,52 @@ void DebugManager::handleSocketReadyRead()
 
                 for (int i = 0; i < frames.size(); ++i) {
                     QJsonObject frame = frames[i].toObject();
-
-                    // ЖЕСТКИЙ ФИКС: Если это самый верхний (текущий) фрейм остановки каретки
                     if (i == 0) {
                         topFrameId = frame["id"].toInt();
-                        int currentLine = frame["line"].toInt(); // Вытаскиваем реальную строку, куда встал Python
-
+                        int currentLine = frame["line"].toInt();
                         qInfo() << ">>> [DAP CORE] Каретка отладки зафиксирована на строке:" << currentLine;
-
-                        // Стреляем сигналом: он и зелёную стрелку нарисует на currentLine,
-                        // и вернет кнопкам Step Over / Step Into статус TRUE в MainWindow!
                         emit breakpointHit(currentLine, m_currentScript);
                     }
 
-                    // Ниже продолжается ваш оригинальный код сбора путей (sourceObj, fullPath и т.д.)...
                     QJsonObject sourceObj = frame["source"].toObject();
-
-                        QString fullPath = sourceObj["path"].toString();
-                        QString shortName = sourceObj["name"].toString();
-
-                        if (shortName.isEmpty() && !fullPath.isEmpty()) {
-                            int lastSlash = fullPath.lastIndexOf('/');
-                            if (lastSlash != -1) {
-                                shortName = fullPath.mid(lastSlash + 1);
+                    QString fullPath = sourceObj["path"].toString();
+                    QString shortName = sourceObj["name"].toString();
+                    if (shortName.isEmpty() && !fullPath.isEmpty()) {
+                        int lastSlash = fullPath.lastIndexOf('/');
+                        if (lastSlash != -1) {
+                            shortName = fullPath.mid(lastSlash + 1);
                         } else {
-                                shortName = fullPath;
+                            shortName = fullPath;
                         }
                     }
-
                     if (shortName.isEmpty()) shortName = "train.py";
-                        if (fullPath.isEmpty()) fullPath = m_currentScript;
+                    if (fullPath.isEmpty()) fullPath = m_currentScript;
 
-                        if (!fullPath.isEmpty() && !uniqueSourcePaths.contains(fullPath)) {
-                            uniqueSourcePaths << fullPath;
+                    if (!fullPath.isEmpty() && !uniqueSourcePaths.contains(fullPath)) {
+                        uniqueSourcePaths << fullPath;
                     }
 
-                        // НАЙДИТЕ ЭТОТ БЛОК ВНУТРИ ЦИКЛА СБОРКИ ФРЕЙМОВ СТЭКА:
-                        QStringList frameData;
-                        frameData << QString::number(i)                      // frame[0] - Уровень
-                                  << frame["name"].toString()                // frame[1] - Функция
-                                  << shortName                               // frame[2] - Имя файла (короткое)
-                                  << QString::number(frame["line"].toInt())  // frame[3] - Строка
-                                  << QString("0x%1").arg(frame["id"].toInt(), 0, 16) // frame[4] - Адрес
-                                  << fullPath;                               // <--- ЖЕСТКИЙ ФИКС: Передаем АБСОЛЮТНЫЙ путь шестым элементом! (frame[5])
-
-                        stackFramesForUi.append(frameData);
+                    QStringList frameData;
+                    frameData << QString::number(i)
+                              << frame["name"].toString()
+                              << shortName
+                              << QString::number(frame["line"].toInt())
+                              << QString("0x%1").arg(frame["id"].toInt(), 0, 16)
+                              << fullPath;
+                    stackFramesForUi.append(frameData);
                 }
 
-                // =========================================================================
-                // 🌟 ИСПРАВЛЕНИЕ: ПЕРЕДАЧА ДИНАМИЧЕСКОГО TOP_FRAME_ID ВМЕСТО ЖЕСТКОЙ ДВОЙКИ
-                // =========================================================================
                 emit stackTraceReceived(stackFramesForUi);
                 emit loadedSourcesReceived(uniqueSourcePaths);
 
-                // Проверяем, что отладчик прислал хотя бы один валидный кадр
                 if (topFrameId > 0) {
                     QJsonObject args;
-                    // Передаем РЕАЛЬНЫЙ идентификатор верхнего фрейма (topFrameId вместо 2)
                     args["frameId"] = topFrameId;
-
                     qInfo() << ">>> [DAP CLIENT] Запрашиваю области видимости для фрейма ID:" << topFrameId;
                     sendDapCommand("scopes", args);
                 }
-            } // Конец блока else if (command == "stackTrace")
-
-            else if (command == "scopes")
-            {
+            }
+            else if (command == "scopes") {
                 QJsonObject body = jsonObj["body"].toObject();
                 QJsonArray scopes = body["scopes"].toArray();
                 if (!scopes.isEmpty()) {
@@ -316,106 +342,72 @@ void DebugManager::handleSocketReadyRead()
                     sendDapCommand("variables", args);
                 }
             }
-            else if (command == "variables")
-            {
-                    QJsonObject body = jsonObj["body"].toObject();
-                    QJsonArray scopesVars = body["variables"].toArray();
-                    QList<QStringList> variablesForUi;
+            else if (command == "variables") {
+                QJsonObject body = jsonObj["body"].toObject();
+                QJsonArray scopesVars = body["variables"].toArray();
+                QList<QStringList> variablesForUi;
 
-                    for (auto v : scopesVars) {
-                        QJsonObject varObj = v.toObject();
-                        QStringList varData;
-                        varData << varObj["name"].toString()
-                        << varObj["value"].toString()
-                        << varObj["type"].toString();
-                        variablesForUi.append(varData);
+                for (const auto &v : scopesVars) {
+                    QJsonObject varObj = v.toObject();
+                    QStringList varData;
+                    varData << varObj["name"].toString()
+                            << varObj["value"].toString()
+                            << varObj["type"].toString();
+                    variablesForUi.append(varData);
                 }
                 emit variablesReceived(variablesForUi);
             }
-            else if (command == "loadedSources")
-            {
-                    if (jsonObj["success"].toBool(true)) {
-                        QJsonObject body = jsonObj["body"].toObject();
-                        QJsonArray sources = body["sources"].toArray();
-                        QStringList pathsForUi;
-                        for (int i = 0; i < sources.size(); ++i) {
-                            QJsonObject srcObj = sources[i].toObject();
-                            QString fullPath = srcObj["path"].toString();
-                            if (!fullPath.isEmpty()) {
-                                pathsForUi << fullPath;
+            else if (command == "loadedSources") {
+                if (jsonObj["success"].toBool(true)) {
+                    QJsonObject body = jsonObj["body"].toObject();
+                    QJsonArray sources = body["sources"].toArray();
+                    QStringList pathsForUi;
+                    for (int i = 0; i < sources.size(); ++i) {
+                        QJsonObject srcObj = sources[i].toObject();
+                        QString fullPath = srcObj["path"].toString();
+                        if (!fullPath.isEmpty()) {
+                            pathsForUi << fullPath;
                         }
                     }
                     emit loadedSourcesReceived(pathsForUi);
                 }
             }
         }
-        // ---------------------------------------------------------------------
-        // ОБРАБОТКА СИСТЕМНЫХ СОБЫТИЙ (EVENTS)
-        // ---------------------------------------------------------------------
-        else if (type == "event")
-        {
+        // =========================================================================
+        // 2. ОБРАБОТКА СОБЫТИЙ (EVENTS)
+        // =========================================================================
+        else if (type == "event") {
             QString eventName = jsonObj["event"].toString();
 
-            // =========================================================================
-            // 🌟 ИСПРАВЛЕННЫЙ БЛОК НА СТРАНИЦЕ 6 ЛОГА (debugmanager.cpp)
-            // =========================================================================
-            // =========================================================================
-            // 🌟 ИСПРАВЛЕННЫЙ БЛОК: УСТРАНЕНИЕ ОШИБКИ COMPILER (parentWidget)
-            // =========================================================================
-            if (eventName == "initialized")
-            {
+            if (eventName == "initialized") {
                 qInfo() << ">>> [DAP EVENT] Поймали системный флаг initialized!";
-
-                // Дефолтный резервный вариант строки, если редактор не будет найден
-                int targetBreakpointLine = 20;
-
-                // Исправлено: используем метод parent() вместо parentWidget()
-                Neuro_programm *mainWindow = qobject_cast<Neuro_programm*>(this->parent());
-
-                if (mainWindow) {
-                    // Вытаскиваем центральный стек виджетов через метасистему Qt
-                    QStackedWidget *centralStack = mainWindow->findChild<QStackedWidget*>("centralStackedWidget");
-                    QWidget *currentPage = centralStack ? centralStack->currentWidget() : nullptr;
-
-                    // Ищем активное текстовое поле редактора на текущей вкладке
-                    CodeEditor *activeEditor = currentPage ? currentPage->findChild<CodeEditor*>() : nullptr;
-
-                    if (activeEditor) {
-                        // Здесь мы запрашиваем реальную строку, на которой стоит каретка/точка.
-                        // Пока для теста жестко фиксируем вашу живую 20-ю строку с брейкпоинтом:
-                        targetBreakpointLine = 20;
+                // Отправляем точки останова. Ответ на них (setBreakpoints) запустит sendConfigurationDone()
+                if (!m_activeBreakpoints.isEmpty()) {
+                    for (auto it = m_activeBreakpoints.begin(); it != m_activeBreakpoints.end(); ++it) {
+                        this->setBreakpointsInFile(it.key(), it.value());
                     }
+                } else {
+                    this->setBreakpointsInFile(m_currentScript, QList<int>());
                 }
-
-                qInfo() << ">>> [DAP] Синхронизирую реальную точку останова. Строка:" << targetBreakpointLine;
-
-                // Отправляем в Python-отладчик debugpy слепок с реальным номером строки!
-                this->setBreakpointsInFile(m_currentScript, QList<int>() << targetBreakpointLine);
             }
-
-            else if (eventName == "stopped")
-            {
+            else if (eventName == "stopped") {
                 QJsonObject body = jsonObj["body"].toObject();
                 m_currentThreadId = body["threadId"].toInt(1);
+                emit statusMessageReady("Выполнение приостановлено.", 3000);
 
-                emit statusMessageReady(" Выполнение приостановлено.", 3000);
-
-                // Просто запрашиваем срез стека фреймов у Python. Стрелку двинем, когда получим ответ!
                 QJsonObject args;
                 args["threadId"] = m_currentThreadId;
                 sendDapCommand("stackTrace", args);
             }
         }
-    } // Конец цикла while(true)
+    }
 }
 
 void DebugManager::stepOver()
 {
     if (!m_isConnected) return;
-
     QJsonObject arguments;
-    arguments["threadId"] = m_currentThreadId; // Передаем обязательный параметр потока!
-
+    arguments["threadId"] = m_currentThreadId;
     qInfo() << ">>> [DAP] Отправляю команду пошагового обхода: Step Over (next)...";
     sendDapCommand("next", arguments);
 }
@@ -423,74 +415,88 @@ void DebugManager::stepOver()
 void DebugManager::stepInto()
 {
     if (!m_isConnected) return;
-
     QJsonObject arguments;
     arguments["threadId"] = m_currentThreadId;
-
     qInfo() << ">>> [DAP] Отправляю команду шага внутрь: Step Into (stepIn)...";
     sendDapCommand("stepIn", arguments);
+}
+
+void DebugManager::stepOut()
+{
+    if (!m_isConnected) return;
+    QJsonObject arguments;
+    arguments["threadId"] = m_currentThreadId;
+    qInfo() << ">>> [DAP NETWORK] Шлю в сокет debugpy команду: Step Out (stepOut)...";
+    sendDapCommand("stepOut", arguments);
 }
 
 void DebugManager::resumeExecution()
 {
     if (!m_isConnected) return;
-
     QJsonObject arguments;
     arguments["threadId"] = m_currentThreadId;
-
     qInfo() << ">>> [DAP] Отпускаю программу: Resume / Continue (continue)...";
     sendDapCommand("continue", arguments);
 }
 
+void DebugManager::requestPause()
+{
+    if (!m_isConnected) return;
+    QJsonObject arguments;
+    arguments["threadId"] = m_currentThreadId;
+    sendDapCommand("pause", arguments);
+}
+
 void DebugManager::stopDebugSession()
 {
-    // Блокируем сигналы, чтобы события завершения не спамили статусбар главного окна
-    this->blockSignals(true);
-
-    // 1. Закрываем и сбрасываем сетевой сокет DAP
-    if (m_tcpSocket) {
-        m_tcpSocket->disconnectFromHost();
-        if (m_tcpSocket->state() != QAbstractSocket::UnconnectedState) {
-            m_tcpSocket->waitForDisconnected(500);
-        }
-    }
+    bool wasRunning = m_isConnected || (m_process && m_process->state() != QProcess::NotRunning);
     m_isConnected = false;
 
-    // 2. ЖЕСТКИЙ ML-ФИКС: Насильно вырезаем процесс из ядра ОС Linux!
-    if (m_process && m_process->state() != QProcess::NotRunning) {
-        m_process->kill(); // Используем строго kill() вместо terminate()! Сигнал SIGKILL невозможно игнорировать.
-        m_process->waitForFinished(2000); // Даем ОС 2 секунды на полную очистку порта
+    if (m_tcpSocket) {
+        m_tcpSocket->disconnect(this);
+        if (m_tcpSocket->state() != QAbstractSocket::UnconnectedState) {
+            m_tcpSocket->disconnectFromHost();
+        }
     }
 
-    this->blockSignals(false);
-    qInfo() << ">>> [DEBUG_MGR] Сессия отладки полностью уничтожена, порт 5678 свободен.";
+    if (m_process && m_process->state() != QProcess::NotRunning) {
+        m_process->disconnect(this);
+        m_process->kill();
+        m_process->waitForFinished(1000);
+    }
+
+    qInfo() << ">>> [DEBUG_MGR] Сессия отладки полностью уничтожена, порт" << m_debugPort << "свободен.";
+
+    // Отправляем сигнал только если сигналы не заблокированы и сессия реально была активна:
+    if (wasRunning && !this->signalsBlocked()) {
+        emit sessionFinished();
+    }
 }
 
 void DebugManager::handleReadyReadStandardError()
 {
+    if (!m_process) return;
     QByteArray rawErr = m_process->readAllStandardError();
     QString errorText = QString::fromUtf8(rawErr);
-
     if (errorText.isEmpty()) return;
 
-    // Просто асинхронно собираем строки Traceback в ОЗУ
     m_accumulatedErrors.append(errorText);
-
-    // Дублируем в консоль Qt Creator
     qWarning() << "!!! [КРИТИЧЕСКИЙ ЛОГ PYTHON] !!!\n" << errorText;
 }
 
 void DebugManager::handleReadyReadStandardOutput()
 {
-    QString output = QString::fromUtf8(m_process->readAllStandardOutput()).trimmed();
-    if (!output.isEmpty()) {
-        qInfo() << "[Debug py Output]:" << output;
+    if (!m_process) return;
+    QByteArray out = m_process->readAllStandardOutput();
+    if (!out.isEmpty()) {
+        qInfo().noquote() << "[PYTHON STDOUT]:" << QString::fromUtf8(out).trimmed();
     }
 }
 
 void DebugManager::handleProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
-    // 1. Принудительно выгребаем самые последние остатки логов из операционной системы Linux
+    Q_UNUSED(exitStatus);
+
     if (m_process) {
         QByteArray earlyErr = m_process->readAllStandardError();
         if (!earlyErr.isEmpty()) {
@@ -499,38 +505,25 @@ void DebugManager::handleProcessFinished(int exitCode, QProcess::ExitStatus exit
     }
 
     QString finalTraceback = m_accumulatedErrors.trimmed();
+    m_isConnected = false;
 
-    // УЛЬТИМАТИВНЫЙ ТРИГГЕР: Если процесс завершился (с любым кодом) и в буфере
-    // обнаружен Traceback ошибки — это 100% авария скрипта, выводим окно!
-    if (!finalTraceback.isEmpty() && (finalTraceback.contains("Traceback") || finalTraceback.contains("Error:") || exitCode != 0)) {
-
-        m_accumulatedErrors.clear(); // Сразу зачищаем буфер класса
-
-        // Выстреливаем сигналом ошибки, пробивая архитектурный тупик
+    if (!finalTraceback.isEmpty() && (finalTraceback.contains("Traceback") ||
+                                      finalTraceback.contains("Error:") || exitCode != 0)) {
+        m_accumulatedErrors.clear();
         emit debugSessionError("Сбой выполнения Python-скрипта", finalTraceback);
-
-        // Отправляем короткую строчку в статусбар
-        emit statusMessageReady(QString("❌ Отладка прервана из-за ошибки! Код: %1").arg(exitCode), 5000);
-
-        // Гасим сокеты, процессы и закрываем панели через единственный sessionFinished()
-        m_isConnected = false;
+        emit statusMessageReady(QString("Отладка прервана из-за ошибки! Код: %1").arg(exitCode), 5000);
         emit sessionFinished();
         return;
     }
 
-    // === ШТАТНЫЙ СЦЕНАРИЙ (Для успешного или планового выхода из отладки) ===
     if (m_process) {
         QByteArray remainingOut = m_process->readAllStandardOutput();
         if (!remainingOut.isEmpty()) {
-            qInfo() << "[Debug py Final Output]:" << remainingOut.trimmed();
-            this->handleReadyReadStandardOutput();
+            qInfo() << "[Debugpy Final Output]:" << remainingOut.trimmed();
         }
     }
 
-    m_isConnected = false;
-    emit statusMessageReady(QString(" Сессия отладки закрыта. Код завершения: %1").arg(exitCode), 4000);
-
-    // Только теперь гасим UI
+    emit statusMessageReady(QString("Сессия отладки закрыта. Код завершения: %1").arg(exitCode), 4000);
     emit sessionFinished();
 }
 
@@ -538,9 +531,14 @@ void DebugManager::setBreakpointsInFile(const QString &sourceFile, const QList<i
 {
     if (!m_isConnected) return;
 
+    QString cleanPath = QFileInfo(sourceFile).canonicalFilePath();
+    if (cleanPath.isEmpty()) {
+        cleanPath = QDir::cleanPath(sourceFile);
+    }
+
     QJsonObject arguments;
     QJsonObject sourceObj;
-    sourceObj["path"] = QDir::toNativeSeparators(sourceFile);
+    sourceObj["path"] = cleanPath;
     arguments["source"] = sourceObj;
 
     QJsonArray breakpointsArray;
@@ -549,45 +547,20 @@ void DebugManager::setBreakpointsInFile(const QString &sourceFile, const QList<i
         bp["line"] = line;
         breakpointsArray.append(bp);
     }
+
     arguments["breakpoints"] = breakpointsArray;
     arguments["sourceModified"] = false;
 
     sendDapCommand("setBreakpoints", arguments);
-    qInfo() << "[DEBUG_MGR] Отправлен слепок точек останова для файла:" << sourceFile << "Строки:" << lineNumbers;
+    qInfo() << "[DEBUG_MGR] Зафиксирован брейкпоинт для пути:" << cleanPath << "Строки:" << lineNumbers;
 }
 
 void DebugManager::sendConfigurationDone()
 {
     if (!m_isConnected) return;
-
-    QJsonObject arguments; // Аргументов нет по спецификации JSON-RPC DAP
+    QJsonObject arguments;
     sendDapCommand("configurationDone", arguments);
     qInfo() << ">>> [DAP CLIENT] Сетевой пакет configurationDone успешно улетел в debugpy!";
-}
-
-void DebugManager::requestPause()
-{
-    if (!m_isConnected) return;
-
-    QJsonObject arguments;
-    arguments["threadId"] = m_currentThreadId; // Передаем сохраненный ID активного потока
-
-    sendDapCommand("pause", arguments);
-}
-
-void DebugManager::stepOut()
-{
-    // Защита: если сокет дебага мертв, ничего не шлем в сеть
-    if (!m_isConnected) return;
-
-    QJsonObject arguments;
-    // Передаем уникальный ID активного Python-потока, на котором замер брейкпоинт
-    arguments["threadId"] = m_currentThreadId;
-
-    qInfo() << ">>> [DAP NETWORK] Шлю в сокет debugpy команду: Step Out (stepOut)...";
-
-    // Вызываем ваш штатный метод отправки DAP-команд
-    sendDapCommand("stepOut", arguments);
 }
 
 void DebugManager::evaluateWatchExpression(int rowId, const QString &expression)
@@ -596,13 +569,11 @@ void DebugManager::evaluateWatchExpression(int rowId, const QString &expression)
 
     QJsonObject arguments;
     arguments["expression"] = expression;
-    arguments["context"] = "watch"; // Контекст оценки выражения по протоколу DAP
-    arguments["frameId"] = 1;       // ID верхнего кадра стека вызовов PyTorch
+    arguments["context"] = "watch";
+    arguments["frameId"] = 1;
 
     QJsonObject requestObj;
     int currentSeq = m_commandSequence++;
-
-    // Сохраняем связку seq пакета и строки UI в ассоциативную карту
     m_watchSeqMap[currentSeq] = rowId;
 
     requestObj["seq"] = currentSeq;
@@ -612,7 +583,14 @@ void DebugManager::evaluateWatchExpression(int rowId, const QString &expression)
 
     QByteArray body = QJsonDocument(requestObj).toJson(QJsonDocument::Compact);
     QString header = QString("Content-Length: %1\r\n\r\n").arg(body.length());
-
     m_tcpSocket->write(header.toUtf8());
     m_tcpSocket->write(body);
+}
+
+void DebugManager::updateBreakpoints(const QString &filePath, const QList<int> &lines) {
+    m_activeBreakpoints[filePath] = lines;
+    // Если уже подключены к сокету — сразу обновляем на лету в Python
+    if (m_isConnected) {
+        setBreakpointsInFile(filePath, lines);
+    }
 }

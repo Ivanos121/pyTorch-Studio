@@ -35,6 +35,7 @@ public:
     void sendConfigurationDone();
     void requestPause();
     void evaluateWatchExpression(int rowId, const QString &expression);
+    void updateBreakpoints(const QString &filePath, const QList<int> &lines);
 
 signals:
     void statusMessageReady(const QString &message, int timeout = 0);
@@ -72,6 +73,7 @@ private:
     int m_currentThreadId = 1;
     QMap<int, int> m_watchSeqMap;
     QString m_accumulatedErrors;
+    QMap<QString, QList<int>> m_activeBreakpoints;
 };
 
 #endif // DEBUGMANAGER_H

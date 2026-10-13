@@ -139,6 +139,14 @@ public:
     void clearInlineValues();
     void formatSelectedPythonCode();
 
+    // Методы для обновления отдельных слоев снаружи (из LSP, поиска, отладчика)
+    void setLspDiagnostics(const QList<QTextEdit::ExtraSelection> &diags);
+    void setSearchSelections(const QList<QTextEdit::ExtraSelection> &selections);
+    void setDebuggerSelections(const QList<QTextEdit::ExtraSelection> &selections);
+
+    // Центральный метод сборки и отрисовки всех слоев
+    void updateExtraSelections();
+
 signals:
     void logMessage(const QString &message);
     void errorsCountChanged(int count);
@@ -149,6 +157,9 @@ signals:
 public slots:
     // Теперь этот слот скомпилируется без ошибок соответствия типов!
     void showQuickFixMenu(const QList<QuickFixAction>& fixes);
+    void zoomInText(int step = 1);
+    void zoomOutText(int step = 1);
+    void resetTextZoom();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -161,6 +172,7 @@ protected:
     bool event(QEvent *event) override;
     bool eventFilter(QObject *obj, QEvent *event) override;
     void mousePressEvent(QMouseEvent *e) override;
+    void wheelEvent(QWheelEvent *e) override;
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
@@ -193,15 +205,30 @@ private:
     StickyScrollArea *m_stickyScrollWidget = nullptr;
     QProcess *lspProcess = nullptr;
     QTimer *lspDelayTimer = nullptr;
+    int m_currentFontSize = 13; // Храним актуальный размер шрифта здесь
+    static constexpr int DEFAULT_FONT_SIZE = 13;
+    static constexpr int MIN_FONT_SIZE = 8;
+    static constexpr int MAX_FONT_SIZE = 48; // Позволит масштабировать до 48px
+
     void clearErrorHighlights();
     void highlightError(int startLine, int startChar, int endLine, int endChar, bool isError);
     int findMatchingBracket(int pos, QChar openBracket, QChar closeBracket, bool directionRight);
+    QList<QTextEdit::ExtraSelection> m_lspDiagnosticSelections;
 
     QList<QTextEdit::ExtraSelection> lspExtraSelections;
     PythonHighlighter *m_highlighter = nullptr;
     int lspDocumentVersion = 1;
     QList<QTextEdit::ExtraSelection> m_lspSelectionsBuffer;
     QList<QTextEdit::ExtraSelection> m_currentLspSelections;
+
+    // Хранилища независимых слоев выделения
+    //QList<QTextEdit::ExtraSelection> m_lspDiagnosticSelections; // Ошибки и предупреждения pylsp
+    QList<QTextEdit::ExtraSelection> m_searchSelections;        // Результаты поиска (Ctrl+F)
+    QList<QTextEdit::ExtraSelection> m_debugSelections;         // Точки останова / текущая строка отладки
+    QList<QTextEdit::ExtraSelection> m_bracketSelections;       // Подсветка парных скобок () [] {}
+
+    // Вспомогательный метод расчета скобок
+    void calculateBracketMatches();
     void sendLspDidOpen();
     QByteArray m_lspBuffer;
     QWidget *lineNumberArea;
@@ -217,6 +244,7 @@ class FoldingArea : public QWidget
 public:
     FoldingArea(CodeEditor *editor) : QWidget(editor), m_editor(editor) {}
     QSize sizeHint() const override { return QSize(m_editor->foldingAreaWidth(), 0); }
+
 protected:
     void paintEvent(QPaintEvent *event) override { m_editor->foldingAreaPaintEvent(event); }
     void mousePressEvent(QMouseEvent *event) override { m_editor->foldingAreaMousePressEvent(event); }

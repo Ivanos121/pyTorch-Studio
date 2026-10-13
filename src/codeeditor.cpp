@@ -460,41 +460,43 @@ CodeEditor::CodeEditor(QWidget *parent) : QPlainTextEdit(parent)
             );
     }
 
-    // === ИНТЕГРАЦИЯ AI COPILOT GENERATOR (ХОТКЕЙ CTRL + I) ===
+    // === ИНТЕГРАЦИЯ AI COPILOT GENERATOR (ХОТКЕЙ CTRL + L) ===
     QShortcut *shortcutAiGenerate = new QShortcut(QKeySequence("Ctrl+L"), this);
     connect(shortcutAiGenerate, &QShortcut::activated, this, [this]() {
 
-                // Вызываем наш вынесенный отдельный класс
+                // Создаем окно оверлея
                 AiPromptWidget *aiWidget = new AiPromptWidget(this);
                 aiWidget->setAttribute(Qt::WA_DeleteOnClose);
 
-                // Вычисляем точные экранные координаты каретки
+                // Вычисляем точные экранные координаты каретки редактора
                 QPoint cursorGlobalPos = this->mapToGlobal(this->cursorRect().bottomLeft());
                 aiWidget->move(cursorGlobalPos.x(), cursorGlobalPos.y() + 4);
 
-                // === НАЙДИТЕ ЭТОТ БЛОК И ЗАМЕНИТЕ ЕГО ПОЛНОСТЬЮ ===
-                connect(aiWidget, &AiPromptWidget::promptSubmitted, this, [this](const QString &prompt) {
+                connect(aiWidget, &AiPromptWidget::promptSubmitted, this, [this, aiWidget](const QString &prompt) {
                     if (prompt.isEmpty()) return;
 
                     if (Neuro_programm::self) {
                         int insertPosition = this->textCursor().position();
                         QString fullCode = this->toPlainText();
 
+                        // Включаем потоковую индикацию в виджете
+                        aiWidget->startGenerationStream();
+
                         qInfo() << ">>> [AI COPILOT] Вызываю генерацию через мета-систему invokeMethod...";
 
-                        // БРОНИРОВАННЫЙ ВЫЗОВ: Вызываем ИИ-метод по его строковому имени.
-                        // Это на 100% убирает ошибку компиляции "has no member named"!
+                        // Передаем указатель на сам виджет (Q_ARG(QWidget*, ...)) для управления токенами
                         QMetaObject::invokeMethod(Neuro_programm::self, "aiCodeGenerationRequested",
                                                   Qt::QueuedConnection,
                                                   Q_ARG(int, insertPosition),
                                                   Q_ARG(QString, prompt),
-                                                  Q_ARG(QString, fullCode)
+                                                  Q_ARG(QString, fullCode),
+                                                  Q_ARG(QWidget*, aiWidget)
                                                   );
                     }
                 });
 
                 aiWidget->show();
-                aiWidget->m_lineEdit->setFocus();
+                aiWidget->lineEdit()->setFocus();
             });
 
 }
@@ -726,74 +728,91 @@ void CodeEditor::lineNumberAreaPaintEvent(QPaintEvent *event)
     }
 }
 
-void CodeEditor::highlightCurrentLine()
-{
-    // Центральный буфер для ВСЕХ графических выделений в редакторе [0:427]
-    QList<QTextEdit::ExtraSelection> extraSelections;
+// void CodeEditor::highlightCurrentLine()
+// {
+//     // Центральный буфер для ВСЕХ графических выделений в редакторе [0:427]
+//     QList<QTextEdit::ExtraSelection> extraSelections;
 
-    // Считываем точный объем символов в документе на данную миллисекунду
-    int docTotalChars = this->document() ? this->document()->characterCount() : 0;
-    if (docTotalChars <= 0) return;
+//     // Считываем точный объем символов в документе на данную миллисекунду
+//     int docTotalChars = this->document() ? this->document()->characterCount() : 0;
+//     if (docTotalChars <= 0) return;
 
-    // 1. ПОДСВЕТКА ТЕКУЩЕЙ СТРОКИ КОДА
-    if (!isReadOnly()) {
-        QTextEdit::ExtraSelection selection;
-        selection.format.setBackground(QColor(228, 242, 252));
-        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
-        selection.cursor = textCursor();
+//     // 1. ПОДСВЕТКА ТЕКУЩЕЙ СТРОКИ КОДА
+//     if (!isReadOnly()) {
+//         QTextEdit::ExtraSelection selection;
+//         selection.format.setBackground(QColor(228, 242, 252));
+//         selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+//         selection.cursor = textCursor();
 
-        // Безопасный предохранитель для текущего системного курсора
-        if (selection.cursor.position() >= 0 && selection.cursor.position() < docTotalChars)
-        {
-            selection.cursor.clearSelection();
-            extraSelections.append(selection);
-        }
-    }
+//         // Безопасный предохранитель для текущего системного курсора
+//         if (selection.cursor.position() >= 0 && selection.cursor.position() < docTotalChars)
+//         {
+//             selection.cursor.clearSelection();
+//             extraSelections.append(selection);
+//         }
+//     }
 
-    // 2. БЕЗОПАСНАЯ ИНТЕГРАЦИЯ ОШИБОК СЕРВЕРА (ФИКС OUT OF RANGE НА ПОЗИЦИЮ 4228)
-    for (const QTextEdit::ExtraSelection &lspSel : std::as_const(m_currentLspSelections))
-    {
-        // Здесь используется строго lspSel.cursor!
-        if (!lspSel.cursor.isNull() && lspSel.cursor.position() < docTotalChars)
-        {
-            extraSelections.append(lspSel);
-        }
-    }
+//     // 2. БЕЗОПАСНАЯ ИНТЕГРАЦИЯ ОШИБОК СЕРВЕРА (ФИКС OUT OF RANGE НА ПОЗИЦИЮ 4228)
+//     for (const QTextEdit::ExtraSelection &lspSel : std::as_const(m_currentLspSelections))
+//     {
+//         // Здесь используется строго lspSel.cursor!
+//         if (!lspSel.cursor.isNull() && lspSel.cursor.position() < docTotalChars)
+//         {
+//             extraSelections.append(lspSel);
+//         }
+//     }
 
-    // 3. ОТРИСОВКА ВИРТУАЛЬНЫХ КУРСОРОВ ДЛЯ МУЛЬТИКУРСОРНОСТИ [0:427]
-    int mainCaretPos = textCursor().position();
-    for (const QTextCursor &vCursor : std::as_const(m_virtualCursors)) {
-        if (vCursor.position() == mainCaretPos) continue;
+//     // 3. ОТРИСОВКА ВИРТУАЛЬНЫХ КУРСОРОВ ДЛЯ МУЛЬТИКУРСОРНОСТИ [0:427]
+//     int mainCaretPos = textCursor().position();
+//     for (const QTextCursor &vCursor : std::as_const(m_virtualCursors)) {
+//         if (vCursor.position() == mainCaretPos) continue;
 
-        // Здесь используется строго vCursor!
-        if (!vCursor.isNull() && vCursor.position() < docTotalChars) {
-            QTextEdit::ExtraSelection sel;
-            sel.cursor = vCursor;
-            if (!vCursor.hasSelection()) {
-                if (!sel.cursor.atEnd()) {
-                    sel.cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
-                }
-                QPen caretPen(palette().color(QPalette::Text), 1);
-                sel.format.setProperty(QTextFormat::OutlinePen, caretPen);
-            } else {
-                sel.format.setBackground(QColor(0, 120, 215, 80));
-            }
-            extraSelections.append(sel);
-        }
-    }
-//v
-    // 4. Отдаем проверенный монолитный буфер графическому движку Qt [0:428]
-    this->setExtraSelections(extraSelections); // [0:428]
+//         // Здесь используется строго vCursor!
+//         if (!vCursor.isNull() && vCursor.position() < docTotalChars) {
+//             QTextEdit::ExtraSelection sel;
+//             sel.cursor = vCursor;
+//             if (!vCursor.hasSelection()) {
+//                 if (!sel.cursor.atEnd()) {
+//                     sel.cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+//                 }
+//                 QPen caretPen(palette().color(QPalette::Text), 1);
+//                 sel.format.setProperty(QTextFormat::OutlinePen, caretPen);
+//             } else {
+//                 sel.format.setBackground(QColor(0, 120, 215, 80));
+//             }
+//             extraSelections.append(sel);
+//         }
+//     }
+// //v
+//     // 4. Отдаем проверенный монолитный буфер графическому движку Qt [0:428]
+//     this->setExtraSelections(extraSelections); // [0:428]
 
-    // 5. ИНТЕГРАЦИЯ СКОБОК (Вызываем только если скобки лежат в границах ОЗУ) [0:428]
-    if (textCursor().position() < docTotalChars) {
-        this->matchBrackets(); // [0:428]
-    }
-}
+//     // 5. ИНТЕГРАЦИЯ СКОБОК (Вызываем только если скобки лежат в границах ОЗУ) [0:428]
+//     if (textCursor().position() < docTotalChars) {
+//         this->matchBrackets(); // [0:428]
+//     }
+// }
 
 
 void CodeEditor::keyPressEvent(QKeyEvent *e)
 {
+    // Масштаб с клавиатуры
+    if (e->modifiers() & Qt::ControlModifier) {
+        if (e->key() == Qt::Key_Plus || e->key() == Qt::Key_Equal) {
+            zoomInText(1);
+            e->accept();
+            return;
+        } else if (e->key() == Qt::Key_Minus) {
+            zoomOutText(1);
+            e->accept();
+            return;
+        } else if (e->key() == Qt::Key_0) {
+            resetTextZoom();
+            e->accept();
+            return;
+        }
+    }
+
     QString textToInsert = e->text();
 
     // =========================================================================
@@ -1290,43 +1309,35 @@ void CodeEditor::foldingAreaMousePressEvent(QMouseEvent *event)
 void CodeEditor::paintEvent(QPaintEvent *e)
 {
     // =========================================================================
-    // ЛЕНИВАЯ РЕГИСТРАЦИЯ В JEDI: Если сервер готов, а файл еще не открыт — открываем!
+    // ЛЕНИВАЯ РЕГИСТРАЦИЯ В JEDI
     // =========================================================================
-    static QSet<QString> registeredFiles; // Храним список уже открытых путей
-    QString cleanPath = this->currentFilePath;
-    if (Neuro_programm::self && !cleanPath.isEmpty() && !registeredFiles.contains(cleanPath)) {
-        this->sendLspDidOpen();
-        registeredFiles.insert(cleanPath); // Маркируем как успешно зарегистрированный
+    static QSet<QString> registeredFiles;
+    // QString cleanPath = this->currentFilePath;
+    // if (Neuro_programm::self && !cleanPath.isEmpty() && !registeredFiles.contains(cleanPath)) {
+    //     this->sendLspDidOpen();
+    //     registeredFiles.insert(cleanPath);
+    // }
+
+    // БЕЗОПАСНЫЙ СТАРТ: Проверка на пустой экран
+    if (this->toPlainText().trimmed().isEmpty()) {
+        // Заставка или заглушка при пустом документе
     }
 
-    // =========================================================================
-    // БЕЗОПАСНЫЙ СТАРТ: Проверка на пустой экран (Заставка JetBrains шорткатов)
-    // =========================================================================
-    if (this->toPlainText().trimmed().isEmpty())
-    {
-        // Если вы используете встроенный сплэш внутри paintEvent, его код выполняется здесь.
-    }
-
-    // 1. ЕДИНСТВЕННЫЙ И ПРАВИЛЬНЫЙ ВЫЗОВ СТАНДАРТНОЙ ОТРЫСОВКИ ТЕКСТА QT
+    // 1. СТАНДАРТНАЯ ОТРИСОВКА ТЕКСТА QT
     QPlainTextEdit::paintEvent(e);
 
-    // Создаем основной графический контекст для viewport редактора
     QPainter painter(this->viewport());
+    painter.setFont(this->font());
     painter.setRenderHint(QPainter::Antialiasing, true);
-
-    // Считываем ширину панели номеров строк и параметры шрифта
-    int lineNumberAreaWidth = (lineNumberArea != nullptr) ? lineNumberArea->width() : 0;
 
     // Настройка пера для Indent Guides
     QPen indentPen;
-    indentPen.setColor(QColor(0xb0b4bc)); // Насыщенный серый цвет Breeze Light
-    indentPen.setWidth(1); // Толщина строго в 1 пиксель
-    indentPen.setStyle(Qt::SolidLine); // Сплошная линия
+    indentPen.setColor(QColor(0xb0b4bc)); // Breeze Light серый
+    indentPen.setWidth(1);
+    indentPen.setStyle(Qt::SolidLine);
+
     // =========================================================================
-    // 2. СВЕДЕННЫЙ ЦИКЛ ОБХОДА: ПЛАШКИ, НАПРАВЛЯЮЩИЕ И ИНЛАЙН-ЗНАЧЕНИЯ
-    // =========================================================================
-    // =========================================================================
-    // 2. СВЕДЕННЫЙ ЦИКЛ ОБХОДА: ПЛАШКИ, НАПРАВЛЯЮЩИЕ И ИНЛАЙН-ЗНАЧЕНИЯ
+    // 2. ЦИКЛ ОБХОДА: НАПРАВЛЯЮЩИЕ, ПЛАШКИ И ИНЛАЙН-ЗНАЧЕНИЯ
     // =========================================================================
     QTextBlock block = firstVisibleBlock();
     int blockNumber = block.blockNumber();
@@ -1340,117 +1351,107 @@ void CodeEditor::paintEvent(QPaintEvent *e)
             QString text = block.text();
             QString trimmedText = text.trimmed();
             FolderBlockData *foldData = static_cast<FolderBlockData*>(block.userData());
+            QTextLayout *layoutObj = block.layout();
 
             // -----------------------------------------------------------------
-            // А. УМНАЯ ИНТЕЛЛЕКТУАЛЬНАЯ ЛОГИКА INDENT GUIDES (СКВОЗЬ ПУСТЫЕ СТРОКИ)
+            // А. НАДЁЖНЫЙ РАСЧЕТ И ОТРИСОВКА INDENT GUIDES (БЕЗ РАЗРЫВОВ)
             // -----------------------------------------------------------------
-            int leadingSpaces = 0;
-            for (char ch : text.toStdString()) {
-                if (ch == ' ') leadingSpaces++;
-                else if (ch == '\t') leadingSpaces += 4;
+            // -----------------------------------------------------------------
+            // РАСЧЕТ И ОТРИСОВКА INDENT GUIDES (БЕЗ ПЕРЕСЕЧЕНИЯ КОММЕНТАРИЕВ И ТЕКСТА)
+            // -----------------------------------------------------------------
+            //QString trimmedText = text.trimmed();
+
+            // Считаем фактический физический отступ текущей строки
+            int actualSpaces = 0;
+            for (const QChar &ch : text) {
+                if (ch == QLatin1Char(' ')) actualSpaces++;
+                else if (ch == QLatin1Char('\t')) actualSpaces += 4;
                 else break;
             }
 
-            bool isControlStructure = trimmedText.startsWith("for ") ||
-                                      trimmedText.startsWith("while ") ||
-                                      trimmedText.startsWith("if ") ||
-                                      trimmedText.startsWith("elif ") ||
-                                      trimmedText.startsWith("else:") ||
-                                      trimmedText.startsWith("try:") ||
-                                      trimmedText.startsWith("except ") ||
-                                      trimmedText.startsWith("with ");
+            // Комментарий с 0 отступом (как строка 67) НЕ является проходным - он в корне файла!
+            bool isZeroIndentComment = (actualSpaces == 0 && trimmedText.startsWith(QLatin1Char('#')));
 
-            bool isFunctionDef = trimmedText.startsWith("def ") ||
-                                 trimmedText.startsWith("class ");
+            // Проходными считаются ТОЛЬКО:
+            // 1) полностью пустые строки
+            // 2) комментарии, которые уже сдвинуты вправо (внутри блока)
+            // 3) одиночные скобки
+            bool isThroughLine = !isZeroIndentComment && (
+                                     trimmedText.isEmpty() ||
+                                     trimmedText.startsWith(QLatin1Char('#')) ||
+                                     trimmedText == QStringLiteral(")") ||
+                                     trimmedText == QStringLiteral("]") ||
+                                     trimmedText == QStringLiteral("}"));
+
+            int leadingSpaces = actualSpaces;
+
+            if (isThroughLine) {
+                // Ищем отступ следующей строки кода
+                QTextBlock lookAhead = block.next();
+                int nextSpaces = 0;
+                while (lookAhead.isValid()) {
+                    QString nextTrim = lookAhead.text().trimmed();
+                    if (!nextTrim.isEmpty() && !nextTrim.startsWith(QLatin1Char('#')) &&
+                        nextTrim != QStringLiteral(")") && nextTrim != QStringLiteral("]") && nextTrim != QStringLiteral("}")) {
+                        for (const QChar &ch : lookAhead.text()) {
+                            if (ch == QLatin1Char(' ')) nextSpaces++;
+                            else if (ch == QLatin1Char('\t')) nextSpaces += 4;
+                            else break;
+                        }
+                        break;
+                    }
+                    lookAhead = lookAhead.next();
+                }
+
+                // Ищем отступ предыдущей строки кода
+                QTextBlock lookBack = block.previous();
+                int prevSpaces = 0;
+                while (lookBack.isValid()) {
+                    QString prevTrim = lookBack.text().trimmed();
+                    if (!prevTrim.isEmpty() && !prevTrim.startsWith(QLatin1Char('#')) &&
+                        prevTrim != QStringLiteral(")") && prevTrim != QStringLiteral("]") && prevTrim != QStringLiteral("}")) {
+                        for (const QChar &ch : lookBack.text()) {
+                            if (ch == QLatin1Char(' ')) prevSpaces++;
+                            else if (ch == QLatin1Char('\t')) prevSpaces += 4;
+                            else break;
+                        }
+                        break;
+                    }
+                    lookBack = lookBack.previous();
+                }
+
+                leadingSpaces = qMax(nextSpaces, prevSpaces);
+            }
 
             int currentLevel = leadingSpaces / 4;
 
-            // Заглядываем вперед, чтобы найти уровень отступа следующего живого кода
-            QTextBlock nextBlock = block.next();
-            int nextLeadingSpaces = 0;
-            while (nextBlock.isValid() && nextBlock.text().trimmed().isEmpty()) {
-                nextBlock = nextBlock.next();
-            }
-            if (nextBlock.isValid()) {
-                QString nextText = nextBlock.text();
-                for (char ch : nextText.toStdString()) {
-                    if (ch == ' ') nextLeadingSpaces++;
-                    else if (ch == '\t') nextLeadingSpaces += 4;
-                    else break;
-                }
-            }
-            int nextLevel = nextLeadingSpaces / 4;
-
-            // ЗОЛОТОЙ СТАНДАРТ IDE: Если на строке нет значимого кода (пустая или комментарий),
-            // мы принудительно подтягиваем её уровень к уровню следующего рабочего блока кода!
-            bool isCommentOrEmpty = trimmedText.isEmpty() || trimmedText.startsWith("#");
-            if (isCommentOrEmpty && nextBlock.isValid()) {
-                currentLevel = nextLevel;
-            }
-
-            int maxGuides = currentLevel;
-
-            if (isFunctionDef && currentLevel == 0) {
-                maxGuides = 0;
-            }
-            else if (isCommentOrEmpty) {
-                maxGuides = currentLevel; // Тянем линию родительского уровня сквозь пустоту
-            }
-            else {
-                maxGuides = qMin(currentLevel, nextLevel);
-            }
-
-            if (maxGuides < 0) maxGuides = 0;
-
-            // ОТРИСОВКА ВЕРТИКАЛЬНЫХ НАПРАВЛЯЮЩИХ (Вынесена из-под lineCount > 0!)
-            // =========================================================================
-            // АБСОЛЮТНО МОНОЛИТНАЯ ОТПРАВКА ЛИНИЙ ЛЮБОГО УРОВНЯ (ФИКС ВТОРОГО УРОВНЯ)
-            // =========================================================================
-            QTextLayout *layoutObj = block.layout();
-            if (maxGuides > 0 && layoutObj)
-            {
+            if (currentLevel > 0) {
                 painter.save();
                 painter.setRenderHint(QPainter::Antialiasing, false);
                 painter.setPen(indentPen);
+                painter.setFont(this->font()); // Гарантирует актуальный размер при зуме
 
-                // Заранее ищем первый валидный лейаут нижнего рабочего кода на случай пустой строки
-                QTextLayout *nextLayoutObj = nullptr;
-                if (layoutObj->lineCount() == 0 && nextBlock.isValid()) {
-                    nextLayoutObj = nextBlock.layout();
-                }
+                // Точные метрики текущего отмасштабированного шрифта
+                QFontMetrics fm(this->font());
+                qreal spaceWidth = fm.horizontalAdvance(QLatin1Char(' '));
+                qreal indentStep = spaceWidth * 4.0;
+                qreal baseLeftX = blockBoundingGeometry(block).translated(contentOffset()).left();
 
-                for (int i = 1; i <= maxGuides; ++i)
-                {
-                    int targetCharIndex = (i - 1) * 4;
-                    qreal startTextX = 0;
+                for (int lvl = 1; lvl <= currentLevel; ++lvl) {
+                    qreal targetX = baseLeftX + ((lvl - 1) * indentStep);
 
-                    // СЦЕНАРИЙ А: Если в строке есть текст, берем её родные пиксели
-                    if (layoutObj->lineCount() > 0) {
-                        QTextLine textLine = layoutObj->lineAt(0);
-                        startTextX = textLine.cursorToX(targetCharIndex);
-                    }
-                    // СЦЕНАРИЙ Б: Если строка пустая, но у нижней строки есть текст —
-                    // берем ИДЕАЛЬНЫЕ пиксельные координаты X у нижнего блока!
-                    else if (nextLayoutObj && nextLayoutObj->lineCount() > 0) {
-                        QTextLine nextTextLine = nextLayoutObj->lineAt(0);
-                        startTextX = nextTextLine.cursorToX(targetCharIndex);
-                    }
-                    // СЦЕНАРИЙ В: Фолбэк на случай, если файл вообще закончился пустотой
-                    else {
-                        int spaceWidth = painter.fontMetrics().horizontalAdvance(' ');
-                        startTextX = lineNumberAreaWidth + (m_foldingArea ? m_foldingArea->width() : 0) + (targetCharIndex * spaceWidth) - lineNumberAreaWidth;
+                    if (!trimmedText.isEmpty() && (targetX >= baseLeftX + (actualSpaces * spaceWidth))) {
+                        continue;
                     }
 
-                    int lineX = static_cast<int>(contentOffset().x()) + static_cast<int>(startTextX);
-                    lineX += 1; // Оптический микро-сдвиг для идеальной вертикали по левой грани букв
-
+                    int lineX = static_cast<int>(targetX) + 1;
                     painter.drawLine(lineX, blockTop, lineX, blockBottom);
                 }
                 painter.restore();
             }
 
             // -----------------------------------------------------------------
-            // ВСТРОЕННАЯ ИНЖЕКЦИЯ INLINE VALUES VIEW (ПЕЧАТЬ ПЕРЕМЕННЫХ)
+            // Б. ВСТРОЕННАЯ ИНЖЕКЦИЯ INLINE VALUES VIEW
             // -----------------------------------------------------------------
             if (layoutObj && layoutObj->lineCount() > 0 && !m_inlineValues.isEmpty() && m_inlineValues.contains(blockNumber)) {
                 painter.save();
@@ -1463,23 +1464,19 @@ void CodeEditor::paintEvent(QPaintEvent *e)
                 int lastLineIdx = layoutObj->lineCount() - 1;
                 QTextLine lastLine = layoutObj->lineAt(lastLineIdx);
                 int inlineX = static_cast<int>(lastLine.naturalTextWidth()) + 20;
-
                 if (inlineX < 60) {
                     inlineX = static_cast<int>(layoutObj->position().x()) + 45;
                 }
-
                 int inlineY = blockTop + static_cast<int>(lastLine.y()) + painter.fontMetrics().ascent();
                 painter.drawText(inlineX, inlineY, m_inlineValues[blockNumber]);
                 painter.restore();
             }
 
             // -----------------------------------------------------------------
-            // Б. ЛОГИКА СВЕРТЫВАНИЯ КОДА (Рисуем плашку {...} )
+            // В. ЛОГИКА СВЕРТЫВАНИЯ КОДА (Плашка {...})
             // -----------------------------------------------------------------
-            if (foldData && foldData->isFoldStart && foldData->isFolded)
-            {
-                if (layoutObj && layoutObj->lineCount() > 0)
-                {
+            if (foldData && foldData->isFoldStart && foldData->isFolded) {
+                if (layoutObj && layoutObj->lineCount() > 0) {
                     QTextLine line = layoutObj->lineAt(0);
                     int textWidth = static_cast<int>(line.naturalTextWidth());
                     int badgeX = static_cast<int>(contentOffset().x()) + textWidth + 15;
@@ -1493,8 +1490,8 @@ void CodeEditor::paintEvent(QPaintEvent *e)
                     painter.setPen(QColor(199, 199, 199));
                     painter.setBrush(QColor(239, 240, 241));
                     painter.drawRoundedRect(badgeRect, 3, 3);
-                    painter.setPen(QColor(35, 38, 41));
 
+                    painter.setPen(QColor(35, 38, 41));
                     QFont font = painter.font();
                     font.setBold(true);
                     painter.setFont(font);
@@ -1502,13 +1499,13 @@ void CodeEditor::paintEvent(QPaintEvent *e)
                     painter.restore();
                 }
             }
-        }
+        } // if (block.isVisible() ...)
 
         block = block.next();
         blockTop = blockBottom;
         blockBottom = blockTop + static_cast<int>(blockBoundingRect(block).height());
         blockNumber++;
-    }
+    } // while (block.isValid() ...)
 
     // =========================================================================
     // 3. ИНТЕГРИРОВАННЫЙ ВЫВОД ИНТЕРАКТИВНОЙ ЛУПЫ С ПОДСВЕТКОЙ СИНТАКСИСА
@@ -1519,33 +1516,39 @@ void CodeEditor::paintEvent(QPaintEvent *e)
         painter.setRenderHint(QPainter::Antialiasing, true);
         QPoint mousePos = this->property("minimapMousePos").toPoint();
         double totalLines = this->document()->blockCount();
+
         if (totalLines > 0 && minimapArea->height() > 0)
         {
             double hoverPercent = static_cast<double>(mousePos.y()) / minimapArea->height();
             int targetLineNum = static_cast<int>(hoverPercent * totalLines);
             if (targetLineNum < 0) targetLineNum = 0;
             if (targetLineNum >= totalLines) targetLineNum = totalLines - 1;
+
             int startLook = qMax(0, targetLineNum - 2);
             int endLook = qMin(static_cast<int>(totalLines) - 1, targetLineNum + 2);
+
             int lensWidth = 320;
             int lensHeight = 90;
             int lensX = this->viewport()->width() - 70 - lensWidth - 2;
             int lensY = mousePos.y() - (lensHeight / 2);
             if (lensY < 5) lensY = 5;
-            if (lensY + lensHeight > this->viewport()->height() - 5)
-            {
+            if (lensY + lensHeight > this->viewport()->height() - 5) {
                 lensY = this->viewport()->height() - lensHeight - 5;
             }
+
             painter.setBrush(this->palette().color(QPalette::Base));
             painter.setPen(QPen(this->palette().color(QPalette::Mid), 1));
             painter.drawRoundedRect(lensX, lensY, lensWidth, lensHeight, 6, 6);
+
             QFont lensFont;
             lensFont.setPixelSize(12);
             lensFont.setFamily("Monospace");
             painter.setFont(lensFont);
+
             int textX = lensX + 12;
             int textY = lensY + 8;
             int lineHeight = fontMetrics().height() - 2;
+
             for (int l = startLook; l <= endLook; ++l)
             {
                 QTextBlock b = this->document()->findBlockByNumber(l);
@@ -1553,24 +1556,23 @@ void CodeEditor::paintEvent(QPaintEvent *e)
                 {
                     QString text = b.text();
                     QString clippedText = text.left(45);
-                    if (l == targetLineNum)
-                    {
+
+                    if (l == targetLineNum) {
                         painter.setPen(this->palette().color(QPalette::Highlight));
-                        painter.drawText(textX, textY, "➔");
+                        painter.drawText(textX, textY, "→");
                     }
+
                     int currentTextX = textX + 14;
                     QTextLayout textLayout(clippedText, lensFont);
                     textLayout.beginLayout();
                     QTextLine line = textLayout.createLine();
                     textLayout.endLayout();
+
                     QList<QTextLayout::FormatRange> textFormats;
-                    if (m_highlighter && b.layout())
-                    {
+                    if (m_highlighter && b.layout()) {
                         QList<QTextLayout::FormatRange> blockFormats = b.layout()->formats();
-                        for (const auto &range : std::as_const(blockFormats))
-                        {
-                            if (range.start < 45)
-                            {
+                        for (const auto &range : std::as_const(blockFormats)) {
+                            if (range.start < 45) {
                                 QTextLayout::FormatRange r;
                                 r.start = range.start;
                                 r.length = qMin(range.length, static_cast<int>(45 - range.start));
@@ -1579,12 +1581,14 @@ void CodeEditor::paintEvent(QPaintEvent *e)
                             }
                         }
                     }
+
                     painter.save();
                     painter.setClipRect(QRect(currentTextX, textY, (lensWidth - 35), lineHeight));
                     textLayout.draw(&painter, QPointF(currentTextX, textY), textFormats);
                     painter.restore();
+
+                    textY += lineHeight;
                 }
-                textY += lineHeight;
             }
         }
         painter.restore();
@@ -2202,8 +2206,10 @@ void CodeEditor::showQuickFixMenu(const QList<QuickFixAction>& fixes)
 
 bool CodeEditor::event(QEvent *event)
 {
-    // СЛУШАТЕЛЬ ДВИЖЕНИЯ КУРСОРA: Прячем окно справки, если пользователь увёл мышь
-    if (event->type() == QEvent::Leave || event->type() == QEvent::MouseMove)
+    // =========================================================================
+    // ЗАКРЫТИЕ ХОВЕРА: закрываем только при реальном уводе мыши, а не при микроколебаниях
+    // =========================================================================
+    if (event->type() == QEvent::Leave)
     {
         QWidget* activeHover = this->property("currentHoverWidget").value<QWidget*>();
         if (activeHover) {
@@ -2212,49 +2218,80 @@ bool CodeEditor::event(QEvent *event)
             this->setProperty("currentHoverWidget", QVariant());
         }
     }
+    else if (event->type() == QEvent::MouseMove)
+    {
+        QWidget* activeHover = this->property("currentHoverWidget").value<QWidget*>();
+        if (activeHover) {
+            QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+            QPoint spawnPos = this->property("lastTooltipGlobalPos").toPoint();
+            // Закрываем окно, только если мышь реально сдвинулась дальше чем на 15 пикселей от места вызова
+            if ((mouseEvent->globalPos() - spawnPos).manhattanLength() > 15) {
+                activeHover->close();
+                activeHover->deleteLater();
+                this->setProperty("currentHoverWidget", QVariant());
+            }
+        }
+    }
 
-    // Ловим событие запроса подсказки (наведение и удержание мыши)
+    // =========================================================================
+    // ОБРАБОТКА ПОДСКАЗОК (ToolTip)
+    // =========================================================================
     if (event->type() == QEvent::ToolTip)
     {
-        // Если открыто окно автодополнения — не спамим подсказками, разгружаем поток
         if (m_popupWindow && m_popupWindow->isVisible()) {
             event->accept();
             return true;
         }
 
         QHelpEvent *helpEvent = static_cast<QHelpEvent *>(event);
-        QTextCursor cursor = this->cursorForPosition(helpEvent->pos()); // Вычисляем символ под мышкой
+        QTextCursor cursor = this->cursorForPosition(helpEvent->pos());
         int mouseLine = cursor.blockNumber();
         int mouseChar = cursor.columnNumber();
 
-        // =========================================================================
-        // ШАГ 1: ПРЯМОЙ ОФИЦИАЛЬНЫЙ ВЫВОД ОШИБОК ИЗ ГЛОБАЛЬНОГО МАССИВА СРЕДЫ
-        // =========================================================================
+        // ---------------------------------------------------------------------
+        // ШАГ 1: КАРТОЧКА ОШИБКИ В СТИЛЕ СОВРЕМЕННЫХ IDE
+        // ---------------------------------------------------------------------
         for (const auto& error : std::as_const(Neuro_programm::globalLspErrors))
         {
-            // Проверяем, попала ли мышка на строку и символ, где Jedi зафиксировал ошибку
             if (error.line == mouseLine && mouseChar >= error.startChar && mouseChar <= error.endChar)
             {
-                // Форматируем текст ошибки в красивый JetBrains/Breeze html-блок
-                QString htmlTooltip = QString(
-                                          "<div style='background-color: #232629; color: #eff0f1; padding: 8px; "
-                                          "font-family: \"JetBrains Mono\", monospace; font-size: 12px; border: 1px solid #ef5350;'>"
-                                          "<b style='color: #ef5350;'>Диагностика PyTorch Studio:</b><br/>"
-                                          "<span>%1</span>"
-                                          "</div>"
-                                          ).arg(error.message.toHtmlEscaped());
+                // Цвета бейджа в зависимости от типа
+                bool isErr = error.isError;
+                QString badgeBg    = isErr ? "#FFEBE9" : "#FFF8C5";
+                QString badgeColor = isErr ? "#CF222E" : "#9A6700";
+                QString badgeText  = isErr ? "Error" : "Warning";
+                QString codeTag    = error.code.isEmpty() ? "" : QString("&nbsp;&nbsp;<span style='color: #57609A; font-family: monospace; font-size: 11px;'>[%1]</span>").arg(error.code);
 
-                // Нативно и мгновенно выводим окно карточки в глобальных координатах мыши
-                QToolTip::showText(helpEvent->globalPos(), htmlTooltip, this); //
+                // Аккуратная светлая верстка
+                QString htmlTooltip = QString(
+                                          "<div style='background-color: #FFFFFF; color: #1F2328; border: 1px solid #D0D7DE; "
+                                          "border-radius: 4px; padding: 6px 10px; font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Helvetica, Arial, sans-serif; font-size: 12px;'>"
+                                          "  <div style='margin-bottom: 4px;'>"
+                                          "    <span style='background-color: %1; color: %2; font-size: 10px; font-weight: bold; padding: 1px 5px; border-radius: 3px;'>"
+                                          "      %3"
+                                          "    </span>"
+                                          "    %4"
+                                          "  </div>"
+                                          "  <div style='color: #24292F; line-height: 135%; margin-top: 3px;'>"
+                                          "    %5"
+                                          "  </div>"
+                                          "</div>"
+                                          ).arg(badgeBg, badgeColor, badgeText, codeTag, error.message.toHtmlEscaped());
+
+                // Получаем прямоугольник проблемного слова, чтобы тултип не дрожал
+                QRect targetRect = this->cursorRect(cursor);
+                targetRect.adjust(-2, -2, 2, 2);
+
+                QToolTip::showText(helpEvent->globalPos(), htmlTooltip, this, targetRect);
 
                 event->accept();
-                return true; // Ошибка успешно выведена, выходим из метода!
+                return true;
             }
         }
 
-        // =========================================================================
-        // ШАГ 2: ЕСЛИ СИНТАКСИЧЕСКИХ ОШИБОК НЕТ — ШЛЕМ ХОВЕР-ЗАПРОС СВЕДЕНИЙ О МЕТОДЕ
-        // =========================================================================
+        // ---------------------------------------------------------------------
+        // ШАГ 2: ХОВЕР-ЗАПРОС СВЕДЕНИЙ О МЕТОДЕ / ТИПЕ
+        // ---------------------------------------------------------------------
         if (Neuro_programm::self)
         {
             qint64 lastHoverTime = this->property("lastHoverSentTime").toLongLong();
@@ -2291,14 +2328,10 @@ bool CodeEditor::event(QEvent *event)
             event->accept();
             return true;
         }
-
-        // ИСПРАВЛЕНО: Убрали безусловный QToolTip::hideText() отсюда, перенеся его под фильтр
     }
 
-    // Для всех остальных системных событий возвращаем стандартное поведение Qt
     return QPlainTextEdit::event(event);
 }
-
 
 void CodeEditor::registerCompletionWidgets(QWidget* popup, QListWidget* list)
 {
@@ -2342,108 +2375,101 @@ int CodeEditor::findMatchingBracket(int pos, QChar openBracket, QChar closeBrack
     return -1; // Пара не найдена (сломанный синтаксис)
 }
 
-void CodeEditor::matchBrackets()
-{
-    // Буфер для хранения графических выделений скобок
-    QList<QTextEdit::ExtraSelection> bracketSelections;
+// void CodeEditor::matchBrackets()
+// {
+//     // Буфер для хранения графических выделений скобок
+//     QList<QTextEdit::ExtraSelection> bracketSelections;
 
-    // Важно: мы не должны затирать маркеры ошибок синтаксиса от Jedi!
-    // Поэтому мы берем текущие выделения, отфильтровываем старые скобки и сохраняем ошибки.
-    QList<QTextEdit::ExtraSelection> currentSelections = this->extraSelections();
-    for (const auto& selection : std::as_const(currentSelections)) {
-        // Ошибки синтаксиса у нас имеют WaveUnderline или фоновую заливку,
-        // а у скобок формат будет строго точечный (Background/Outline).
-        if (selection.format.underlineStyle() == QTextCharFormat::WaveUnderline ||
-            selection.format.background().color() == QColor(255, 42, 42, 35))
-        {
-            bracketSelections.append(selection); // Сохраняем ошибки Jedi
-        }
-    }
+//     // Важно: мы не должны затирать маркеры ошибок синтаксиса от Jedi!
+//     // Поэтому мы берем текущие выделения, отфильтровываем старые скобки и сохраняем ошибки.
+//     QList<QTextEdit::ExtraSelection> currentSelections = this->extraSelections();
+//     for (const auto& selection : std::as_const(currentSelections)) {
+//         // Ошибки синтаксиса у нас имеют WaveUnderline или фоновую заливку,
+//         // а у скобок формат будет строго точечный (Background/Outline).
+//         if (selection.format.underlineStyle() == QTextCharFormat::WaveUnderline ||
+//             selection.format.background().color() == QColor(255, 42, 42, 35))
+//         {
+//             bracketSelections.append(selection); // Сохраняем ошибки Jedi
+//         }
+//     }
 
-    QTextCursor cursor = this->textCursor();
-    int currentPos = cursor.position();
-    QTextDocument *doc = this->document();
+//     QTextCursor cursor = this->textCursor();
+//     int currentPos = cursor.position();
+//     QTextDocument *doc = this->document();
 
-    // Проверяем символы слева и справа от текстовой каретки
-    QChar charRight = (currentPos < doc->characterCount() - 1) ? doc->characterAt(currentPos) : QChar();
-    QChar charLeft = (currentPos > 0) ? doc->characterAt(currentPos - 1) : QChar();
+//     // Проверяем символы слева и справа от текстовой каретки
+//     QChar charRight = (currentPos < doc->characterCount() - 1) ? doc->characterAt(currentPos) : QChar();
+//     QChar charLeft = (currentPos > 0) ? doc->characterAt(currentPos - 1) : QChar();
 
-    int startBracketPos = -1;
-    int endBracketPos = -1;
-    QChar openChar, closeChar;
-    bool directionRight = true;
+//     int startBracketPos = -1;
+//     int endBracketPos = -1;
+//     QChar openChar, closeChar;
+//     bool directionRight = true;
 
-    // Шаг 1: Определяем, стоит ли курсор рядом со скобкой
-    if (charRight == '(' || charRight == '[' || charRight == '{') {
-        startBracketPos = currentPos + 1;
-        openChar = charRight;
-        closeChar = (charRight == '(') ? ')' : (charRight == '[') ? ']' : '}';
-        directionRight = true;
-    } else if (charLeft == ')' || charLeft == ']' || charLeft == '}') {
-        startBracketPos = currentPos;
-        closeChar = charLeft;
-        openChar = (charLeft == ')') ? '(' : (charLeft == ']') ? '[' : '{';
-        directionRight = false;
-    } else if (charLeft == '(' || charLeft == '[' || charLeft == '{') {
-        startBracketPos = currentPos;
-        openChar = charLeft;
-        closeChar = (charLeft == '(') ? ')' : (charLeft == '[') ? ']' : '}';
-        directionRight = true;
-    } else if (charRight == ')' || charRight == ']' || charRight == '}') {
-        startBracketPos = currentPos + 1;
-        closeChar = charRight;
-        openChar = (charRight == ')') ? '(' : (charRight == ']') ? '[' : '{';
-        directionRight = false;
-    }
+//     // Шаг 1: Определяем, стоит ли курсор рядом со скобкой
+//     if (charRight == '(' || charRight == '[' || charRight == '{') {
+//         startBracketPos = currentPos + 1;
+//         openChar = charRight;
+//         closeChar = (charRight == '(') ? ')' : (charRight == '[') ? ']' : '}';
+//         directionRight = true;
+//     } else if (charLeft == ')' || charLeft == ']' || charLeft == '}') {
+//         startBracketPos = currentPos;
+//         closeChar = charLeft;
+//         openChar = (charLeft == ')') ? '(' : (charLeft == ']') ? '[' : '{';
+//         directionRight = false;
+//     } else if (charLeft == '(' || charLeft == '[' || charLeft == '{') {
+//         startBracketPos = currentPos;
+//         openChar = charLeft;
+//         closeChar = (charLeft == '(') ? ')' : (charLeft == '[') ? ']' : '}';
+//         directionRight = true;
+//     } else if (charRight == ')' || charRight == ']' || charRight == '}') {
+//         startBracketPos = currentPos + 1;
+//         closeChar = charRight;
+//         openChar = (charRight == ')') ? '(' : (charRight == ']') ? '[' : '{';
+//         directionRight = false;
+//     }
 
-    // Шаг 2: Если курсор наткнулся на скобку, запускаем сканер поиска пары
-    if (startBracketPos != -1)
-    {
-        endBracketPos = findMatchingBracket(startBracketPos, openChar, closeChar, directionRight);
+//     // Шаг 2: Если курсор наткнулся на скобку, запускаем сканер поиска пары
+//     if (startBracketPos != -1)
+//     {
+//         endBracketPos = findMatchingBracket(startBracketPos, openChar, closeChar, directionRight);
 
-        if (endBracketPos != -1)
-        {
-            // Настраиваем красивый, контрастный стиль подсветки скобок (KDE Breeze Light стандарт)
-            QTextEdit::ExtraSelection s1, s2;
+//         if (endBracketPos != -1)
+//         {
+//             // Настраиваем красивый, контрастный стиль подсветки скобок (KDE Breeze Light стандарт)
+//             QTextEdit::ExtraSelection s1, s2;
 
-            // Цвет подсветки: мягкий светло-зеленый фон с темно-зелеными буквами
-            QColor bracketBg = QColor::fromRgb(255, 249, 196);
-            QColor bracketBorder = QColor::fromRgb(251, 192, 45);
+//             // Цвет подсветки: мягкий светло-зеленый фон с темно-зелеными буквами
+//             QColor bracketBg = QColor::fromRgb(255, 249, 196);
+//             QColor bracketBorder = QColor::fromRgb(251, 192, 45);
 
-            s1.format.setBackground(bracketBg);
-            s1.format.setProperty(QTextFormat::OutlinePen, QPen(bracketBorder, 1));
-            s1.cursor = this->textCursor();
-            s1.cursor.setPosition(startBracketPos - 1);
-            s1.cursor.setPosition(startBracketPos, QTextCursor::KeepAnchor);
+//             s1.format.setBackground(bracketBg);
+//             s1.format.setProperty(QTextFormat::OutlinePen, QPen(bracketBorder, 1));
+//             s1.cursor = this->textCursor();
+//             s1.cursor.setPosition(startBracketPos - 1);
+//             s1.cursor.setPosition(startBracketPos, QTextCursor::KeepAnchor);
 
-            s2.format.setBackground(bracketBg);
-            s2.format.setProperty(QTextFormat::OutlinePen, QPen(bracketBorder, 1));
-            s2.cursor = this->textCursor();
-            s2.cursor.setPosition(endBracketPos - 1);
-            s2.cursor.setPosition(endBracketPos, QTextCursor::KeepAnchor);
+//             s2.format.setBackground(bracketBg);
+//             s2.format.setProperty(QTextFormat::OutlinePen, QPen(bracketBorder, 1));
+//             s2.cursor = this->textCursor();
+//             s2.cursor.setPosition(endBracketPos - 1);
+//             s2.cursor.setPosition(endBracketPos, QTextCursor::KeepAnchor);
 
-            bracketSelections.append(s1);
-            bracketSelections.append(s2);
-        }
-    }
+//             bracketSelections.append(s1);
+//             bracketSelections.append(s2);
+//         }
+//     }
 
-    // Принудительно отдаем обновленный массив selection графическому движку Qt
-    // мы забираем уже существующую полосу строки и ошибки, и просто дописываем скобки в конец!
-    //QList<QTextEdit::ExtraSelection> currentSelections = this->extraSelections();
-    for (const auto& s : bracketSelections) {
-        currentSelections.append(s);
-    }
+//     // Принудительно отдаем обновленный массив selection графическому движку Qt
+//     // мы забираем уже существующую полосу строки и ошибки, и просто дописываем скобки в конец!
+//     //QList<QTextEdit::ExtraSelection> currentSelections = this->extraSelections();
+//     for (const auto& s : bracketSelections) {
+//         currentSelections.append(s);
+//     }
 
-    // Принудительно отдаем обновленный массив графическому движку Qt
-    this->setExtraSelections(currentSelections);
-}
-
-#include "codeeditor.h"
-#include <QMenu>
-#include <QAction>
-#include <QTextCursor>
-#include <QApplication>
-#include <QClipboard>
+//     // Принудительно отдаем обновленный массив графическому движку Qt
+//     this->setExtraSelections(currentSelections);
+// }
 
 void CodeEditor::showEditorContextMenu(const QPoint &pos)
 {
@@ -3282,4 +3308,322 @@ void CodeEditor::processSubmittedPrompt(const QString &promptText)
     }
 }
 
+void CodeEditor::wheelEvent(QWheelEvent *e)
+{
+    // Если зажат Ctrl — меняем масштаб колесиком
+    if (e->modifiers() & Qt::ControlModifier) {
+        int delta = e->angleDelta().y();
+        if (delta > 0) {
+            zoomInText(1);
+        } else if (delta < 0) {
+            zoomOutText(1);
+        }
+        e->accept();
+        return;
+    }
 
+    // Обычная прокрутка
+    QPlainTextEdit::wheelEvent(e);
+}
+
+void CodeEditor::zoomInText(int step)
+{
+    if (m_currentFontSize >= MAX_FONT_SIZE) return;
+
+    m_currentFontSize = qMin(MAX_FONT_SIZE, m_currentFontSize + step);
+
+    QFont f = this->font();
+    f.setPixelSize(m_currentFontSize);
+    this->setFont(f);
+
+    if (this->document()) {
+        this->document()->setDefaultFont(f);
+        // Принудительно инвалидируем разметку всех блоков под новый размер шрифта
+        this->document()->markContentsDirty(0, this->document()->characterCount());
+    }
+
+    // Синхронизируем физическую ширину табуляции (4 пробела) с новым шрифтом
+    QFontMetrics fm(f);
+    this->setTabStopDistance(fm.horizontalAdvance(QLatin1Char(' ')) * 4);
+
+    updateLineNumberAreaWidth(0);
+    this->viewport()->update();
+    if (lineNumberArea) lineNumberArea->update();
+}
+
+void CodeEditor::zoomOutText(int step)
+{
+    if (m_currentFontSize <= MIN_FONT_SIZE) return;
+
+    m_currentFontSize = qMax(MIN_FONT_SIZE, m_currentFontSize - step);
+
+    QFont f = this->font();
+    f.setPixelSize(m_currentFontSize);
+    this->setFont(f);
+
+    if (this->document()) {
+        this->document()->setDefaultFont(f);
+        // Принудительно инвалидируем разметку всех блоков под новый размер шрифта
+        this->document()->markContentsDirty(0, this->document()->characterCount());
+    }
+
+    // Синхронизируем физическую ширину табуляции (4 пробела) с новым шрифтом
+    QFontMetrics fm(f);
+    this->setTabStopDistance(fm.horizontalAdvance(QLatin1Char(' ')) * 4);
+
+    updateLineNumberAreaWidth(0);
+    this->viewport()->update();
+    if (lineNumberArea) lineNumberArea->update();
+}
+
+void CodeEditor::resetTextZoom()
+{
+    m_currentFontSize = DEFAULT_FONT_SIZE;
+
+    QFont f = this->font();
+    f.setPixelSize(m_currentFontSize);
+    this->setFont(f);
+
+    if (this->document()) {
+        this->document()->setDefaultFont(f);
+        // Принудительно инвалидируем разметку всех блоков под новый размер шрифта
+        this->document()->markContentsDirty(0, this->document()->characterCount());
+    }
+
+    // Синхронизируем физическую ширину табуляции (4 пробела) с дефолтным шрифтом
+    QFontMetrics fm(f);
+    this->setTabStopDistance(fm.horizontalAdvance(QLatin1Char(' ')) * 4);
+
+    updateLineNumberAreaWidth(0);
+    this->viewport()->update();
+    if (lineNumberArea) lineNumberArea->update();
+}
+
+// void CodeEditor::setLspDiagnostics(const QList<QTextEdit::ExtraSelection> &diags)
+// {
+//     m_lspDiagnosticSelections = diags;
+//     // Сразу же наносим ошибки на экран и форсируем перерисовку!
+//     updateExtraSelections();
+// }
+
+// void CodeEditor::updateExtraSelections()
+// {
+//     if (isReadOnly()) return;
+
+//     QList<QTextEdit::ExtraSelection> extraSelections;
+
+//     // -------------------------------------------------------------
+//     // СЛОЙ 1: Ошибки и предупреждения от LSP (Красные волнистые линии)
+//     // -------------------------------------------------------------
+//     extraSelections.append(m_lspDiagnosticSelections);
+
+//     // -------------------------------------------------------------
+//     // СЛОЙ 2: Подсветка парных скобок (matchBrackets)
+//     // -------------------------------------------------------------
+//     // Здесь ваша логика поиска скобок (добавляем результат в extraSelections)
+//     // matchBracketsSelections(extraSelections);
+
+//     // -------------------------------------------------------------
+//     // СЛОЙ 3: Подсветка текущей строки (highlightCurrentLine)
+//     // -------------------------------------------------------------
+//     QTextEdit::ExtraSelection currentLineSelection;
+//     currentLineSelection.format.setBackground(QColor(40, 44, 52, 100)); // или ваш цвет подсветки строки
+//     currentLineSelection.format.setProperty(QTextFormat::FullWidthSelection, true);
+//     currentLineSelection.cursor = textCursor();
+//     currentLineSelection.cursor.clearSelection();
+//     extraSelections.append(currentLineSelection);
+
+//     // Применяем объединенный стек выделений к документу
+//     this->setExtraSelections(extraSelections);
+
+//     // КРИТИЧНО ДЛЯ МГНОВЕННОГО ПОЯВЛЕНИЯ БЕЗ КЛИКА МЫШИ:
+//     if (this->viewport()) {
+//         this->viewport()->repaint();
+//     }
+// }
+
+// =============================================================================
+// ВНЕШНИЕ СЕТТЕРЫ ДЛЯ СЛОЕВ ВЫДЕЛЕНИЯ
+// =============================================================================
+
+void CodeEditor::setLspDiagnostics(const QList<QTextEdit::ExtraSelection> &diags)
+{
+    m_lspDiagnosticSelections = diags;
+    // При получении диагностики сразу пересобираем слои
+    this->updateExtraSelections();
+}
+
+void CodeEditor::setSearchSelections(const QList<QTextEdit::ExtraSelection> &selections)
+{
+    m_searchSelections = selections;
+    this->updateExtraSelections();
+}
+
+void CodeEditor::setDebuggerSelections(const QList<QTextEdit::ExtraSelection> &selections)
+{
+    m_debugSelections = selections;
+    this->updateExtraSelections();
+}
+
+// Стандартные слоты теперь просто делегируют задачу главному диспетчеру
+void CodeEditor::highlightCurrentLine()
+{
+    this->updateExtraSelections();
+}
+
+void CodeEditor::matchBrackets()
+{
+    this->calculateBracketMatches();
+    this->updateExtraSelections();
+}
+
+// =============================================================================
+// ВСПОМОГАТЕЛЬНЫЙ РАСЧЕТ ПАРНЫХ СКОБОК
+// =============================================================================
+
+void CodeEditor::calculateBracketMatches()
+{
+    m_bracketSelections.clear();
+
+    QTextCursor cur = this->textCursor();
+    QTextDocument *doc = this->document();
+    if (!doc) return;
+
+    int pos = cur.position();
+    QChar chPrev = (pos > 0) ? doc->characterAt(pos - 1) : QChar();
+    QChar chCurr = doc->characterAt(pos);
+
+    auto isBracket = [](QChar c) {
+        return c == '(' || c == ')' || c == '{' || c == '}' || c == '[' || c == ']';
+    };
+
+    int targetPos = -1;
+    QChar bracketChar;
+
+    if (isBracket(chPrev)) {
+        targetPos = pos - 1;
+        bracketChar = chPrev;
+    } else if (isBracket(chCurr)) {
+        targetPos = pos;
+        bracketChar = chCurr;
+    } else {
+        return;
+    }
+
+    QChar matchChar;
+    int direction = 1;
+    if (bracketChar == '(') { matchChar = ')'; direction = 1; }
+    else if (bracketChar == ')') { matchChar = '('; direction = -1; }
+    else if (bracketChar == '{') { matchChar = '}'; direction = 1; }
+    else if (bracketChar == '}') { matchChar = '{'; direction = -1; }
+    else if (bracketChar == '[') { matchChar = ']'; direction = 1; }
+    else if (bracketChar == ']') { matchChar = '['; direction = -1; }
+
+    int depth = 1;
+    int searchPos = targetPos + direction;
+    int totalLen = doc->characterCount();
+    int matchFoundPos = -1;
+
+    while (searchPos >= 0 && searchPos < totalLen) {
+        QChar c = doc->characterAt(searchPos);
+        if (c == bracketChar) {
+            depth++;
+        } else if (c == matchChar) {
+            depth--;
+            if (depth == 0) {
+                matchFoundPos = searchPos;
+                break;
+            }
+        }
+        searchPos += direction;
+    }
+
+    if (matchFoundPos != -1) {
+        QTextCharFormat bracketFormat;
+        // БЫЛО: темный фон
+        // bracketFormat.setBackground(QColor(60, 70, 85, 180));
+        // bracketFormat.setFontWeight(QFont::Bold);
+
+        // СТАЛО: классический ярко-желтый / золотистый цвет (стиль PyCharm/QtCreator для светлой темы)
+        bracketFormat.setBackground(QColor(255, 235, 140)); // Мягкий приятный желтый фон (#FFE78C)
+        bracketFormat.setForeground(QColor(160, 100, 0));   // Контрастный темный контур/текст скобки
+        bracketFormat.setFontWeight(QFont::Bold);
+
+        // Первая скобка
+        QTextEdit::ExtraSelection sel1;
+        sel1.format = bracketFormat;
+        sel1.cursor = cur;
+        sel1.cursor.setPosition(targetPos);
+        sel1.cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+        m_bracketSelections.append(sel1);
+
+        // Вторая скобка
+        QTextEdit::ExtraSelection sel2;
+        sel2.format = bracketFormat;
+        sel2.cursor = cur;
+        sel2.cursor.setPosition(matchFoundPos);
+        sel2.cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+        m_bracketSelections.append(sel2);
+    }
+}
+
+// =============================================================================
+// ЦЕНТРАЛЬНЫЙ ДИСПЕТЧЕР: updateExtraSelections
+// =============================================================================
+
+void CodeEditor::updateExtraSelections()
+{
+    if (this->isReadOnly()) return;
+
+    QList<QTextEdit::ExtraSelection> combinedSelections;
+
+    // -------------------------------------------------------------------------
+    // 1. СЛОЙ ТЕКУЩЕЙ СТРОКИ (Самый нижний фоновый слой)
+    // -------------------------------------------------------------------------
+    QTextEdit::ExtraSelection currentLine;
+
+    // Блёдно-голубой градиентный фон (в стиле JetBrains / PyCharm для светлой темы):
+    QRect rect = cursorRect();
+    QLinearGradient gradient(0, rect.top(), this->viewport()->width(), rect.top());
+    gradient.setColorAt(0.0, QColor(232, 242, 254)); // Нежно-голубой #E8F2FE у номеров строк
+    gradient.setColorAt(0.6, QColor(245, 249, 255)); // Очень светлый оттенок в центре
+    gradient.setColorAt(1.0, QColor(255, 255, 255)); // Плавный уход в белый к правому краю
+
+    currentLine.format.setBackground(QBrush(gradient));
+    currentLine.format.setProperty(QTextFormat::FullWidthSelection, true);
+    currentLine.cursor = this->textCursor();
+    currentLine.cursor.clearSelection();
+    combinedSelections.append(currentLine);
+
+    // -------------------------------------------------------------------------
+    // 2. СЛОЙ ПОИСКА (Ctrl+F)
+    // -------------------------------------------------------------------------
+    combinedSelections.append(m_searchSelections);
+
+    // -------------------------------------------------------------------------
+    // 3. СЛОЙ ОТЛАДКИ (Breakpoints / Current Execution Line)
+    // -------------------------------------------------------------------------
+    combinedSelections.append(m_debugSelections);
+
+    // -------------------------------------------------------------------------
+    // 4. СЛОЙ ПАРНЫХ СКОБОК
+    // -------------------------------------------------------------------------
+    combinedSelections.append(m_bracketSelections);
+
+    // -------------------------------------------------------------------------
+    // 5. СЛОЙ LSP-ДИАГНОСТИКИ (Верхний слой — красные волнистые линии)
+    // -------------------------------------------------------------------------
+    // Накладывается поверх всех фонов, чтобы ошибки всегда были видны
+    combinedSelections.append(m_lspDiagnosticSelections);
+
+    // -------------------------------------------------------------------------
+    // ПРИМЕНЕНИЕ И МГНОВЕННЫЙ РЕНДЕР
+    // -------------------------------------------------------------------------
+    this->setExtraSelections(combinedSelections);
+
+    // КРИТИЧНО: Форсируем перерисовку viewport прямо сейчас!
+    // Не ждем события клика мыши, смены фокуса или сдвига курсора.
+    if (this->viewport()) {
+        this->viewport()->repaint();
+    }
+}

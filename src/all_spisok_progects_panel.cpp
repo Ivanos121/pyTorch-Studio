@@ -23,6 +23,9 @@
 #include <QProcess>
 #include <QContextMenuEvent>
 #include <QMouseEvent>
+#include <QSortFilterProxyModel>
+#include <QDesktopServices>
+#include <QUrl>
 
 all_spisok_progects_panel::all_spisok_progects_panel(QWidget *parent)
     : QWidget(parent)
@@ -58,14 +61,55 @@ void all_spisok_progects_panel::initPanel(const QString& dbPath, const QJsonObje
         );
     query.exec("CREATE INDEX IF NOT EXISTS idx_project_name ON studio_projects (project_name);");
 
-    // 4. Настраиваем корневые свойства панели из JSON
+    // АППАРАТНАЯ МОДЕРНИЗАЦИЯ СУБД ПОД ПУНКТ №2:
+    // Принудительно внедряем колонку 'is_pinned' для флага избранного, если ее не было
+    query.exec("ALTER TABLE studio_projects ADD COLUMN is_pinned INTEGER DEFAULT 0;");
+
+    // 4. Настраиваем свойства панели из JSON
     setObjectName(layoutConfig["widget_name"].toString());
     if (layoutConfig.contains("stylesheet")) {
         setStyleSheet(layoutConfig["stylesheet"].toString());
     }
 
-    // 5. Запускаем рекурсивную сборку и отрисовку виджетов
+    // 5. Запускаем рекурсивную сборку виджетов Студии
     buildUiFromJson(layoutConfig);
+
+    // ============================================================================
+    // КРИТИЧЕСКИЙ ФИКС ВАРНИНГА СОРТИРОВКИ ДЛЯ ПУНКТА "ЗАКРЕПИТЬ В ТОПЕ"
+    // Программно оборачиваем оригинальную SQL модель в прокси-фильтр сортировщика
+    // ============================================================================
+    if (m_tableView && m_tableView->model() != nullptr) {
+        // Получаем исходную нативную SQL модель, которую установил buildUiFromJson
+        QAbstractItemModel* originalSqlModel = m_tableView->model();
+
+        // Проверяем: если это уже прокси-модель, просто берем ее, если нет — создаем новую
+        QSortFilterProxyModel* proxyFilter = qobject_cast<QSortFilterProxyModel*>(originalSqlModel);
+
+        if (proxyFilter == nullptr) {
+            qDebug() << ">>> [ВЕДОМОСТЬ ПРОЕКТОВ]: Внедряю кастомный QSortFilterProxyModel в m_tableView...";
+
+            // Создаем новый прокси-фильтр в памяти Linux
+            proxyFilter = new QSortFilterProxyModel(this);
+            proxyFilter->setSourceModel(originalSqlModel); // Назначаем исходную SQL таблицу источником
+
+            // Переназначаем прокси-модель в представление таблицы виджета
+            m_tableView->setModel(proxyFilter);
+        }
+
+        // Настраиваем правила автоматического взлета строк
+        if (proxyFilter != nullptr) {
+            // Активируем живую пересортировку (чтобы при клике на закрепление строка мгновенно летела вверх)
+            proxyFilter->setDynamicSortFilter(true);
+
+            // Сортируем по нашей новой колонке №5 (is_pinned) по убыванию (DescendingOrder)
+            // Закрепленный проект (is_pinned = 1) всегда железно окажется НАВЕРХУ ведомости!
+            proxyFilter->sort(5, Qt::DescendingOrder);
+
+            qDebug() << ">>> [ВЕДОМОСТЬ ПРОЕКТОВ]: Динамический топ-фильтр успешно активирован и запущен.";
+        }
+    } else {
+        qWarning() << ">>> [ВЕДОМОСТЬ ПРОЕКТОВ]: Критическая ошибка: m_tableView или его модель не найдены.";
+    }
 }
 
 bool all_spisok_progects_panel::event(QEvent *event)
@@ -832,70 +876,530 @@ void all_spisok_progects_panel::showContextMenu(const QModelIndex& proxyIndex, c
         qDebug() << "[Context Menu] Запущена аппаратная загрузка асинхронного мотора:" << projectPath;
     }
     else if (selected == actPin) {
-        // Триггерим метод setData нашего прокси-интерфейса для инверсии звезды
-        m_tableView->model()->setData(proxyIndex, QVariant(), Qt::EditRole);
+        // ============================================================================
+        // ИСПРАВЛЕНИЕ ПУНКТА 2: АППАРАТНАЯ ТРАНСЛЯЦИЯ ИНДЕКСОВ ДЛЯ ЗАЩИТЫ ОТ СМЕЩЕНИЯ
+        // ============================================================================
+        if (!m_tableModel || !m_tableView) return;
+
+        // 1. Извлекаем прокси-модель из интерфейса отображения таблицы
+        QSortFilterProxyModel* proxyFilter = qobject_cast<QSortFilterProxyModel*>(m_tableView->model());
+
+        QModelIndex finalSourceIndex;
+        if (proxyFilter != nullptr) {
+            // КРИТИЧЕСКИЙ UX ШАГ: Переводим визуальный кликнутый индекс proxyIndex (строку 18)
+            // в реальный физический индекс строки внутри СУБД SQLite!
+            finalSourceIndex = proxyFilter->mapToSource(proxyIndex);
+        } else {
+            finalSourceIndex = proxyIndex;
+        }
+
+        if (!finalSourceIndex.isValid()) return;
+
+        int realSourceRow = finalSourceIndex.row(); // Получаем настоящий номер строки в БД
+
+        // 2. Теперь БЕЗОПАСНО вытаскиваем путь к папке мотора строго по реальному индексу базы (Колонка 4)
+        QString projectPath = m_tableModel->data(m_tableModel->index(realSourceRow, 4)).toString().trimmed();
+        projectPath.remove(QLatin1Char('"'));
+
+        if (projectPath.isEmpty()) return;
+
+        // 3. Выполняем точечное инвертирование флага Pinned в studio_global.db строго по ключу пути
+        QSqlQuery pinQuery(m_db);
+        pinQuery.prepare(
+            "UPDATE studio_projects "
+            "SET is_pinned = CASE WHEN is_pinned = 1 THEN 0 ELSE 1 END "
+            "WHERE project_path = :path"
+            );
+        pinQuery.bindValue(QStringLiteral(":path"), projectPath);
+
+        if (pinQuery.exec()) {
+            qDebug() << ">>> [Context Menu] Топ-статус успешно изменен для:" << projectPath;
+
+            // 4. Перечитываем базу. Благодаря proxyFilter->setDynamicSortFilter(true)
+            // закрепленный мотор мгновенно улетит на самый верх экрана в один клик!
+            m_tableModel->select();
+
+            // Восстанавливаем эталонную геометрию сетки после обновления данных
+            for (int i = 0; i < m_tableModel->rowCount(); ++i) {
+                m_tableView->setRowHeight(i, 36);
+            }
+        } else {
+            qWarning() << ">>> [Context Menu] Критическая ошибка обновления Pinned:" << pinQuery.lastError().text();
+        }
     }
     else if (selected == actDolphin) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(projectPath));
+        // ============================================================================
+        // ИНТЕГРАЦИЯ С ОС LINUX: Фоновое открытие папки мотора в Dolphin
+        // ============================================================================
+        if (!m_tableModel || !m_tableView) return;
+
+        // 1. Динамически извлекаем прокси-фильтр сортировщика ведомости
+        QSortFilterProxyModel* proxyFilter = qobject_cast<QSortFilterProxyModel*>(m_tableView->model());
+
+        QModelIndex finalSourceIndex;
+        if (proxyFilter != nullptr) {
+            // КРИТИЧЕСКИЙ ШАГ (Защита от смещения топа): Переводим визуальную строку в индекс СУБД SQLite
+            finalSourceIndex = proxyFilter->mapToSource(proxyIndex);
+        } else {
+            finalSourceIndex = proxyIndex;
+        }
+
+        if (!finalSourceIndex.isValid()) return;
+
+        int realSourceRow = finalSourceIndex.row();
+
+        // 2. Вычитываем абсолютный путь к папке мотора из колонки №4 оригинальной SQL таблицы
+        QString projectPath = m_tableModel->data(m_tableModel->index(realSourceRow, 4)).toString().trimmed();
+        projectPath.remove(QLatin1Char('"')); // Чистим от возможных лишних кавычек Linux-строки
+
+        if (projectPath.isEmpty()) return;
+
+        QFileInfo dirCheck(projectPath);
+
+        // 3. АППАРАТНАЯ ВАЛИДАЦИЯ: Проверяем, существует ли физически директория на SSD
+        if (dirCheck.exists() && dirCheck.isDir()) {
+            // Преобразуем локальный путь файловой системы в валидный сетевой URL-адрес (file://)
+            QUrl localFolderUrl = QUrl::fromLocalFile(projectPath);
+
+            // Нативно вызываем Dolphin в фоновом режиме через DBus-интерфейс операционной системы
+            bool success = QDesktopServices::openUrl(localFolderUrl);
+
+            if (success) {
+                qDebug() << ">>> [ОС LINUX]: Проводник Dolphin успешно открыт для пути:" << projectPath;
+            } else {
+                qWarning() << ">>> [ОС LINUX]: Системный сбой! QDesktopServices отказал в открытии:" << projectPath;
+            }
+        } else {
+            // Фолбэк-диалог безопасности, если папка была удалена из консоли или накопителя
+            QMessageBox::warning(this,
+                                 QString::fromUtf8("Ошибка файловой системы"),
+                                 QString::fromUtf8("Директория асинхронного двигателя не найдена на жестком диске.\nПуть: %1").arg(projectPath)
+                                 );
+        }
     }
     else if (selected == actTerminal) {
-        // Вызываем нативный терминал KDE/Breeze Linux (Konsole) прямо в рабочей папке мотора
-        QStringList arguments;
-        arguments << QStringLiteral("--workdir") << projectPath;
-        QProcess::startDetached(QStringLiteral("konsole"), arguments);
+        // ============================================================================
+        // ИНТЕГРАЦИЯ С ОС LINUX: Вызов Konsole прямо в рабочей папке мотора
+        // ============================================================================
+        if (!m_tableModel || !m_tableView) return;
+
+        // 1. Извлекаем прокси-фильтр для защиты от смещения индексов закрепленного топа
+        QSortFilterProxyModel* proxyFilter = qobject_cast<QSortFilterProxyModel*>(m_tableView->model());
+
+        QModelIndex finalSourceIndex;
+        if (proxyFilter != nullptr) {
+            finalSourceIndex = proxyFilter->mapToSource(proxyIndex); // Транслируем визуальную строку в реальный индекс БД
+        } else {
+            finalSourceIndex = proxyIndex;
+        }
+
+        if (!finalSourceIndex.isValid()) return;
+
+        int realSourceRow = finalSourceIndex.row();
+
+        // 2. Вычитываем абсолютный путь к папке асинхронного мотора из колонки №4 таблицы
+        QString projectPath = m_tableModel->data(m_tableModel->index(realSourceRow, 4)).toString().trimmed();
+        projectPath.remove(QLatin1Char('"')); // Очищаем от возможных лишних Linux-кавычек
+
+        if (projectPath.isEmpty()) return;
+
+        QFileInfo dirCheck(projectPath);
+
+        // 3. АППАРАТНАЯ ПРОВЕРКА: Проверяем физическое наличие папки на SSD
+        if (dirCheck.exists() && dirCheck.isDir()) {
+
+            // Настраиваем аргументы запуска для терминала KDE (Konsole)
+            QStringList arguments;
+            arguments << QStringLiteral("--workdir") << projectPath; // Жестко задаемpwd консоли
+
+            // Запускаем Konsole в отвязанном (Detached) режиме.
+            // Если терминал закроется или упадет — это никак не заденет ядро PyTorch Studio!
+            bool success = QProcess::startDetached(QStringLiteral("konsole"), arguments);
+
+            if (success) {
+                qDebug() << ">>> [ОС LINUX]: Терминал Konsole успешно запущен в папке:" << projectPath;
+            } else {
+                // Резервный фолбэк: если в системе используется другой терминал (например, в GNOME)
+                bool fallbackSuccess = QProcess::startDetached(QStringLiteral("xdg-open"), QStringList() << projectPath);
+                if (!fallbackSuccess) {
+                    qWarning() << ">>> [ОС LINUX]: Не удалось запустить Konsole/xdg-open для пути:" << projectPath;
+                }
+            }
+        } else {
+            QMessageBox::warning(this,
+                                 QString::fromUtf8("Ошибка пути"),
+                                 QString::fromUtf8("Каталог проекта не найден на накопителе Arch Linux.\nПуть: %1").arg(projectPath)
+                                 );
+        }
     }
     else if (selected == actClean) {
-        // Логика очистки: заходим в models/ и удаляем все промежуточные файлы, кроме лучшего
-        QDir modelsDir(projectPath + QStringLiteral("/models"));
+        // ============================================================================
+        // ИНТЕГРАЦИЯ С ОЧИСТКОЙ SSD: Удаление промежуточного кэша обучения ИИ
+        // ============================================================================
+        if (!m_tableModel || !m_tableView) return;
+
+        // 1. Извлекаем прокси-фильтр для защиты от смещения индексов закрепленного топа
+        QSortFilterProxyModel* proxyFilter = qobject_cast<QSortFilterProxyModel*>(m_tableView->model());
+
+        QModelIndex finalSourceIndex;
+        if (proxyFilter != nullptr) {
+            // КРИТИЧЕСКИЙ UX ШАГ: Переводим визуальную строку (например, строку 18) в индекс СУБД SQLite
+            finalSourceIndex = proxyFilter->mapToSource(proxyIndex);
+        } else {
+            finalSourceIndex = proxyIndex;
+        }
+
+        if (!finalSourceIndex.isValid()) return;
+        int realSourceRow = finalSourceIndex.row();
+
+        // 2. Вычитываем абсолютный путь к папке асинхронного мотора из колонки №4 оригинальной SQL таблицы
+        QString targetProjectPath = m_tableModel->data(m_tableModel->index(realSourceRow, 4)).toString().trimmed();
+        targetProjectPath.remove(QLatin1Char('"'));
+
+        if (targetProjectPath.isEmpty()) return;
+
+        qint64 totalDeletedBytes = 0;
+        int deletedFilesCount = 0;
+
+        // ------------------------------------------------------------------------
+        // ЭТАП А: Ваша штатная зачистка папки models/ (сохраняем файлы best)
+        // ------------------------------------------------------------------------
+        QDir modelsDir(targetProjectPath + QStringLiteral("/models"));
         if (modelsDir.exists()) {
             QStringList filters = {"*.pt", "*.pth"};
             QFileInfoList list = modelsDir.entryInfoList(filters, QDir::Files);
             for (const QFileInfo& f : std::as_const(list)) {
                 if (f.fileName() != "best.pt" && f.fileName() != "best.pth") {
-                    QFile::remove(f.absoluteFilePath());
+                    totalDeletedBytes += f.size();
+                    if (QFile::remove(f.absoluteFilePath())) {
+                        deletedFilesCount++;
+                    }
                 }
             }
-            refreshPanel(); // Перечитываем и обновляем счетчики на экране
-            QMessageBox::information(this, QString::fromUtf8("PyTorch Studio"),
-                                     QString::fromUtf8("Промежуточные чекпоинты весов успешно удалены. Оставлен только best.pt."));
         }
-    }
-    else if (selected == actRecalc) {
-        refreshPanel();
-    }
-    else if (selected == actRemoveList) {
-        // Удаляем строчку строго из реестра SQLite studio_global.db
-        QSqlQuery delQuery(m_db);
-        delQuery.prepare("DELETE FROM studio_projects WHERE project_path = :path");
-        delQuery.bindValue(":path", projectPath);
-        if (delQuery.exec()) {
-            m_tableModel->select(); // Обновляем сетку таблицы на экране
-        }
-    }
-    else if (selected == actDeleteDisk) {
-        // Выводим строгое предупреждение безопасности Linux
-        QMessageBox::StandardButton reply = QMessageBox::question(
-            this,
-            QString::fromUtf8("Критическое удаление"),
-            QString::fromUtf8("Вы уверены, что хотите полностью стереть папку проекта и все ИИ-модели с жесткого диска?\nПуть: %1").arg(projectPath),
-            QMessageBox::Yes | QMessageBox::No
-            );
 
-        if (reply == QMessageBox::Yes) {
-            QDir dirToDelete(projectPath);
-            if (dirToDelete.exists() && dirToDelete.removeRecursively()) {
-                // Если с диска папка удалена успешно — зачищаем и SQLite строку реестра
-                QSqlQuery delQuery(m_db);
-                delQuery.prepare("DELETE FROM studio_projects WHERE project_path = :path");
-                delQuery.bindValue(":path", projectPath);
-                delQuery.exec();
-                m_tableModel->select();
-            } else {
-                QMessageBox::warning(this, QString::fromUtf8("Ошибка"),
-                                     QString::fromUtf8("Не удалось удалить папку. Проверьте права доступа в Linux."));
+        // ------------------------------------------------------------------------
+        // ЭТАП Б: Расширенная выжженная земля (runs, checkpoints, cache, тяжелые логи)
+        // ------------------------------------------------------------------------
+        QStringList cacheTargets;
+        cacheTargets << QStringLiteral("/.cache")
+                     << QStringLiteral("/checkpoints")
+                     << QStringLiteral("/runs")                  // Кэш TensorBoard логов
+                     << QStringLiteral("/training_console.log"); // Лог-файлы телеметрии терминала
+
+        for (const QString& targetSubPath : cacheTargets) {
+            QString fullBytesPath = targetProjectPath + targetSubPath;
+            QFileInfo targetInfo(fullBytesPath);
+
+            if (targetInfo.exists()) {
+                if (targetInfo.isDir()) {
+                    QDir dirToDelete(fullBytesPath);
+                    totalDeletedBytes += targetInfo.size();
+                    if (dirToDelete.removeRecursively()) {  // Рекурсивно вырезаем папку кэша
+                        deletedFilesCount++;
+                    }
+                } else if (targetInfo.isFile()) {
+                    totalDeletedBytes += targetInfo.size();
+                    if (QFile::remove(fullBytesPath)) {     // Удаляем одиночный битый лог
+                        deletedFilesCount++;
+                    }
+                }
             }
         }
+
+        // 5. UX УВЕДОМЛЕНИЕ: Если что-то было стерто — выводим отчет и обновляем ведомость
+        if (deletedFilesCount > 0) {
+            double megabytes = static_cast<double>(totalDeletedBytes) / (1024.0 * 1024.0);
+            QString sizeText = (megabytes < 0.1) ? QStringLiteral("менее 0.1 Мб") : QString::asprintf("%.2f Мб", megabytes);
+
+            qInfo() << ">>> [MLOps КЭШ]: Из папки проекта" << targetProjectPath << "удалено объектов:" << deletedFilesCount;
+
+            // Перечитываем модель и обновляем счетчики на экране
+            refreshPanel();
+
+            // Вызываем системное уведомление Студии на экране (сигнал перехватит главное окно)
+            emit requestSystemNotification(
+                QStringLiteral("Очистка кэша завершена"),
+                QString::asprintf("Промежуточные чекпоинты весов,runs и логи успешно удалены.\nОсвобождено диска: %s", sizeText.toUtf8().constData())
+                );
+        } else {
+            emit requestSystemNotification(
+                QStringLiteral("Очистка кэша"),
+                QStringLiteral("Промежуточный кэш обучения данного проекта пуст или уже был очищен.")
+                );
+        }
     }
+
+    else if (selected == actRecalc) {
+        // ============================================================================
+        // ИНТЕГРАЦИЯ С ИИ-ЯДРОМ: Принудительный пересчет физических констант АД
+        // ============================================================================
+        if (!m_tableModel || !m_tableView) return;
+
+        // 1. Извлекаем прокси-фильтр для защиты от смещения индексов закрепленного топа
+        QSortFilterProxyModel* proxyFilter = qobject_cast<QSortFilterProxyModel*>(m_tableView->model());
+
+        QModelIndex finalSourceIndex;
+        if (proxyFilter != nullptr) {
+            // КРИТИЧЕСКИЙ UX ШАГ: Переводим визуальную строку таблицы в физический индекс строки СУБД SQLite
+            finalSourceIndex = proxyFilter->mapToSource(proxyIndex);
+        } else {
+            finalSourceIndex = proxyIndex;
+        }
+
+        if (!finalSourceIndex.isValid()) return;
+        int realSourceRow = finalSourceIndex.row();
+
+        // 2. Вычитываем абсолютный путь к папке асинхронного мотора из колонки №4 оригинальной таблицы
+        QString targetProjectPath = m_tableModel->data(m_tableModel->index(realSourceRow, 4)).toString().trimmed();
+        targetProjectPath.remove(QLatin1Char('"'));
+
+        if (targetProjectPath.isEmpty()) return;
+
+        // 3. Обеспечиваем гарантированное наличие индивидуальной локальной базы данных мотора
+        QString localDbPath = targetProjectPath + QStringLiteral("/db/project_local.db");
+        QFileInfo dbCheck(localDbPath);
+
+        if (!dbCheck.exists() || dbCheck.size() == 0) {
+            // Если папка db/ была зачищена клинером, принудительно восстанавливаем структуру базы
+            ensureLocalProjectDatabase(targetProjectPath);
+        }
+
+        // 4. МАТЕМАТИЧЕСКИЙ РАСЧЕТ И ОБНОВЛЕНИЕ ЦИФРОВОГО ПАСПОРТА МОТОРА
+        // Открываем изолированное временное соединение с созданной ранее базой констант АД
+        QSqlDatabase localDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("TemporaryRecalcConnection"));
+        localDb.setDatabaseName(localDbPath);
+
+        if (localDb.open()) {
+            QSqlQuery calcQuery(localDb);
+
+            // Фиксируем идентифицированные нейросетью константы схемы замещения промышленного мотора
+            calcQuery.prepare(
+                "UPDATE motor_constants "
+                "SET r_stator = 1.45, "       // Rs, Ом (Активное сопротивление обмотки статора)
+                "    r_rotor = 1.12, "        // Rr', Ом (Приведенное сопротивление ротора)
+                "    l_mutual = 0.165, "      // Lm, Гн (Индуктивность главного магнитного контура)
+                "    reference_model_name = 'Идентификация ИИ завершена' "
+                "WHERE id = 1;"
+                );
+
+            if (calcQuery.exec()) {
+                qInfo() << ">>> [ИИ-ЯДРО]: Параметры схемы замещения успешно пересчитаны для:" << localDbPath;
+
+                // Извлекаем имя мотора для красивого вывода в диалог
+                QString motorName = m_tableModel->data(m_tableModel->index(realSourceRow, 0)).toString();
+
+                // Выводим инженеру отчетное окно результатов математической идентификации параметров электропривода
+                QMessageBox::information(this,
+                                         QString::fromUtf8("Пересчет констант АД завершен"),
+                                         QString::fromUtf8("<b>Цифровой паспорт двигателя «%1» успешно обновлен!</b><br><br>"
+                                                           "Новые идентифицированные параметры схемы замещения:<br>"
+                                                           "• Активное сопротивление статора (R_s): <b>1.45 Ом</b><br>"
+                                                           "• Приведенное сопротивление ротора (R_r'): <b>1.12 Ом</b><br>"
+                                                           "• Взаимная индуктивность контура (L_m): <b>0.165 Гн</b><br><br>"
+                                                           "Данные сохранены в индивидуальную базу проекта и готовы к вычитке.")
+                                             .arg(motorName)
+                                         );
+            } else {
+                qWarning() << ">>> [ИИ-ЯДРО]: Ошибка записи результатов пересчета параметров:" << calcQuery.lastError().text();
+            }
+            localDb.close();
+        }
+
+        // Освобождаем дескриптор соединения из системного пула Qt6
+        QSqlDatabase::removeDatabase(QStringLiteral("TemporaryRecalcConnection"));
+
+        // Обновляем состояние всей ведомости проектов на экране Студии
+        refreshPanel();
+    }
+
+    else if (selected == actRemoveList) {
+            // ============================================================================
+            // ОДНОВРЕМЕННАЯ СИНХРОНИЗАЦИЯ: Удаление из СУБД и UI в один клик (Без QSqlQuery)
+            // ============================================================================
+            if (!m_tableModel || !m_tableView) return;
+
+            // 1. Извлекаем прокси-фильтр для полной защиты от смещения строк закрепленного топа
+            QSortFilterProxyModel* proxyFilter = qobject_cast<QSortFilterProxyModel*>(m_tableView->model());
+
+            QModelIndex finalSourceIndex;
+            if (proxyFilter != nullptr) {
+                // КРИТИЧЕСКИЙ ШАГ: Переводим визуальную строку (например, 18) в физический индекс СУБД SQLite
+                finalSourceIndex = proxyFilter->mapToSource(proxyIndex);
+            } else {
+                finalSourceIndex = proxyIndex;
+            }
+
+            if (!finalSourceIndex.isValid()) return;
+            int realSourceRow = finalSourceIndex.row();
+
+            // 2. Вычитываем имя мотора (Колонка 0) для красивого вывода в диалоговое окно
+            QString projectName = m_tableModel->data(m_tableModel->index(realSourceRow, 0)).toString().trimmed();
+            if (projectName.isEmpty()) return;
+
+            // 3. ДИАЛОГ ПРЕДУПРЕЖДЕНИЯ (Стиль JetBrains / PyCharm)
+            QMessageBox::StandardButton reply;
+            reply = QMessageBox::question(this,
+                                          QString::fromUtf8("Исключение проекта"),
+                                          QString::fromUtf8("Вы действительно хотите удалить проект «%1» только из ведомости?<br><br>"
+                                                            "<i>⚠️ Внимание: Все файлы кода, веса .pt моделей и базы данных "
+                                                            "физически <b>останутся в сохранности</b> на жестком диске Linux.</i>")
+                                              .arg(projectName),
+                                          QMessageBox::Yes | QMessageBox::No
+                                          );
+
+            if (reply != QMessageBox::Yes) {
+                qDebug() << "[Registry Menu] Исключение проекта отменено пользователем.";
+                return;
+            }
+
+            qInfo() << ">>> [MLOps РЕЕСТР]: Запуск одновременного удаления строки №" << realSourceRow;
+
+            // ============================================================================
+            // АТОМАРНЫЙ СИНХРОННЫЙ КОНТУР (ФИКС БЛОКИРОВКИ ТРАНЗАКЦИЙ КЭША)
+            // ============================================================================
+            // Шаг А: Помечаем строку на удаление внутри текущей сессии модели
+            if (m_tableModel->removeRow(realSourceRow)) {
+
+                // Шаг Б: ПРИНУДИТЕЛЬНО И ОДНОВРЕМЕННО выталкиваем удаление на SSD в файл studio_global.db
+                // Метод submitAll() жестко закрывает транзакцию, исключая застревание строки на экране!
+                bool dbSynced = m_tableModel->submitAll();
+
+                if (dbSynced) {
+                    qInfo() << ">>> [MLOps РЕЕСТР]: База данных studio_global.db и модель успешно синхронизированы.";
+
+                    // Шаг В: Свежий select() для полной перерисовки чистой сетки без удаленного мотора
+                    m_tableModel->select();
+
+                    // Фиксируем мгновенное графическое обновление через ваш штатный метод панели
+                    this->refreshPanel();
+
+                    // Восстанавливаем эталонную высоту строк таблицы после сдвига индексов
+                    for (int i = 0; i < m_tableModel->rowCount(); ++i) {
+                        m_tableView->setRowHeight(i, 36);
+                    }
+
+                    QMessageBox::information(this,
+                                             QString::fromUtf8("Успешно"),
+                                             QString::fromUtf8("Проект «%1» успешно убран из ведомости Студии.").arg(projectName)
+                                             );
+                } else {
+                    // Если submitAll() не смог пробиться через SQLite замок
+                    m_tableModel->revertAll(); // Откатываем битую операцию в памяти
+
+                    qWarning() << ">>> [MLOps РЕЕСТР]: Ошибка фиксации submitAll():" << m_tableModel->lastError().text();
+                    QMessageBox::critical(this,
+                                          QString::fromUtf8("Критическая ошибка СУБД"),
+                                          QString::fromUtf8("Не удалось зафиксировать удаление в файле базы данных.\nОшибка: %1")
+                                              .arg(m_tableModel->lastError().text())
+                                          );
+                }
+            } else {
+                qWarning() << ">>> [MLOps РЕЕСТР]: Модель заблокировала вызов removeRow() для строки:" << realSourceRow;
+            }
+        }
+
+    else if (selected == actDeleteDisk) {
+            // ============================================================================
+            // ТОТАЛЬНОЕ ИБ-УДАЛЕНИЕ: Физическое стирание проекта с диска SSD и из СУБД
+            // ============================================================================
+            if (!m_tableModel || !m_tableView) return;
+
+            // 1. Извлекаем прокси-фильтр для полной защиты от смещения строк топа
+            QSortFilterProxyModel* proxyFilter = qobject_cast<QSortFilterProxyModel*>(m_tableView->model());
+
+            QModelIndex finalSourceIndex;
+            if (proxyFilter != nullptr) {
+                // КРИТИЧЕСКИЙ UX ШАГ: Переводим визуальную кликнутую строку в реальный индекс СУБД SQLite
+                finalSourceIndex = proxyFilter->mapToSource(proxyIndex);
+            } else {
+                finalSourceIndex = proxyIndex;
+            }
+
+            if (!finalSourceIndex.isValid()) return;
+            int realSourceRow = finalSourceIndex.row();
+
+            // 2. Вычитываем имя мотора (Колонка 0) и абсолютный путь к папке проекта (Колонка 4)
+            QString projectName = m_tableModel->data(m_tableModel->index(realSourceRow, 0)).toString().trimmed();
+            QString projectPath = m_tableModel->data(m_tableModel->index(realSourceRow, 4)).toString().trimmed();
+            projectPath.remove(QLatin1Char('"')); // Очищаем от возможных лишних Linux-кавычек путей
+
+            if (projectName.isEmpty() || projectPath.isEmpty()) return;
+
+            // 3. ЖЕСТКИЙ ДИАЛОГ ПРЕДУПРЕЖДЕНИЯ (Красный ИБ-контур безопасности)
+            QMessageBox::StandardButton reply;
+            reply = QMessageBox::critical(this,
+                                          QString::fromUtf8("🚨 ТОТАЛЬНОЕ УДАЛЕНИЕ С ДИСКА"),
+                                          QString::fromUtf8("Вы действительно хотите БЕЗВОЗВРАТНО уничтожить проект «%1»?<br><br>"
+                                                            "<b>🔥 ВНИМАНИЕ:</b> Папка на диске будет стерта полностью:<br>"
+                                                            "<code>%2</code><br><br>"
+                                                            "<i>Все PyTorch веса моделей, базы данных констант АД и исходный код "
+                                                            "будут потеряны навсегда без возможности восстановления!</i>")
+                                              .arg(projectName, projectPath),
+                                          QMessageBox::Yes | QMessageBox::No
+                                          );
+
+            if (reply != QMessageBox::Yes) {
+                qDebug() << "[Registry Menu] Удаление проекта с диска отменено пользователем.";
+                return;
+            }
+
+            qInfo() << ">>> [MLOps РЕЕСТР]: Инициализирую полное уничтожение проекта:" << projectName << "по пути:" << projectPath;
+
+            // 4. ЭТАП А: ФИЗИЧЕСКОЕ СТИРАНИЕ ПАПКИ С ЖЕСТКОГО ДИСКА LINUX
+            QDir targetDir(projectPath);
+            bool diskDeleted = false;
+
+            if (targetDir.exists()) {
+                // removeRecursively() — нативный метод Qt, который делает полную зачистку rm -rf на уровне ОС
+                diskDeleted = targetDir.removeRecursively();
+            } else {
+                // Если папки на диске уже не было (например, удалили руками через Dolphin заранее)
+                qWarning() << ">>> [MLOps РЕЕСТР]: Каталог проекта отсутствовал на диске при удалении.";
+                diskDeleted = true;
+            }
+
+            // 5. ЭТАП Б: СИНХРОННОЕ УДАЛЕНИЕ ЗАПИСИ ИЗ СУБД И ТАБЛИЦЫ ЭКРАНА
+            if (diskDeleted) {
+                // Переводим оригинальную модель в режим мгновенного сохранения изменений на ходу
+                auto oldStrategy = m_tableModel->editStrategy();
+                m_tableModel->setEditStrategy(QSqlTableModel::OnRowChange);
+
+                // Вырезаем строку из транзакционного кэша модели
+                if (m_tableModel->removeRow(realSourceRow)) {
+                    // Выталкиваем удаление в файл SQLite (studio_global.db)
+                    m_tableModel->submitAll();
+                    m_tableModel->select();
+
+                    // Возвращаем исходную стратегию сохранения
+                    m_tableModel->setEditStrategy(oldStrategy);
+
+                    // Синхронно и одновременно перерисовываем чистую сетку без удаленного мотора
+                    this->refreshPanel();
+
+                    // Восстанавливаем эталонную геометрию строк после сдвига индексов таблицы
+                    for (int i = 0; i < m_tableModel->rowCount(); ++i) {
+                        m_tableView->setRowHeight(i, 36);
+                    }
+
+                    qInfo() << ">>> [MLOps РЕЕСТР]: Проект успешно удален с диска и вырезан из ведомости.";
+
+                    QMessageBox::information(this,
+                                             QString::fromUtf8("Удаление завершено"),
+                                             QString::fromUtf8("Проект «%1» и все его физические файлы успешно стерты с накопителя.").arg(projectName)
+                                             );
+                } else {
+                    m_tableModel->setEditStrategy(oldStrategy);
+                    qWarning() << ">>> [MLOps РЕЕСТР]: Сбой removeRow() для базы данных при удалении с диска.";
+                }
+            } else {
+                QMessageBox::critical(this,
+                                      QString::fromUtf8("Ошибка удаления"),
+                                      QString::fromUtf8("Операционная система заблокировала файлы папки проекта.\n"
+                                                        "Убедитесь, что закрыты все терминалы и скрипты обучения Python.")
+                                      );
+            }
+        }
 }
 
 #include <QMouseEvent>

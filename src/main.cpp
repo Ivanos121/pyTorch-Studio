@@ -79,35 +79,33 @@ void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &contex
     }
 }
 
-// =========================================================================
-// ФИНАЛЬНЫЙ СКОРРЕКТИРОВАННЫЙ ОБРАБОТЧИК ЛОГОВ (УБРАНА ЗАВИСИМОСТЬ ОТ ОКНА)
-// =========================================================================
-// void linuxConsoleMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
-// {
-//     // 1. ПОЛНЫЙ ИГНОР ЛОГОВ ПОТОКОВ ПРИ ЗАКРЫТИИ (ИСПРАВЛЕНИЕ КРАША thread is still running)
-//     if (msg.contains(QStringLiteral("QThread: Destroyed while thread is still running")) ||
-//         msg.contains(QStringLiteral("QObjectPrivate::deleteChildren")) ||
-//         msg.contains(QStringLiteral("QObject::killTimer")))
-//     {
-//         std::cout << " [СИСТЕМНЫЙ ИГНОР]: Поток или таймер закрывается. Блокируем вызов GUI." << std::endl;
-//         std::cout.flush();
-//         return;
-//     }
+// Вспомогательная функция отправки запроса прогрева
+void preloadOllamaModel(const QString &modelName)
+{
+    // Используем динамический менеджер, чтобы он жил асинхронно
+    auto *manager = new QNetworkAccessManager();
 
-//     // 2. БЕЗОПАСНЫЙ СТАНДАРТНЫЙ ВЫВОД В КОНСОЛЬ LINUX ARCH
-//     if (type == QtInfoMsg) {
-//         std::cout << "[INFO]: " << msg.toStdString() << std::endl;
-//     } else if (type == QtWarningMsg) {
-//         std::cerr << "[WARN]: " << msg.toStdString() << " (" << context.file << ":" << context.line << ")" << std::endl;
-//     } else if (type == QtCriticalMsg || type == QtFatalMsg) {
-//         std::cerr << "\n🔴 [CRITICAL ERROR]: " << msg.toStdString() << std::endl;
-//         std::cerr.flush();
-//     } else {
-//         std::cout << msg.toStdString() << std::endl;
-//     }
-// }
+    QUrl url("http://127.0.0.1:11434/api/generate");
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
+    QJsonObject json;
+    json["model"] = modelName;
+    json["keep_alive"] = "60m"; // Удерживать модель в ОЗУ не менее часа
+    // Не передаем prompt — Ollama просто прочитает веса в память
 
+    QNetworkReply *reply = manager->post(request, QJsonDocument(json).toJson());
+
+    QObject::connect(reply, &QNetworkReply::finished, [reply, manager, modelName]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            qInfo() << "🚀 [AI Warmup]: Модель" << modelName << "успешно предзагружена в память!";
+        } else {
+            qWarning() << "⚠️ [AI Warmup]: Не удалось предзагрузить модель:" << reply->errorString();
+        }
+        reply->deleteLater();
+        manager->deleteLater();
+    });
+}
 
 int main(int argc, char *argv[])
 {
@@ -132,6 +130,8 @@ int main(int argc, char *argv[])
     QGuiApplication::setDesktopFileName(QStringLiteral("pytorch-studio"));
 
     QApplication a(argc, argv);
+
+    preloadOllamaModel("qwen-chat-7b"); // Или qwen-code-3b
 
     // Сборка контейнера для заголовка окна (внутри qrc ресурсов суффиксы допустимы)
     //QIcon appIcon;

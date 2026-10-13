@@ -223,97 +223,180 @@ void DocumentManager::handleFileClosed(const QString &absoluteFilePath)
         handleFileActivation(m_activeFilePath);
     }
 }
+// void DocumentManager::updateUiTitles(const QString &absoluteFilePath)
+// {
+//     QString realFullPath = absoluteFilePath.trimmed();
+//     QString projectPath = m_window ? m_window->property("currentOpenProjectPath").toString().trimmed() : "";
+
+//     // =========================================================================
+//     // СЦЕНАРИЙ А: ПРОЕКТ ПОЛНОСТЬЮ ЗАКРЫТ ИЛИ ЕЩЕ НЕ ВЫБРАН (ЧИСТЫЙ ХОЛСТ)
+//     // =========================================================================
+//     if (projectPath.isEmpty() || projectPath.contains("build") || projectPath.contains("Debug")) {
+//         m_window->setWindowTitle("PyTorch Studio");
+//         QLabel *liveTitleLabel = m_window->findChild<QLabel*>("titleLabel");
+//         if (liveTitleLabel) liveTitleLabel->setText("PyTorch Studio");
+//         return;
+//     }
+
+//     QString projName = QDir(projectPath).dirName();
+//     QLabel *liveTitleLabel = m_window->findChild<QLabel*>("titleLabel");
+
+//     // =========================================================================
+//     // СЦЕНАРИЙ Б: ОБРАБОТКА СЕРВИСНЫХ СТРАНИЦ ИЛИ ПУСТОГО ПРОЕКТА (БЕЗ ФАЙЛОВ!)
+//     // =========================================================================
+//     if (realFullPath.isEmpty() || realFullPath == "MAIN_SCREEN" || realFullPath == "AI_CHAT_SCREEN")
+//     {
+//         if (realFullPath == "MAIN_SCREEN") {
+//             QString title = QString("Панель управления[%1.pystudio] - PyTorch Studio").arg(projName);
+//             m_window->setWindowTitle(title);
+//             if (liveTitleLabel) liveTitleLabel->setText(title);
+//         }
+//         else if (realFullPath == "AI_CHAT_SCREEN") {
+//             QString title = QString("AI-ассистент[%1.pystudio] - PyTorch Studio").arg(projName);
+//             m_window->setWindowTitle(title);
+//             if (liveTitleLabel) liveTitleLabel->setText(title);
+//         }
+//         else {
+//             QString title = QString("[%1.pystudio] - PyTorch Studio").arg(projName);
+//             m_window->setWindowTitle(title);
+//             if (liveTitleLabel) liveTitleLabel->setText(title);
+//         }
+//         return;
+//     }
+
+//     // =========================================================================
+//     // СЦЕНАРИЙ В: ИДЕТ АКТИВНАЯ РАБОТА С РЕАЛЬНЫМ ФАЙЛОМ КОДА
+//     // =========================================================================
+//     if (!realFullPath.contains("/")) {
+//         QStackedWidget *centralStack = m_window->findChild<QStackedWidget*>("centralStackedWidget");
+//         QWidget *currentPage = centralStack ? centralStack->currentWidget() : nullptr;
+//         if (currentPage && currentPage->objectName().contains("/")) {
+//             realFullPath = currentPage->objectName();
+//         }
+//     }
+
+//     QFileInfo fileInfo(realFullPath);
+//     QString fileName = fileInfo.fileName();
+
+//     QString modifiedMarker = "";
+//     int comboIdx = m_fileCombo ? m_fileCombo->findData(realFullPath) : -1;
+//     if (comboIdx != -1 && m_fileCombo->itemText(comboIdx).endsWith(" *")) {
+//         modifiedMarker = "*";
+//     }
+
+//     QString absoluteFileDir = QDir::cleanPath(fileInfo.absolutePath());
+//     QStringList pathSegments = absoluteFileDir.split("/", Qt::SkipEmptyParts);
+//     QString relativeSubDir = "";
+
+//     int projectIdx = pathSegments.indexOf(projName);
+//     if (projectIdx != -1 && projectIdx < pathSegments.size() - 1) {
+//         QStringList subDirSegments;
+//         for (int i = projectIdx + 1; i < pathSegments.size(); ++i) {
+//             QString segment = pathSegments[i].trimmed();
+//             if (segment.contains("build") || segment.contains("Debug") || segment.contains("qt6"))
+//                 continue;
+//             subDirSegments.append(segment);
+//         }
+//         relativeSubDir = subDirSegments.join("/");
+//     }
+
+//     if (relativeSubDir.isEmpty() || relativeSubDir == ".") {
+//         if (absoluteFileDir.toLower().contains("/scripts")) relativeSubDir = "scripts";
+//         else if (absoluteFileDir.toLower().contains("/config")) relativeSubDir = "config";
+//         else relativeSubDir = projName;
+//     }
+
+//     // QString finalTitle = QString("%1%2(%3@%4)[%4.pystudio] - PyTorch Studio")
+//     //                          .arg(fileName).arg(modifiedMarker).arg(relativeSubDir).arg(projName);
+//     QString finalTitle = QString("%1[*] (%2@%3)[%3.pystudio] PyTorch Studio")
+//                              .arg(fileName).arg(relativeSubDir).arg(projName);
+
+//     m_window->setWindowTitle(finalTitle);
+//     if (liveTitleLabel) {
+//         liveTitleLabel->setText(finalTitle);
+//         liveTitleLabel->update();
+//     }
+// }
+
 void DocumentManager::updateUiTitles(const QString &absoluteFilePath)
 {
+    if (!m_window) return;
+
+    QLabel *liveTitleLabel = m_window->findChild<QLabel*>("titleLabel");
     QString realFullPath = absoluteFilePath.trimmed();
-    QString projectPath = m_window ? m_window->property("currentOpenProjectPath").toString().trimmed() : "";
+
+    // 1. Получаем путь к открытому проекту
+    QString projectPath = m_window->property("currentOpenProjectPath").toString().trimmed();
 
     // =========================================================================
-    // СЦЕНАРИЙ А: ПРОЕКТ ПОЛНОСТЬЮ ЗАКРЫТ ИЛИ ЕЩЕ НЕ ВЫБРАН (ЧИСТЫЙ ХОЛСТ)
+    // СЦЕНАРИЙ А: ПРОЕКТ НЕ ОТКРЫТ (ЧИСТЫЙ СТАРТ)
     // =========================================================================
-    if (projectPath.isEmpty() || projectPath.contains("build") || projectPath.contains("Debug")) {
+    if (projectPath.isEmpty()) {
         m_window->setWindowTitle("PyTorch Studio");
-        QLabel *liveTitleLabel = m_window->findChild<QLabel*>("titleLabel");
         if (liveTitleLabel) liveTitleLabel->setText("PyTorch Studio");
         return;
     }
 
+    // Извлекаем чистое имя проекта (например, "z1")
     QString projName = QDir(projectPath).dirName();
-    QLabel *liveTitleLabel = m_window->findChild<QLabel*>("titleLabel");
+
+    // Имя процесса программы (строго по ТЗ: "pytorch-studio")
+    QString appProcName = QCoreApplication::applicationName().isEmpty()
+                              ? QStringLiteral("pytorch-studio")
+                              : QCoreApplication::applicationName();
 
     // =========================================================================
-    // СЦЕНАРИЙ Б: ОБРАБОТКА СЕРВИСНЫХ СТРАНИЦ ИЛИ ПУСТОГО ПРОЕКТА (БЕЗ ФАЙЛОВ!)
+    // СЦЕНАРИЙ Б: ПРОЕКТ ОТКРЫТ, НО НЕТ АКТИВНЫХ ФАЙЛОВ КОДА
+    // (Или открыты сервисные страницы, или все файлы только что закрыты)
     // =========================================================================
-    if (realFullPath.isEmpty() || realFullPath == "MAIN_SCREEN" || realFullPath == "AI_CHAT_SCREEN")
+    // Проверяем реальное количество открытых документов
+    int openCount = m_filesListWidget ? m_filesListWidget->count() : 0;
+
+    if (openCount == 0 || realFullPath.isEmpty() ||
+        realFullPath == "MAIN_SCREEN" || realFullPath == "AI_CHAT_SCREEN" ||
+        realFullPath == "<нет документа>")
     {
-        if (realFullPath == "MAIN_SCREEN") {
-            QString title = QString("Панель управления[%1.pystudio] - PyTorch Studio").arg(projName);
-            m_window->setWindowTitle(title);
-            if (liveTitleLabel) liveTitleLabel->setText(title);
-        }
-        else if (realFullPath == "AI_CHAT_SCREEN") {
-            QString title = QString("AI-ассистент[%1.pystudio] - PyTorch Studio").arg(projName);
-            m_window->setWindowTitle(title);
-            if (liveTitleLabel) liveTitleLabel->setText(title);
-        }
-        else {
-            QString title = QString("[%1.pystudio] - PyTorch Studio").arg(projName);
-            m_window->setWindowTitle(title);
-            if (liveTitleLabel) liveTitleLabel->setText(title);
+        QString baseProjectTitle = QString("[%1.pystudio] - PyTorch Studio").arg(projName);
+        m_window->setWindowTitle(baseProjectTitle);
+        if (liveTitleLabel) {
+            liveTitleLabel->setText(baseProjectTitle);
+            liveTitleLabel->update();
         }
         return;
     }
 
     // =========================================================================
-    // СЦЕНАРИЙ В: ИДЕТ АКТИВНАЯ РАБОТА С РЕАЛЬНЫМ ФАЙЛОМ КОДА
+    // СЦЕНАРИЙ В: ОТКРЫТ РЕАЛЬНЫЙ ФАЙЛ
+    // Формула: имя_файла (папка_файла@имя_процесса) [проект.pystudio] - PyTorch Studio
     // =========================================================================
-    if (!realFullPath.contains("/")) {
-        QStackedWidget *centralStack = m_window->findChild<QStackedWidget*>("centralStackedWidget");
-        QWidget *currentPage = centralStack ? centralStack->currentWidget() : nullptr;
-        if (currentPage && currentPage->objectName().contains("/")) {
-            realFullPath = currentPage->objectName();
-        }
-    }
-
     QFileInfo fileInfo(realFullPath);
     QString fileName = fileInfo.fileName();
 
-    QString modifiedMarker = "";
-    int comboIdx = m_fileCombo ? m_fileCombo->findData(realFullPath) : -1;
-    if (comboIdx != -1 && m_fileCombo->itemText(comboIdx).endsWith(" *")) {
-        modifiedMarker = "*";
-    }
+    // Имя папки, где лежит файл (например, "scripts")
+    QString parentFolderName = fileInfo.dir().dirName();
 
-    QString absoluteFileDir = QDir::cleanPath(fileInfo.absolutePath());
-    QStringList pathSegments = absoluteFileDir.split("/", Qt::SkipEmptyParts);
-    QString relativeSubDir = "";
-
-    int projectIdx = pathSegments.indexOf(projName);
-    if (projectIdx != -1 && projectIdx < pathSegments.size() - 1) {
-        QStringList subDirSegments;
-        for (int i = projectIdx + 1; i < pathSegments.size(); ++i) {
-            QString segment = pathSegments[i].trimmed();
-            if (segment.contains("build") || segment.contains("Debug") || segment.contains("qt6"))
-                continue;
-            subDirSegments.append(segment);
+    // Проверяем наличие звёздочки изменений
+    bool isModified = false;
+    if (m_fileCombo) {
+        int comboIdx = m_fileCombo->findData(realFullPath);
+        if (comboIdx == -1) comboIdx = m_fileCombo->findText(fileName + " *");
+        if (comboIdx != -1 && m_fileCombo->itemText(comboIdx).endsWith('*')) {
+            isModified = true;
         }
-        relativeSubDir = subDirSegments.join("/");
     }
+    QString visualMarker = isModified ? " *" : "";
 
-    if (relativeSubDir.isEmpty() || relativeSubDir == ".") {
-        if (absoluteFileDir.toLower().contains("/scripts")) relativeSubDir = "scripts";
-        else if (absoluteFileDir.toLower().contains("/config")) relativeSubDir = "config";
-        else relativeSubDir = projName;
-    }
+    // 1. Формат для системной шапки ОС с маркером [*]
+    QString sysTitle = QString("%1[*] (%2@%3) [%4.pystudio] - PyTorch Studio")
+                           .arg(fileName, parentFolderName, appProcName, projName);
+    m_window->setWindowTitle(sysTitle);
 
-    // QString finalTitle = QString("%1%2(%3@%4)[%4.pystudio] - PyTorch Studio")
-    //                          .arg(fileName).arg(modifiedMarker).arg(relativeSubDir).arg(projName);
-    QString finalTitle = QString("%1[*] (%2@%3)[%3.pystudio] PyTorch Studio")
-                             .arg(fileName).arg(relativeSubDir).arg(projName);
+    // 2. Формат для QLabel шапки IDE
+    QString labelTitle = QString("%1%2 (%3@%4) [%5.pystudio] - PyTorch Studio")
+                             .arg(fileName, visualMarker, parentFolderName, appProcName, projName);
 
-    m_window->setWindowTitle(finalTitle);
     if (liveTitleLabel) {
-        liveTitleLabel->setText(finalTitle);
+        liveTitleLabel->setText(labelTitle);
         liveTitleLabel->update();
     }
 }

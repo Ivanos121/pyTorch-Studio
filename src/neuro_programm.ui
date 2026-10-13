@@ -15,6 +15,9 @@
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QGridLayout" name="gridLayout">
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
     <item row="0" column="0" colspan="3">
      <widget class="QWidget" name="customTitleBarPanel" native="true">
       <property name="minimumSize">
@@ -226,6 +229,9 @@ QPushButton:disabled {
        </size>
       </property>
       <layout class="QGridLayout" name="gridLayout_11">
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
        <item row="0" column="0">
         <widget class="QWidget" name="topContainer" native="true">
          <property name="sizePolicy">
@@ -288,6 +294,18 @@ QPushButton:disabled {
           </sizepolicy>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_2">
+          <property name="spacing">
+           <number>6</number>
+          </property>
+          <property name="leftMargin">
+           <number>6</number>
+          </property>
+          <property name="topMargin">
+           <number>6</number>
+          </property>
+          <property name="bottomMargin">
+           <number>6</number>
+          </property>
           <item>
            <widget class="QLabel" name="label_3">
             <property name="text">
@@ -311,7 +329,7 @@ QPushButton:disabled {
       </property>
       <widget class="QStackedWidget" name="centralStackedWidget">
        <property name="currentIndex">
-        <number>10</number>
+        <number>2</number>
        </property>
        <widget class="QWidget" name="page_teacher">
         <layout class="QGridLayout" name="gridLayout_9">
@@ -654,7 +672,7 @@ QListWidget#quickActionsList::item:selected {
       <number>0</number>
      </property>
      <property name="bottomMargin">
-      <number>0</number>
+      <number>6</number>
      </property>
      <property name="spacing">
       <number>0</number>

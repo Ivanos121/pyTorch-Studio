@@ -102,6 +102,7 @@ public:
         int line;
         int startChar;
         int endChar;
+        int severity;
         bool isError;
         QString message;
         QString code;
@@ -111,6 +112,10 @@ public:
         PagePipInstall = 1,   // Консоль установки пакетов
         PageTensorBoard = 2,  // Графики
         PagePipTable = 3      // Таблица установленных пакетов (Ваш QTableWidget)
+    };
+    struct AiChatResponseItem {
+        QString rawResponse;
+        QString targetFilePath;
     };
     static QList<LspErrorData> globalLspErrors;
     QProcess *lspProcess = nullptr;
@@ -133,6 +138,8 @@ public slots:
     void updateJediStatusText(const QString &message, bool isError);
     void updateJediStatusTextFromLsp(int errorCount);
     void refreshProblemsTableView();
+    Q_INVOKABLE void aiCodeGenerationRequested(int insertPos,
+                const QString &prompt, const QString &fullCode, QWidget *promptWidget);
 
 signals:
     void signalSendChunkToConsole(const QString &text);
@@ -151,8 +158,8 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
-
     void onCloseFileButtonClicked();
+
 protected slots:
     void new_progect();
     void openNewFileInEditor(const QString &absoluteFilePath);
@@ -184,7 +191,7 @@ private:
     void sendInitialWelcomeRequest();
     int codeBlockCounter = 0;
     int responseCounter = 0;
-    QMap<QString, QString> aiResponsesMap;
+    QString m_lastActiveCodeFilePath;
     QMap<QString, QString> codeBlocksMap;
     void onChatAnchorClicked(const QUrl &link);
     QString parseMarkdownCodeBlocks(const QString &rawText);
@@ -212,6 +219,8 @@ private:
     void setupSessionTableConnections();
     QTimer *linterDebounceTimer = nullptr;
     void syncDocumentManagerUi();
+    void createAndOpenGeneratedScript(const QString &codeContent);
+    void clearDebugExecutionMarker();
 
 private slots:
     void onFileDoubleClicked(const QModelIndex &index);
@@ -325,6 +334,9 @@ private:
     QLineSeries *lossSeries;
     int          currentEpochCounter;
     QString currentOpenProjectPath;
+    QSet<QString> m_openedLspFiles;
+    QMap<QString, QString> aiResponsesMap;
+    QMap<QString, QString> aiResponseTargetFiles;
     void sendChatMessageToAI();
     static const int MaxRecentFiles = 5;
     QMenu *recentProjectsMenu;

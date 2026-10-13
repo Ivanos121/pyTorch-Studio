@@ -590,6 +590,11 @@ panel_other::panel_other(QWidget *parent) :
 
     connect(ui->closeActTrain, &QPushButton::clicked, this, &panel_other::close);
 
+    if (ui->menuSwitcherStack) {
+        ui->menuSwitcherStack->setFixedHeight(36); // Строго компактный тулбар!
+        ui->menuSwitcherStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
+
 }
 
 panel_other::~panel_other()
@@ -773,12 +778,12 @@ void panel_other::onDebugModeTriggered(bool checked)
 {
     if (checked) {
         // Силово переключаем stackedWidget на ТРЕТЬЮ страницу (индекс 2 - Стек вызовов)
-        if (ui && ui->stackedWidget) {
-            ui->stackedWidget->setCurrentIndex(2);
+        if (ui->problemsContainer) {
+            ui->problemsContainer->hide(); // Гарантированно прячем
         }
-
-        // Задаем правый отступ в 350 пикселей, чтобы не залезать под правую панель дебага
-        //this->setContentsMargins(0, 0, 350, 0);
+        if (ui->stackedWidget) {
+            ui->stackedWidget->setCurrentIndex(2); // Показываем стек
+        }
     }
     else {
         // При остановке возвращаем панель на всю ширину экрана
@@ -907,50 +912,43 @@ void panel_other::addErrorRow(const QString &filePath, const QString &code, cons
 
 void panel_other::activateMode(DisplayMode mode, QSplitter *mainVerticalSplitter)
 {
-    Q_UNUSED(mainVerticalSplitter);
-
-    // -------------------------------------------------------------------------
-    // 🔥 АБСОЛЮТНЫЙ ФИЛЬТР ЛОЖНЫХ ЗАПУСКОВ (Защита от фоновых сигналов)
-    // -------------------------------------------------------------------------
-    // Проверяем, нажата ли кнопка Терминала физически.
-    // Если метод вызван фоновым сигналом/таймером, а кнопка "отжата" — немедленно выходим!
-    if (this->parentWidget()) {
-        QPushButton *btnTerm = this->parentWidget()->findChild<QPushButton*>("btnTerminal");
-        if (btnTerm && !btnTerm->isChecked()) {
-            this->setVisible(false);
-            this->hide();
-            return; // ЖЕСТКИЙ СИЛОВОЙ ВОЗВРАТ — БЛОКИРУЕМ ОТКРЫТИЕ!
-        }
-    }
-
+    // ... проверка кнопки терминала ...
     if (!ui) return;
 
-    // ШАГ 1: Показываем панель на экране (выполнится ТОЛЬКО если кнопка зажата)
     this->show();
     this->setVisible(true);
 
-    // Установка корректной высоты и компоновки (Ваш рабочий сеточный код)
-    int targetHeight = 390;
-    this->setMinimumHeight(targetHeight);
-    this->setFixedHeight(targetHeight);
-    this->setContentsMargins(10, 0, 10, 28); // Зазор над статусбаром
+    // СТРОГО 0 со всех сторон, чтобы не было ступеньки над статусбаром:
+    this->setContentsMargins(0, 0, 0, 0);
 
-    if (ui->splitter) {
-        ui->splitter->setContentsMargins(0, 0, 0, 0);
-        ui->splitter->refresh();
-    }
-
-    // ШАГ 2: Управление внутренним контентом в зависимости от нажатой кнопки
     switch (mode) {
-    case TerminalMode:
+    case DebugMode:
         if (ui->problemsContainer) ui->problemsContainer->hide();
+        if (ui->menuSwitcherStack) {
+            ui->menuSwitcherStack->setFixedHeight(36);
+            ui->menuSwitcherStack->setCurrentIndex(1);
+        }
+        if (ui->stackedWidget) ui->stackedWidget->setCurrentIndex(1); // Таблица стека вызовов
+
+        // Задаем строгую высоту для всей панели дебага (тулбар 36px + 4-5 строк таблицы):
+        this->setMinimumHeight(170);
+        this->setMaximumHeight(190);
+        this->setFixedHeight(180); // Гарантирует одинаковую компактную высоту
+        break;
+
+    case TerminalMode:
+        this->setMaximumHeight(QWIDGETSIZE_MAX);
+        this->setMinimumHeight(160);
+        if (ui->problemsContainer) ui->problemsContainer->hide();
+        if (ui->menuSwitcherStack) {
+            ui->menuSwitcherStack->setFixedHeight(36);
+            ui->menuSwitcherStack->setCurrentIndex(0);
+        }
         if (ui->stackedWidget) ui->stackedWidget->setCurrentIndex(0);
         break;
-    case DebugMode:
-        if (ui->problemsContainer) ui->problemsContainer->show();
-        if (ui->stackedWidget) ui->stackedWidget->setCurrentIndex(2);
-        break;
+
     case TrainingMode:
+        this->setMaximumHeight(QWIDGETSIZE_MAX);
         if (ui->problemsContainer) ui->problemsContainer->hide();
         if (ui->stackedWidget) ui->stackedWidget->setCurrentIndex(2);
         if (ui->btnViewLog) ui->btnViewLog->click();

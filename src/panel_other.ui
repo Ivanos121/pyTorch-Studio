@@ -66,6 +66,12 @@
      </property>
      <widget class="QWidget" name="page_4">
       <layout class="QHBoxLayout" name="horizontalLayout">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
        <item>
         <widget class="QLabel" name="label_2">
          <property name="text">
@@ -195,6 +201,12 @@
      </widget>
      <widget class="QWidget" name="page_5">
       <layout class="QHBoxLayout" name="horizontalLayout_2">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
        <item>
         <widget class="QLabel" name="label">
          <property name="text">
@@ -206,7 +218,13 @@
         <widget class="QPushButton" name="btnResume">
          <property name="minimumSize">
           <size>
-           <width>0</width>
+           <width>32</width>
+           <height>32</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>32</width>
            <height>32</height>
           </size>
          </property>
@@ -219,7 +237,13 @@
         <widget class="QPushButton" name="btnStepOver">
          <property name="minimumSize">
           <size>
-           <width>0</width>
+           <width>32</width>
+           <height>32</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>32</width>
            <height>32</height>
           </size>
          </property>
@@ -232,7 +256,13 @@
         <widget class="QPushButton" name="btnStepInto">
          <property name="minimumSize">
           <size>
-           <width>0</width>
+           <width>32</width>
+           <height>32</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>32</width>
            <height>32</height>
           </size>
          </property>
@@ -245,7 +275,13 @@
         <widget class="QPushButton" name="btnStepOut">
          <property name="minimumSize">
           <size>
-           <width>0</width>
+           <width>32</width>
+           <height>32</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>32</width>
            <height>32</height>
           </size>
          </property>
@@ -258,7 +294,13 @@
         <widget class="QPushButton" name="btnStopDebug">
          <property name="minimumSize">
           <size>
-           <width>0</width>
+           <width>32</width>
+           <height>32</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>32</width>
            <height>32</height>
           </size>
          </property>
@@ -344,10 +386,19 @@
    <item>
     <widget class="QStackedWidget" name="stackedWidget">
      <property name="currentIndex">
-      <number>2</number>
+      <number>3</number>
      </property>
      <widget class="QWidget" name="page">
       <layout class="QVBoxLayout" name="verticalLayout_3">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
        <item>
         <widget class="QSplitter" name="splitter">
          <property name="orientation">
@@ -375,6 +426,12 @@
      </widget>
      <widget class="QWidget" name="page_3">
       <layout class="QVBoxLayout" name="verticalLayout_2">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
        <item>
         <widget class="QTableWidget" name="callStackListWidget"/>
        </item>
@@ -383,13 +440,13 @@
      <widget class="QWidget" name="page_2">
       <layout class="QGridLayout" name="gridLayout">
        <property name="leftMargin">
-        <number>6</number>
+        <number>0</number>
        </property>
        <property name="topMargin">
         <number>6</number>
        </property>
        <property name="rightMargin">
-        <number>6</number>
+        <number>0</number>
        </property>
        <property name="bottomMargin">
         <number>6</number>
@@ -408,6 +465,12 @@
      </widget>
      <widget class="QWidget" name="page_7">
       <layout class="QVBoxLayout" name="verticalLayout_4">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
        <item>
         <widget class="QLabel" name="label_4">
          <property name="sizePolicy">
@@ -443,11 +506,17 @@
       </size>
      </property>
      <layout class="QGridLayout" name="gridLayout_3">
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
       <property name="topMargin">
        <number>0</number>
       </property>
+      <property name="rightMargin">
+       <number>0</number>
+      </property>
       <property name="bottomMargin">
-       <number>6</number>
+       <number>0</number>
       </property>
       <item row="0" column="0">
        <widget class="QWidget" name="widget" native="true">
